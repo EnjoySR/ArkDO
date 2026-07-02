@@ -9,6 +9,7 @@ interface DiscourseLatestResponse {
 
 interface DiscourseTopicList {
   topics?: DiscourseTopic[];
+  more_topics_url?: string;
 }
 
 interface DiscourseTopic {
@@ -35,6 +36,12 @@ interface DiscourseUser {
   avatar_template?: string;
 }
 
+export interface TopicPage {
+  topics: Topic[];
+  page: number;
+  hasMore: boolean;
+}
+
 export class TopicService {
   private bridge: JsonNetworkClient;
 
@@ -43,7 +50,26 @@ export class TopicService {
   }
 
   async getLatestTopics(): Promise<NetworkResult<Topic[]>> {
-    const response: NetworkResult<string> = await this.bridge.getJson('/latest.json');
+    const pageResult: NetworkResult<TopicPage> = await this.getLatestTopicsPage(0);
+    if (!pageResult.success) {
+      return {
+        success: false,
+        statusCode: pageResult.statusCode,
+        challengeState: pageResult.challengeState,
+        error: pageResult.error
+      };
+    }
+
+    return {
+      success: true,
+      statusCode: pageResult.statusCode,
+      challengeState: pageResult.challengeState,
+      data: pageResult.data ? pageResult.data.topics : []
+    };
+  }
+
+  async getLatestTopicsPage(page: number): Promise<NetworkResult<TopicPage>> {
+    const response: NetworkResult<string> = await this.bridge.getJson(this.getLatestPath(page));
     if (!response.success) {
       return this.forwardFailure(response);
     }
@@ -62,11 +88,22 @@ export class TopicService {
         success: true,
         statusCode: response.statusCode,
         challengeState: response.challengeState,
-        data: this.mapTopics(payload.topic_list.topics, payload.users)
+        data: {
+          topics: this.mapTopics(payload.topic_list.topics, payload.users),
+          page: page,
+          hasMore: this.hasMoreTopics(payload.topic_list)
+        }
       };
     } catch (error) {
       return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应不是有效 JSON。');
     }
+  }
+
+  private getLatestPath(page: number): string {
+    if (page <= 0) {
+      return '/latest.json';
+    }
+    return `/latest.json?page=${page}`;
   }
 
   private mapTopics(sourceTopics: DiscourseTopic[], sourceUsers?: DiscourseUser[]): Topic[] {
@@ -97,19 +134,11 @@ export class TopicService {
       return undefined;
     }
 
-    let userId: number | undefined = undefined;
-    for (let posterIndex: number = 0; posterIndex < topic.posters.length; posterIndex++) {
-      const poster: DiscoursePoster = topic.posters[posterIndex];
-      if (poster.description === 'Original Poster' && typeof poster.user_id === 'number') {
-        userId = poster.user_id;
-        break;
-      }
-    }
-
-    if (userId === undefined) {
+    if (topic.posters.length === 0 || typeof topic.posters[0].user_id !== 'number') {
       return undefined;
     }
 
+    const userId: number = topic.posters[0].user_id;
     for (let userIndex: number = 0; userIndex < users.length; userIndex++) {
       const sourceUser: DiscourseUser = users[userIndex];
       if (sourceUser.id === userId && sourceUser.username) {
@@ -125,7 +154,11 @@ export class TopicService {
     return undefined;
   }
 
-  private forwardFailure(response: NetworkResult<string>): NetworkResult<Topic[]> {
+  private hasMoreTopics(topicList: DiscourseTopicList): boolean {
+    return typeof topicList.more_topics_url === 'string' && topicList.more_topics_url.length > 0;
+  }
+
+  private forwardFailure(response: NetworkResult<string>): NetworkResult<TopicPage> {
     return {
       success: false,
       statusCode: response.statusCode,
@@ -134,7 +167,7 @@ export class TopicService {
     };
   }
 
-  private unexpectedResponse(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<Topic[]> {
+  private unexpectedResponse(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<TopicPage> {
     return {
       success: false,
       statusCode: statusCode,

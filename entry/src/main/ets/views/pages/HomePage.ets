@@ -1,17 +1,22 @@
 import { AppConstants } from '../../common/constants/AppConstants';
 import { Topic } from '../../models/Topic';
 import { ArkWebHost } from '../components/ArkWebHost';
+import { TopicListItem } from '../components/TopicListItem';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
-import { TopicService } from '../../services/topic/TopicService';
+import { TopicPage, TopicService } from '../../services/topic/TopicService';
 
 @Component
 export struct HomePage {
   @State private topics: Topic[] = [];
-  @State private isLoading: boolean = false;
-  @State private statusMessage: string = '正在准备 ArkWeb 请求环境';
+  @State private isInitialLoading: boolean = false;
+  @State private isRefreshing: boolean = false;
+  @State private isLoadingMore: boolean = false;
+  @State private hasMore: boolean = true;
+  @State private currentPage: number = 0;
+  @State private listMessage: string = '正在准备 ArkWeb 请求环境';
+  @State private footerMessage: string = '上拉加载更多';
   @State private requiresChallenge: boolean = false;
-  @State private refreshCount: number = 0;
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   private topicService: TopicService = new TopicService(this.bridge);
 
@@ -20,7 +25,7 @@ export struct HomePage {
       ArkWebHost({
         bridge: this.bridge,
         onReady: () => {
-          this.loadLatestTopics();
+          this.refreshLatestTopics();
         }
       })
 
@@ -29,85 +34,73 @@ export struct HomePage {
           .fontSize(28)
           .fontWeight(FontWeight.Bold)
           .fontColor('#111827')
-
-        Blank()
-
-        Button(this.isLoading ? '加载中' : '刷新')
-          .fontSize(14)
-          .enabled(!this.isLoading)
-          .onClick(() => {
-            this.loadLatestTopics();
-          })
       }
       .width('100%')
       .padding({ left: 20, right: 20, top: 20, bottom: 12 })
 
-      Column() {
-        Text('最新帖子')
-          .fontSize(18)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#111827')
-
-        Text(this.statusMessage)
-          .fontSize(14)
-          .fontColor(this.requiresChallenge ? '#B45309' : '#4B5563')
-          .margin({ top: 8 })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .width('100%')
-      .padding(16)
-      .backgroundColor('#F3F4F6')
-
-      Scroll() {
-        Column() {
+      Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
+        List() {
           if (this.topics.length === 0) {
-            Text(this.isLoading ? '正在请求 /latest.json' : '暂无帖子数据')
-              .fontSize(15)
-              .fontColor('#6B7280')
+            ListItem() {
+              Column() {
+                if (this.isInitialLoading) {
+                  LoadingProgress()
+                    .width(28)
+                    .height(28)
+                    .color('#2563EB')
+                    .margin({ bottom: 12 })
+                }
+
+                Text(this.listMessage)
+                  .fontSize(15)
+                  .fontColor(this.requiresChallenge ? '#B45309' : '#6B7280')
+                  .textAlign(TextAlign.Center)
+              }
               .width('100%')
-              .padding({ top: 24 })
+              .height(240)
+              .justifyContent(FlexAlign.Center)
+            }
           }
 
           ForEach(this.topics, (topic: Topic) => {
-            Column() {
-              Text(topic.title)
-                .fontSize(17)
-                .fontWeight(FontWeight.Medium)
-                .fontColor('#111827')
-                .maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-              Row() {
-                Text(topic.author?.username ? topic.author?.username : '未知用户')
-                  .fontSize(13)
-                  .fontColor('#6B7280')
-
-                Text(`${topic.replyCount ? topic.replyCount : 0} 回复`)
-                  .fontSize(13)
-                  .fontColor('#6B7280')
-                  .margin({ left: 12 })
-
-                Text(`${topic.likeCount ? topic.likeCount : 0} 赞`)
-                  .fontSize(13)
-                  .fontColor('#6B7280')
-                  .margin({ left: 12 })
-              }
-              .margin({ top: 8 })
-            }
-            .width('100%')
-            .padding({ top: 14, bottom: 14 })
-            .border({
-              width: { bottom: 1 },
-              color: '#E5E7EB'
-            })
-            .alignItems(HorizontalAlign.Start)
+            TopicListItem({ topic: topic })
           }, (topic: Topic) => topic.id.toString())
+
+          if (this.topics.length > 0) {
+            ListItem() {
+              Row() {
+                if (this.isLoadingMore) {
+                  LoadingProgress()
+                    .width(18)
+                    .height(18)
+                    .color('#2563EB')
+                    .margin({ right: 8 })
+                }
+
+                Text(this.footerMessage)
+                  .fontSize(13)
+                  .fontColor(this.requiresChallenge ? '#B45309' : '#6B7280')
+              }
+              .width('100%')
+              .height(54)
+              .justifyContent(FlexAlign.Center)
+            }
+          }
         }
         .width('100%')
+        .height('100%')
         .padding({ left: 20, right: 20 })
+        .onReachEnd(() => {
+          this.loadMoreTopics();
+        })
       }
       .width('100%')
       .layoutWeight(1)
+      .pullToRefresh(true)
+      .refreshOffset(64)
+      .onRefreshing(() => {
+        this.refreshLatestTopics();
+      })
     }
     .width('100%')
     .height('100%')
@@ -115,38 +108,81 @@ export struct HomePage {
     .alignItems(HorizontalAlign.Start)
   }
 
-  private async loadLatestTopics(): Promise<void> {
-    if (this.isLoading) {
+  private async refreshLatestTopics(): Promise<void> {
+    if (this.isRefreshing || this.isLoadingMore) {
       return;
     }
 
-    this.isLoading = true;
+    this.isRefreshing = true;
+    this.isInitialLoading = this.topics.length === 0;
     this.requiresChallenge = false;
-    this.statusMessage = `正在通过 ArkWeb 请求 /latest.json · 第 ${this.refreshCount + 1} 次`;
+    this.listMessage = '正在加载最新帖子';
+    this.footerMessage = '上拉加载更多';
 
-    const result: NetworkResult<Topic[]> = await this.topicService.getLatestTopics();
-    this.isLoading = false;
-    this.refreshCount++;
+    const result: NetworkResult<TopicPage> = await this.topicService.getLatestTopicsPage(0);
+    this.isRefreshing = false;
+    this.isInitialLoading = false;
 
     if (result.success && result.data) {
-      this.topics = result.data;
-      this.statusMessage = `已加载 ${result.data.length} 个最新帖子 · HTTP ${result.statusCode} · ${this.formatClock(new Date())}`;
+      this.topics = result.data.topics;
+      this.currentPage = 0;
+      this.hasMore = result.data.hasMore;
+      this.listMessage = result.data.topics.length > 0 ? '' : '暂无帖子数据';
+      this.footerMessage = this.hasMore ? '上拉加载更多' : '没有更多了';
       return;
     }
 
-    this.topics = [];
     this.requiresChallenge = result.error?.requiresChallenge === true;
-    this.statusMessage = `${result.error?.message ? result.error.message : '最新帖子加载失败'} · ${this.formatClock(new Date())}`;
-  }
-
-  private formatClock(date: Date): string {
-    return `${this.padClockNumber(date.getHours())}:${this.padClockNumber(date.getMinutes())}:${this.padClockNumber(date.getSeconds())}`;
-  }
-
-  private padClockNumber(value: number): string {
-    if (value < 10) {
-      return `0${value}`;
+    if (this.topics.length === 0) {
+      this.listMessage = result.error?.message ? result.error.message : '最新帖子加载失败';
+    } else {
+      this.footerMessage = result.error?.message ? result.error.message : '刷新失败';
     }
-    return value.toString();
+  }
+
+  private async loadMoreTopics(): Promise<void> {
+    if (this.isRefreshing || this.isLoadingMore || !this.hasMore || this.topics.length === 0) {
+      return;
+    }
+
+    this.isLoadingMore = true;
+    this.requiresChallenge = false;
+    this.footerMessage = '正在加载更多';
+
+    const nextPage: number = this.currentPage + 1;
+    const result: NetworkResult<TopicPage> = await this.topicService.getLatestTopicsPage(nextPage);
+    this.isLoadingMore = false;
+
+    if (result.success && result.data) {
+      this.topics = this.mergeTopics(this.topics, result.data.topics);
+      this.currentPage = nextPage;
+      this.hasMore = result.data.hasMore && result.data.topics.length > 0;
+      this.footerMessage = this.hasMore ? '上拉加载更多' : '没有更多了';
+      return;
+    }
+
+    this.requiresChallenge = result.error?.requiresChallenge === true;
+    this.footerMessage = result.error?.message ? `${result.error.message}，上拉重试` : '加载失败，上拉重试';
+  }
+
+  private mergeTopics(existingTopics: Topic[], nextTopics: Topic[]): Topic[] {
+    const seenTopicIds: Map<number, boolean> = new Map();
+    const mergedTopics: Topic[] = [];
+
+    for (let index: number = 0; index < existingTopics.length; index++) {
+      const topic: Topic = existingTopics[index];
+      seenTopicIds.set(topic.id, true);
+      mergedTopics.push(topic);
+    }
+
+    for (let index: number = 0; index < nextTopics.length; index++) {
+      const topic: Topic = nextTopics[index];
+      if (!seenTopicIds.get(topic.id)) {
+        seenTopicIds.set(topic.id, true);
+        mergedTopics.push(topic);
+      }
+    }
+
+    return mergedTopics;
   }
 }
