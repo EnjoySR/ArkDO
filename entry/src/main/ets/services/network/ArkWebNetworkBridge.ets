@@ -4,6 +4,15 @@ import { detectChallenge } from './ChallengeDetector';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from './NetworkTypes';
 
 const REQUEST_ID_TOKEN: string = '__ARKDO_REQUEST_ID__';
+const BODY_LOG_CHUNK_SIZE: number = 3000;
+
+function logNetwork(message: string): void {
+  console.info(`[ArkDO][Network] ${message}`);
+}
+
+function logNetworkBody(message: string): void {
+  console.info(`[ArkDO][Network][Body] ${message}`);
+}
 
 export interface ArkWebJsonExecutor {
   run(script: string): Promise<string>;
@@ -61,6 +70,7 @@ class WebviewJsonExecutor implements ArkWebJsonExecutor, ArkWebResultReceiver {
   run(script: string): Promise<string> {
     const requestId: string = `arkdo_${this.requestSequence}`;
     this.requestSequence++;
+    logNetwork(`ArkWeb executor start requestId=${requestId}`);
 
     return new Promise<string>((resolve: (value: string) => void, reject: (reason: string) => void) => {
       const timeoutId: number = setTimeout(() => {
@@ -82,9 +92,11 @@ class WebviewJsonExecutor implements ArkWebJsonExecutor, ArkWebResultReceiver {
   onJsonResult(requestId: string, payload: string): void {
     const pendingRequest: PendingJsonRequest | undefined = this.pendingRequests.get(requestId);
     if (!pendingRequest) {
+      logNetwork(`ArkWeb callback ignored requestId=${requestId}`);
       return;
     }
 
+    logNetwork(`ArkWeb callback received requestId=${requestId} payloadLength=${payload.length}`);
     clearTimeout(pendingRequest.timeoutId);
     this.pendingRequests.delete(requestId);
     pendingRequest.resolve(payload);
@@ -96,6 +108,7 @@ class WebviewJsonExecutor implements ArkWebJsonExecutor, ArkWebResultReceiver {
       return;
     }
 
+    logNetwork(`ArkWeb executor reject requestId=${requestId} reason=${message}`);
     clearTimeout(pendingRequest.timeoutId);
     this.pendingRequests.delete(requestId);
     pendingRequest.reject(message);
@@ -125,7 +138,11 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   }
 
   async getJson(path: string): Promise<NetworkResult<string>> {
+    const requestPath: string = this.normalizePath(path);
+    logNetwork(`GET ${requestPath} start`);
+
     if (!this.executor) {
+      logNetwork(`GET ${requestPath} skipped: ArkWeb host is not ready`);
       return {
         success: false,
         statusCode: 0,
@@ -139,9 +156,11 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
 
     try {
-      const rawResult: string = await this.executor.run(this.createFetchScript(path));
-      return this.convertEnvelope(JSON.parse(rawResult) as WebFetchEnvelope);
+      const rawResult: string = await this.executor.run(this.createFetchScript(requestPath));
+      logNetwork(`GET ${requestPath} raw envelope received length=${rawResult.length}`);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope);
     } catch (error) {
+      logNetwork(`GET ${requestPath} failed before response envelope`);
       return {
         success: false,
         statusCode: 0,
@@ -156,8 +175,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   }
 
   private createFetchScript(path: string): string {
-    const requestPath: string = this.normalizePath(path);
-    const encodedPath: string = JSON.stringify(requestPath);
+    const encodedPath: string = JSON.stringify(path);
 
     return `(() => {
       const requestId = '${REQUEST_ID_TOKEN}';
@@ -212,8 +230,9 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     return `/${path}`;
   }
 
-  private convertEnvelope(envelope: WebFetchEnvelope): NetworkResult<string> {
+  private convertEnvelope(path: string, envelope: WebFetchEnvelope): NetworkResult<string> {
     if (envelope.errorMessage) {
+      logNetwork(`GET ${path} envelope error=${envelope.errorMessage}`);
       return {
         success: false,
         statusCode: 0,
@@ -230,8 +249,11 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     const contentType: string = envelope.contentType ? envelope.contentType : '';
     const body: string = envelope.body ? envelope.body : '';
     const challengeState: ChallengeState = detectChallenge(statusCode, contentType, body);
+    logNetwork(`GET ${path} response status=${statusCode} contentType=${contentType} bodyLength=${body.length} challenge=${challengeState}`);
+    this.logResponseBody(path, contentType, body);
 
     if (challengeState !== ChallengeState.NONE) {
+      logNetwork(`GET ${path} requires challenge state=${challengeState}`);
       return {
         success: false,
         statusCode: statusCode,
@@ -245,6 +267,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
 
     if (statusCode < 200 || statusCode >= 300) {
+      logNetwork(`GET ${path} unexpected status=${statusCode}`);
       return {
         success: false,
         statusCode: statusCode,
@@ -264,6 +287,44 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       data: body
     };
 
+    logNetwork(`GET ${path} success status=${statusCode} bodyLength=${body.length}`);
     return result;
+  }
+
+  private logResponseBody(path: string, contentType: string, body: string): void {
+    const formattedBody: string = this.formatBodyForLog(contentType, body);
+    const chunkCount: number = Math.ceil(formattedBody.length / BODY_LOG_CHUNK_SIZE);
+
+    logNetworkBody(`GET ${path} body begin contentType=${contentType} rawLength=${body.length} formattedLength=${formattedBody.length} chunks=${chunkCount}`);
+    if (formattedBody.length === 0) {
+      logNetworkBody(`GET ${path} body chunk 1/1: `);
+    }
+
+    for (let start: number = 0; start < formattedBody.length; start += BODY_LOG_CHUNK_SIZE) {
+      const chunkIndex: number = Math.floor(start / BODY_LOG_CHUNK_SIZE) + 1;
+      const chunk: string = formattedBody.substring(start, start + BODY_LOG_CHUNK_SIZE);
+      logNetworkBody(`GET ${path} body chunk ${chunkIndex}/${chunkCount}: ${chunk}`);
+    }
+    logNetworkBody(`GET ${path} body end`);
+  }
+
+  private formatBodyForLog(contentType: string, body: string): string {
+    const normalizedContentType: string = contentType.toLowerCase();
+    const trimmedBody: string = body.trim();
+    const looksJson: boolean = normalizedContentType.indexOf('application/json') >= 0 ||
+      trimmedBody.startsWith('{') ||
+      trimmedBody.startsWith('[');
+
+    if (!looksJson) {
+      return body;
+    }
+
+    try {
+      const parsedBody: Object = JSON.parse(body) as Object;
+      const formattedBody: string = JSON.stringify(parsedBody, null, 2);
+      return formattedBody;
+    } catch (error) {
+      return body;
+    }
   }
 }
