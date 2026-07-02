@@ -161,9 +161,16 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     return `(() => {
       const requestId = '${REQUEST_ID_TOKEN}';
-      fetch(${encodedPath}, {
+      const requestUrl = new URL(${encodedPath}, window.location.origin);
+      requestUrl.searchParams.set('_arkdo_ts', Date.now().toString());
+      fetch(requestUrl.toString(), {
         credentials: 'include',
-        headers: { 'Accept': 'application/json' }
+        cache: 'no-store',
+        headers: {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
       }).then((response) => {
         response.text().then((body) => {
           window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({

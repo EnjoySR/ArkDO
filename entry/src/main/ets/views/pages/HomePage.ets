@@ -11,6 +11,7 @@ export struct HomePage {
   @State private isLoading: boolean = false;
   @State private statusMessage: string = '正在准备 ArkWeb 请求环境';
   @State private requiresChallenge: boolean = false;
+  @State private refreshCount: number = 0;
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   private topicService: TopicService = new TopicService(this.bridge);
 
@@ -121,19 +122,31 @@ export struct HomePage {
 
     this.isLoading = true;
     this.requiresChallenge = false;
-    this.statusMessage = '正在通过 ArkWeb 请求 /latest.json';
+    this.statusMessage = `正在通过 ArkWeb 请求 /latest.json · 第 ${this.refreshCount + 1} 次`;
 
     const result: NetworkResult<Topic[]> = await this.topicService.getLatestTopics();
     this.isLoading = false;
+    this.refreshCount++;
 
     if (result.success && result.data) {
       this.topics = result.data;
-      this.statusMessage = `已加载 ${result.data.length} 个最新帖子`;
+      this.statusMessage = `已加载 ${result.data.length} 个最新帖子 · HTTP ${result.statusCode} · ${this.formatClock(new Date())}`;
       return;
     }
 
     this.topics = [];
     this.requiresChallenge = result.error?.requiresChallenge === true;
-    this.statusMessage = result.error?.message ? result.error.message : '最新帖子加载失败';
+    this.statusMessage = `${result.error?.message ? result.error.message : '最新帖子加载失败'} · ${this.formatClock(new Date())}`;
+  }
+
+  private formatClock(date: Date): string {
+    return `${this.padClockNumber(date.getHours())}:${this.padClockNumber(date.getMinutes())}:${this.padClockNumber(date.getSeconds())}`;
+  }
+
+  private padClockNumber(value: number): string {
+    if (value < 10) {
+      return `0${value}`;
+    }
+    return value.toString();
   }
 }
