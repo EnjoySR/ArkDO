@@ -4,6 +4,10 @@ import { HomePage } from '../views/pages/HomePage';
 @Component
 struct Index {
   build() {
-    HomePage()
+    Column() {
+      HomePage()
+    }
+    .width('100%')
+    .height('100%')
   }
 }
