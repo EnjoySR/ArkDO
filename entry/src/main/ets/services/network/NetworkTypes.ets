@@ -24,3 +24,7 @@ export interface NetworkResult<T> {
   data?: T;
   error?: NetworkError;
 }
+
+export interface JsonNetworkClient {
+  getJson(path: string): Promise<NetworkResult<string>>;
+}
