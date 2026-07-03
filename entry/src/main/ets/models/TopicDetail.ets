@@ -1,4 +1,5 @@
 import { User } from './User';
+import { TopicTag } from './Topic';
 
 export interface TopicPost {
   id: number;
@@ -17,6 +18,8 @@ export interface TopicDetail {
   id: number;
   title: string;
   slug?: string;
+  categoryId?: number;
+  tags: TopicTag[];
   postsCount?: number;
   replyCount?: number;
   likeCount?: number;

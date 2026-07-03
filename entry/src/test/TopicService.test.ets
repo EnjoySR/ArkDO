@@ -153,7 +153,7 @@ export default function topicServiceTest() {
     });
 
     it('loadsTopicDetailFromDiscoursePayload', 0, async () => {
-      const payload: string = '{"id":42,"title":"ArkDO 第二阶段","slug":"arkdo-phase-two","posts_count":2,"reply_count":1,"like_count":3,"views":128,"created_at":"2026-07-03T00:00:00.000Z","post_stream":{"posts":[{"id":100,"topic_id":42,"post_number":1,"username":"alice","name":"Alice","avatar_template":"/user_avatar/linux.do/alice/{size}/1_2.png","created_at":"2026-07-03T00:01:00.000Z","cooked":"<p>Hello <strong>ArkDO</strong>&amp; Linux.do</p>","like_count":2},{"id":101,"topic_id":42,"post_number":2,"username":"bob","name":"Bob","avatar_template":"/user_avatar/linux.do/bob/{size}/1_2.png","created_at":"2026-07-03T00:02:00.000Z","cooked":"<p>第二条回复<br>继续讨论</p>","reply_count":1}]}}';
+      const payload: string = '{"id":42,"title":"ArkDO 第二阶段","slug":"arkdo-phase-two","category_id":36,"tags":["快问快答",{"name":"高级推广","slug":"1514-tag"}],"posts_count":2,"reply_count":1,"like_count":3,"views":128,"created_at":"2026-07-03T00:00:00.000Z","post_stream":{"posts":[{"id":100,"topic_id":42,"post_number":1,"username":"alice","name":"Alice","avatar_template":"/user_avatar/linux.do/alice/{size}/1_2.png","created_at":"2026-07-03T00:01:00.000Z","cooked":"<p>Hello <strong>ArkDO</strong>&amp; Linux.do</p>","like_count":2},{"id":101,"topic_id":42,"post_number":2,"username":"bob","name":"Bob","avatar_template":"/user_avatar/linux.do/bob/{size}/1_2.png","created_at":"2026-07-03T00:02:00.000Z","cooked":"<p>第二条回复<br>继续讨论</p>","reply_count":1}]}}';
       const bridge: FakeBridge = new FakeBridge({
         success: true,
         statusCode: 200,
@@ -168,6 +168,11 @@ export default function topicServiceTest() {
       expect(result.success).assertTrue();
       expect(result.data?.id).assertEqual(42);
       expect(result.data?.title).assertEqual('ArkDO 第二阶段');
+      expect(result.data?.categoryId).assertEqual(36);
+      expect(result.data?.tags.length).assertEqual(2);
+      expect(result.data?.tags[0].name).assertEqual('快问快答');
+      expect(result.data?.tags[1].name).assertEqual('高级推广');
+      expect(result.data?.tags[1].slug).assertEqual('1514-tag');
       expect(result.data?.viewCount).assertEqual(128);
       expect(result.data?.posts.length).assertEqual(2);
       expect(result.data?.posts[0].author?.username).assertEqual('alice');

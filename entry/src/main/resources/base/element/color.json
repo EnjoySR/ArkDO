@@ -3,6 +3,38 @@
     {
       "name": "start_window_background",
       "value": "#FFFFFF"
+    },
+    {
+      "name": "page_bg",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "text_primary",
+      "value": "#111827"
+    },
+    {
+      "name": "text_secondary",
+      "value": "#6B7280"
+    },
+    {
+      "name": "brand",
+      "value": "#2563EB"
+    },
+    {
+      "name": "warning",
+      "value": "#B45309"
+    },
+    {
+      "name": "border",
+      "value": "#E5E7EB"
+    },
+    {
+      "name": "surface_muted",
+      "value": "#F3F4F6"
+    },
+    {
+      "name": "avatar_fg",
+      "value": "#4B5563"
     }
   ]
 }

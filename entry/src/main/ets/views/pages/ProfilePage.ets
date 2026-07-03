@@ -4,6 +4,7 @@ import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { AuthService } from '../../services/auth/AuthService';
 import { UserAvatar } from '../components/UserAvatar';
+import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
 
@@ -12,6 +13,7 @@ export struct ProfilePage {
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   onLoginClick: () => void = () => {};
+  @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
   @State private currentUser?: User = undefined;
   @State private isCheckingSession: boolean = false;
   @State private hasCheckedSession: boolean = false;
@@ -49,6 +51,8 @@ export struct ProfilePage {
         .width('100%')
         .padding({ left: 20, right: 20, top: 20, bottom: 12 })
 
+      this.AppearanceSection()
+
       if (this.currentUser) {
         this.LoggedInContent()
       } else {
@@ -58,6 +62,47 @@ export struct ProfilePage {
     .width('100%')
     .height('100%')
     .backgroundColor('#FFFFFF')
+  }
+
+  @Builder
+  private AppearanceSection() {
+    Column() {
+      Text('外观')
+        .fontSize(13)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+        .margin({ bottom: 8 })
+
+      Row() {
+        this.ThemeOption('跟随系统', ThemeMode.SYSTEM)
+        this.ThemeOption('浅色', ThemeMode.LIGHT)
+        this.ThemeOption('深色', ThemeMode.DARK)
+      }
+      .width('100%')
+      .padding(4)
+      .backgroundColor($r('app.color.surface_muted'))
+      .borderRadius(10)
+    }
+    .width('100%')
+    .padding({ left: 20, right: 20, top: 4, bottom: 12 })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  private ThemeOption(label: string, mode: ThemeMode) {
+    Text(label)
+      .fontSize(14)
+      .fontWeight(this.themeMode === mode ? FontWeight.Medium : FontWeight.Normal)
+      .fontColor(this.themeMode === mode ? Color.White : $r('app.color.text_secondary'))
+      .textAlign(TextAlign.Center)
+      .layoutWeight(1)
+      .height(36)
+      .margin(2)
+      .borderRadius(8)
+      .backgroundColor(this.themeMode === mode ? $r('app.color.brand') : Color.Transparent)
+      .onClick(() => {
+        ThemeManager.setMode(getContext(this), mode);
+      })
   }
 
   @Builder

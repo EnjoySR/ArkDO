@@ -1,12 +1,13 @@
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
 import { TopicDetail, TopicPost } from '../../models/TopicDetail';
-import { User } from '../../models/User';
+import { TopicCategory, TopicTag } from '../../models/Topic';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { TopicService } from '../../services/topic/TopicService';
+import { SiteMetadata, SiteService } from '../../services/site/SiteService';
+import { TopicMetadataBadges } from '../components/TopicBadges';
 import { TopicPostItem } from '../components/TopicPostItem';
-import { UserAvatar } from '../components/UserAvatar';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 
@@ -17,6 +18,7 @@ export struct TopicDetailPage {
   @State private isLoading: boolean = false;
   @State private message: string = '正在准备 ArkWeb 请求环境';
   @State private requiresChallenge: boolean = false;
+  @State private categories: TopicCategory[] = [];
   param: TopicDetailRouteParam = {
     topicId: 0,
     title: ''
@@ -24,6 +26,7 @@ export struct TopicDetailPage {
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   onBack: () => void = () => {};
+  private isSiteMetadataLoading: boolean = false;
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
 
@@ -35,6 +38,7 @@ export struct TopicDetailPage {
     }
 
     if (this.isArkWebReady && !this.detail) {
+      this.loadSiteMetadataIfNeeded();
       this.loadTopicDetail();
     }
   }
@@ -108,29 +112,20 @@ export struct TopicDetailPage {
         .fontColor('#111827')
         .width('100%')
 
-      Row() {
-        UserAvatar({ user: this.getOriginalAuthor(), avatarSize: 32 })
-          .margin({ right: 10 })
-
-        Column() {
-          Text(this.getOriginalAuthorName())
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .fontColor('#111827')
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-          Text(this.getTopicMetaText())
-            .fontSize(12)
-            .fontColor('#6B7280')
-            .margin({ top: 3 })
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
+      if (this.hasBadges()) {
+        TopicMetadataBadges({
+          category: this.findCategory(this.detail?.categoryId),
+          parentCategory: this.findParentCategory(this.detail?.categoryId),
+          tags: this.getTags()
+        })
+        .width('100%')
+        .margin({ top: 8 })
       }
-      .width('100%')
-      .margin({ top: 14 })
-      .alignItems(VerticalAlign.Center)
+
+      Text(this.getTopicMetaText())
+        .fontSize(12)
+        .fontColor('#6B7280')
+        .margin({ top: 8 })
     }
     .width('100%')
     .padding({ top: 20, bottom: 16 })
@@ -195,6 +190,7 @@ export struct TopicDetailPage {
     this.isLoading = true;
     this.requiresChallenge = false;
     this.message = '正在加载帖子详情';
+    this.loadSiteMetadataIfNeeded();
     console.info(`${LOG_TAG} load detail start topicId=${this.param.topicId} slug=${this.getSlugLabel()}`);
 
     const result: NetworkResult<TopicDetail> =
@@ -216,6 +212,7 @@ export struct TopicDetailPage {
 
   private handleArkWebReadyChanged(): void {
     if (this.isArkWebReady && !this.detail && !this.isLoading) {
+      this.loadSiteMetadataIfNeeded();
       this.loadTopicDetail();
     }
   }
@@ -240,24 +237,6 @@ export struct TopicDetailPage {
     return this.param.title;
   }
 
-  private getOriginalAuthor(): User | undefined {
-    if (this.posts.length === 0) {
-      return undefined;
-    }
-    return this.posts[0].author;
-  }
-
-  private getOriginalAuthorName(): string {
-    const author: User | undefined = this.getOriginalAuthor();
-    if (author?.displayName && author.displayName.length > 0) {
-      return author.displayName;
-    }
-    if (author?.username && author.username.length > 0) {
-      return author.username;
-    }
-    return '未知用户';
-  }
-
   private getTopicMetaText(): string {
     if (!this.detail) {
       return `Topic ID：${this.param.topicId}`;
@@ -268,6 +247,54 @@ export struct TopicDetailPage {
     const likeCount: number = this.detail.likeCount ? this.detail.likeCount : 0;
     const viewCount: number = this.detail.viewCount ? this.detail.viewCount : 0;
     return `${postsCount} 帖 · ${replyCount} 回复 · ${likeCount} 赞 · ${viewCount} 浏览`;
+  }
+
+  private async loadSiteMetadataIfNeeded(): Promise<void> {
+    if (!this.isArkWebReady || this.isSiteMetadataLoading || this.categories.length > 0) {
+      return;
+    }
+
+    this.isSiteMetadataLoading = true;
+    const result: NetworkResult<SiteMetadata> = await new SiteService(this.bridge).getSiteMetadata();
+    this.isSiteMetadataLoading = false;
+
+    if (result.success && result.data) {
+      this.categories = result.data.categories;
+      console.info(`${LOG_TAG} site metadata loaded categories=${result.data.categories.length}`);
+      return;
+    }
+
+    console.info(`${LOG_TAG} site metadata skipped status=${result.statusCode}`);
+  }
+
+  private findCategory(categoryId?: number): TopicCategory | undefined {
+    if (!categoryId || this.categories.length === 0) {
+      return undefined;
+    }
+
+    for (let index: number = 0; index < this.categories.length; index++) {
+      const category: TopicCategory = this.categories[index];
+      if (category.id === categoryId) {
+        return category;
+      }
+    }
+    return undefined;
+  }
+
+  private findParentCategory(categoryId?: number): TopicCategory | undefined {
+    const category: TopicCategory | undefined = this.findCategory(categoryId);
+    if (!category || !category.parentCategoryId) {
+      return undefined;
+    }
+    return this.findCategory(category.parentCategoryId);
+  }
+
+  private hasBadges(): boolean {
+    return this.findCategory(this.detail?.categoryId) !== undefined || this.getTags().length > 0;
+  }
+
+  private getTags(): TopicTag[] {
+    return this.detail?.tags ? this.detail.tags : [];
   }
 
   private getSlugLabel(): string {

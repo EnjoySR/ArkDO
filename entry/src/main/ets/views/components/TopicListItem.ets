@@ -23,7 +23,7 @@ export struct TopicListItem {
           Text(this.topic.title)
             .fontSize(17)
             .fontWeight(FontWeight.Medium)
-            .fontColor('#111827')
+            .fontColor($r('app.color.text_primary'))
             .width('100%')
 
           if (this.hasBadges()) {
@@ -39,16 +39,16 @@ export struct TopicListItem {
           Row() {
             Text(this.getAuthorUsername())
               .fontSize(13)
-              .fontColor('#6B7280')
+              .fontColor($r('app.color.text_secondary'))
 
             Text(`${this.topic.replyCount ? this.topic.replyCount : 0} 回复`)
               .fontSize(13)
-              .fontColor('#6B7280')
+              .fontColor($r('app.color.text_secondary'))
               .margin({ left: 12 })
 
             Text(`${this.topic.likeCount ? this.topic.likeCount : 0} 赞`)
               .fontSize(13)
-              .fontColor('#6B7280')
+              .fontColor($r('app.color.text_secondary'))
               .margin({ left: 12 })
           }
           .margin({ top: 4 })
@@ -60,7 +60,7 @@ export struct TopicListItem {
       .padding({ top: 14, bottom: 14 })
       .border({
         width: { bottom: 1 },
-        color: '#E5E7EB'
+        color: $r('app.color.border')
       })
       .alignItems(VerticalAlign.Top)
       .onClick(() => {

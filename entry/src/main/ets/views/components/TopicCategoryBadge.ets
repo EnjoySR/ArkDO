@@ -49,7 +49,7 @@ export struct TopicCategoryBadge {
 
       Text(this.category.name)
         .fontSize(10)
-        .fontColor('#6B7280')
+        .fontColor($r('app.color.text_secondary'))
         .fontWeight(FontWeight.Medium)
     }
     .height(16)

@@ -13,39 +13,15 @@ export struct TopicPostItem {
 
   build() {
     ListItem() {
-      Row() {
-        UserAvatar({ user: this.post.author, avatarSize: 38 })
-          .margin({ right: 12 })
+      Column() {
+        this.PostAuthorHeader()
 
-        Column() {
-          Row() {
-            Text(this.getAuthorName())
-              .fontSize(14)
-              .fontWeight(FontWeight.Medium)
-              .fontColor('#111827')
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-            Text(`#${this.post.postNumber}`)
-              .fontSize(12)
-              .fontColor('#6B7280')
-              .margin({ left: 8 })
-          }
+        PostRichContent({
+          cookedHtml: this.post.cookedHtml,
+          fallbackText: this.post.plainText
+        })
           .width('100%')
-
-          Text(this.getMetaText())
-            .fontSize(12)
-            .fontColor('#9CA3AF')
-            .margin({ top: 4 })
-
-          PostRichContent({
-            cookedHtml: this.post.cookedHtml,
-            fallbackText: this.post.plainText
-          })
-            .margin({ top: 10 })
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
+          .margin({ top: 12 })
       }
       .width('100%')
       .padding({ top: 16, bottom: 16 })
@@ -53,8 +29,42 @@ export struct TopicPostItem {
         width: { bottom: 1 },
         color: '#E5E7EB'
       })
-      .alignItems(VerticalAlign.Top)
+      .alignItems(HorizontalAlign.Start)
     }
+  }
+
+  @Builder
+  private PostAuthorHeader() {
+    Row() {
+      UserAvatar({ user: this.post.author, avatarSize: 38 })
+        .margin({ right: 12 })
+
+      Column() {
+        Row() {
+          Text(this.getAuthorName())
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#111827')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+          Text(`#${this.post.postNumber}`)
+            .fontSize(12)
+            .fontColor('#6B7280')
+            .margin({ left: 8 })
+        }
+        .width('100%')
+
+        Text(this.getMetaText())
+          .fontSize(12)
+          .fontColor('#9CA3AF')
+          .margin({ top: 4 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
   }
 
   private getAuthorName(): string {

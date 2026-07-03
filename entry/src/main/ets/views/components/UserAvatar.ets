@@ -16,12 +16,12 @@ export struct UserAvatar {
           .height(this.avatarSize)
           .borderRadius(this.avatarSize / 2)
           .objectFit(ImageFit.Cover)
-          .backgroundColor('#E5E7EB')
+          .backgroundColor($r('app.color.surface_muted'))
       } else {
         Text(this.getInitial())
           .fontSize(Math.max(12, Math.floor(this.avatarSize * 0.4)))
           .fontWeight(FontWeight.Medium)
-          .fontColor('#4B5563')
+          .fontColor($r('app.color.avatar_fg'))
       }
     }
     .width(this.avatarSize)
@@ -31,7 +31,7 @@ export struct UserAvatar {
       width: 1,
       color: this.avatarBorderColor
     })
-    .backgroundColor('#E5E7EB')
+    .backgroundColor($r('app.color.surface_muted'))
     .alignContent(Alignment.Center)
   }
 

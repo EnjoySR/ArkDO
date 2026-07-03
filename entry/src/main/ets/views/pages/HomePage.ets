@@ -61,7 +61,7 @@ export struct HomePage {
         Text(AppConstants.APP_NAME)
           .fontSize(28)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#111827')
+          .fontColor($r('app.color.text_primary'))
 
         Blank()
 
@@ -80,13 +80,13 @@ export struct HomePage {
                   LoadingProgress()
                     .width(28)
                     .height(28)
-                    .color('#2563EB')
+                    .color($r('app.color.brand'))
                     .margin({ bottom: 12 })
                 }
 
                 Text(this.listMessage)
                   .fontSize(15)
-                  .fontColor(this.requiresChallenge ? '#B45309' : '#6B7280')
+                  .fontColor(this.requiresChallenge ? $r('app.color.warning') : $r('app.color.text_secondary'))
                   .textAlign(TextAlign.Center)
               }
               .width('100%')
@@ -113,13 +113,13 @@ export struct HomePage {
                   LoadingProgress()
                     .width(18)
                     .height(18)
-                    .color('#2563EB')
+                    .color($r('app.color.brand'))
                     .margin({ right: 8 })
                 }
 
                 Text(this.footerMessage)
                   .fontSize(13)
-                  .fontColor(this.requiresChallenge ? '#B45309' : '#6B7280')
+                  .fontColor(this.requiresChallenge ? $r('app.color.warning') : $r('app.color.text_secondary'))
               }
               .width('100%')
               .height(54)
@@ -146,7 +146,7 @@ export struct HomePage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .alignItems(HorizontalAlign.Start)
   }
@@ -164,7 +164,7 @@ export struct HomePage {
             LoadingProgress()
               .width(22)
               .height(22)
-              .color('#2563EB')
+              .color($r('app.color.brand'))
           } else if (this.isLoggedIn) {
             UserAvatar({
               user: this.accountUser,
@@ -173,7 +173,7 @@ export struct HomePage {
           } else {
             SymbolGlyph($r('sys.symbol.person'))
               .fontSize(28)
-              .fontColor(['#2563EB'])
+              .fontColor([$r('app.color.brand')])
               .renderingStrategy(SymbolRenderingStrategy.SINGLE)
           }
         }
@@ -184,7 +184,7 @@ export struct HomePage {
       .width(42)
       .height(42)
       .borderRadius(21)
-      .backgroundColor('#F3F4F6')
+      .backgroundColor($r('app.color.surface_muted'))
       .padding(0)
       .enabled(!this.isCheckingSession)
       .onClick(() => {

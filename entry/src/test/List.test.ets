@@ -11,6 +11,7 @@ import challengeCompletionDetectorTest from './ChallengeCompletionDetector.test'
 import cookedHtmlParserTest from './CookedHtmlParser.test';
 import siteServiceTest from './SiteService.test';
 import topicBadgesTest from './TopicBadges.test';
+import themeManagerTest from './ThemeManager.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -26,4 +27,5 @@ export default function testsuite() {
   cookedHtmlParserTest();
   siteServiceTest();
   topicBadgesTest();
+  themeManagerTest();
 }

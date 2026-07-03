@@ -44,6 +44,8 @@ interface DiscourseTopicDetail {
   id?: number;
   title?: string;
   slug?: string;
+  category_id?: number;
+  tags?: Object[];
   posts_count?: number;
   reply_count?: number;
   like_count?: number;
@@ -284,6 +286,8 @@ export class TopicService {
       id: sourceTopic.id as number,
       title: sourceTopic.title as string,
       slug: sourceTopic.slug,
+      categoryId: sourceTopic.category_id,
+      tags: this.mapTags(sourceTopic.tags),
       postsCount: sourceTopic.posts_count,
       replyCount: sourceTopic.reply_count,
       likeCount: sourceTopic.like_count,

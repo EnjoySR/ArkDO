@@ -23,12 +23,12 @@ export struct TopicTagBadge {
 
       Text(this.tag.name)
         .fontSize(10)
-        .fontColor('#6B7280')
+        .fontColor($r('app.color.text_secondary'))
         .fontWeight(FontWeight.Medium)
     }
     .height(16)
     .padding({ left: 4, right: 4 })
-    .backgroundColor('#E5E7EB')
+    .backgroundColor($r('app.color.surface_muted'))
     .borderRadius(2)
     .alignItems(VerticalAlign.Center)
     .margin({ right: 7, bottom: 4 })
