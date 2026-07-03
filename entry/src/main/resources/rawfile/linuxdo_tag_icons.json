@@ -1,0 +1,262 @@
+[
+  {
+    "tagName": "病友",
+    "iconId": "user-injured",
+    "color": "#F7941D"
+  },
+  {
+    "tagName": "纯水",
+    "iconId": "faucet",
+    "color": "#f7941d"
+  },
+  {
+    "tagName": "订阅节点",
+    "iconId": "network-wired",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "动漫",
+    "iconId": "face-smile",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "二次元",
+    "iconId": "venus",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "封禁",
+    "iconId": "user-slash",
+    "color": "#ff4444"
+  },
+  {
+    "tagName": "高级推广",
+    "iconId": "coins",
+    "color": "#F5bF03"
+  },
+  {
+    "tagName": "公告",
+    "iconId": "bullhorn",
+    "color": "#00aeff"
+  },
+  {
+    "tagName": "公益推广",
+    "iconId": "receipt",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "集中帖",
+    "iconId": "people-group",
+    "color": "#00aeff"
+  },
+  {
+    "tagName": "计算机网络",
+    "iconId": "ethernet",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "健身",
+    "iconId": "heart-pulse",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "金融经济",
+    "iconId": "hand-holding-dollar",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "禁水",
+    "iconId": "droplet-slash",
+    "color": "#ff5555"
+  },
+  {
+    "tagName": "精华神帖",
+    "iconId": "thumbs-up",
+    "color": "#00aeff"
+  },
+  {
+    "tagName": "开源推广",
+    "iconId": "receipt",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "快问快答",
+    "iconId": "circle-question",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "旅行",
+    "iconId": "route",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "美食",
+    "iconId": "pepper-hot",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "配置优化",
+    "iconId": "terminal",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "拼车",
+    "iconId": "car",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "嵌入式",
+    "iconId": "microchip",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "求资源",
+    "iconId": "hands-praying",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "人工智能",
+    "iconId": "brain",
+    "color": "#bd93f9"
+  },
+  {
+    "tagName": "软件测试",
+    "iconId": "bug",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "软件调试",
+    "iconId": "spider",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "软件开发",
+    "iconId": "file-code",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "赏金任务",
+    "iconId": "comment-dollar",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "摄影",
+    "iconId": "camera",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "树洞",
+    "iconId": "tree",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "数据库",
+    "iconId": "database",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "算法",
+    "iconId": "calculator",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "碎碎碎念",
+    "iconId": "droplet",
+    "color": "#00aeff"
+  },
+  {
+    "tagName": "推广",
+    "iconId": "receipt",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "网络安全",
+    "iconId": "user-secret",
+    "color": "#ff1111"
+  },
+  {
+    "tagName": "危险",
+    "iconId": "radiation",
+    "color": "#ff1111"
+  },
+  {
+    "tagName": "文档",
+    "iconId": "book",
+    "color": "#75b6d7"
+  },
+  {
+    "tagName": "音乐",
+    "iconId": "music",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "影视",
+    "iconId": "video",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "硬件测试",
+    "iconId": "bug",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "硬件调试",
+    "iconId": "spider",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "硬件开发",
+    "iconId": "file-code",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "优质博文",
+    "iconId": "blog",
+    "color": "#00aeff"
+  },
+  {
+    "tagName": "游戏",
+    "iconId": "gamepad",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "原创",
+    "iconId": "lightbulb",
+    "color": "#00aeff"
+  },
+  {
+    "tagName": "职场",
+    "iconId": "briefcase",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "转载",
+    "iconId": "share",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "作品集",
+    "iconId": "palette",
+    "color": "#669d34"
+  },
+  {
+    "tagName": "aff",
+    "iconId": "arrow-pointer",
+    "color": "#f7941D"
+  },
+  {
+    "tagName": "livestream",
+    "iconId": "headset",
+    "color": "#00aeff"
+  },
+  {
+    "tagName": "nsfw",
+    "iconId": "triangle-exclamation",
+    "color": "#F7941D"
+  },
+  {
+    "tagName": "vps",
+    "iconId": "server",
+    "color": "#669d34"
+  }
+]

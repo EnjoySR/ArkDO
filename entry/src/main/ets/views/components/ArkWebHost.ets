@@ -40,8 +40,12 @@ export struct ArkWebHost {
       .databaseAccess(true)
       .onlineImageAccess(true)
       .imageAccess(true)
+      .mixedMode(MixedMode.All)
       .cacheMode(CacheMode.Default)
       .javaScriptProxy(this.bridge.createJavaScriptProxy(this.controller))
+      .onControllerAttached(() => {
+        WebSessionManager.applyUserAgent(this.controller, 'ArkWebHost');
+      })
       .onPageEnd(() => {
         this.isControllerReady = true;
         WebSessionManager.saveCookies('ArkWebHost');

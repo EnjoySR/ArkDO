@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<use href="#table-cells"/>
+  <g transform="translate(220, 220) scale(0.7)">
+    <circle cx="256" cy="256" r="256" fill="var(--secondary)"/>
+    <use href="#plus" transform="translate(256 256) scale(0.9) translate(-256 -256)"/>
+  </g>
+</svg>

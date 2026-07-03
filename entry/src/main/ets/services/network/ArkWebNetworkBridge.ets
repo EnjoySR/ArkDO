@@ -2,7 +2,7 @@ import webview from '@ohos.web.webview';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { ChallengeEventBus } from '../challenge/ChallengeEventBus';
 import { detectChallenge } from './ChallengeDetector';
-import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from './NetworkTypes';
+import { ChallengeState, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from './NetworkTypes';
 
 const REQUEST_ID_TOKEN: string = '__ARKDO_REQUEST_ID__';
 const BODY_LOG_CHUNK_SIZE: number = 3000;
@@ -138,7 +138,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     this.executor = executor;
   }
 
-  async getJson(path: string): Promise<NetworkResult<string>> {
+  async getJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
     logNetwork(`GET ${requestPath} start`);
 
@@ -159,7 +159,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     try {
       const rawResult: string = await this.executor.run(this.createFetchScript(requestPath));
       logNetwork(`GET ${requestPath} raw envelope received length=${rawResult.length}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, options);
     } catch (error) {
       logNetwork(`GET ${requestPath} failed before response envelope`);
       return {
@@ -231,7 +231,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     return `/${path}`;
   }
 
-  private convertEnvelope(path: string, envelope: WebFetchEnvelope): NetworkResult<string> {
+  private convertEnvelope(path: string, envelope: WebFetchEnvelope, options?: JsonRequestOptions): NetworkResult<string> {
     if (envelope.errorMessage) {
       logNetwork(`GET ${path} envelope error=${envelope.errorMessage}`);
       return {
@@ -255,7 +255,9 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     if (challengeState !== ChallengeState.NONE) {
       logNetwork(`GET ${path} requires challenge state=${challengeState}`);
-      ChallengeEventBus.notifyChallengeRequired(path, statusCode, challengeState);
+      if (options?.notifyChallenge !== false) {
+        ChallengeEventBus.notifyChallengeRequired(path, statusCode, challengeState);
+      }
       return {
         success: false,
         statusCode: statusCode,

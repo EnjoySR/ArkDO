@@ -78,5 +78,20 @@ export default function arkWebNetworkBridgeTest() {
       expect(receivedStatusCode).assertEqual(403);
       expect(receivedChallengeState).assertEqual(ChallengeState.REQUIRED);
     });
+
+    it('canSuppressChallengeEventForInternalProbe', 0, async () => {
+      const executor: FakeJsonExecutor = new FakeJsonExecutor('{"statusCode":403,"contentType":"text/html","body":"<html><title>Just a moment...</title><body>cf-chl</body></html>"}');
+      const bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
+      let receivedSource: string = '';
+      const unsubscribe: () => void = ChallengeEventBus.subscribe((event: ChallengeRequiredEvent) => {
+        receivedSource = event.source;
+      });
+      bridge.setExecutor(executor);
+
+      await bridge.getJson('/latest.json', { notifyChallenge: false });
+      unsubscribe();
+
+      expect(receivedSource).assertEqual('');
+    });
   });
 }

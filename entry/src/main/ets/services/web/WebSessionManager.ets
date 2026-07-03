@@ -19,6 +19,15 @@ export class WebSessionManager {
     }
   }
 
+  static applyUserAgent(controller: webview.WebviewController, source: string): void {
+    try {
+      controller.setCustomUserAgent(AppConstants.DEFAULT_USER_AGENT);
+      console.info(`${LOG_TAG} user agent applied source=${source} ua=${AppConstants.DEFAULT_USER_AGENT}`);
+    } catch (error) {
+      console.info(`${LOG_TAG} user agent apply failed source=${source} error=${JSON.stringify(error)}`);
+    }
+  }
+
   static saveCookies(source: string): void {
     webview.WebCookieManager.saveCookieAsync()
       .then(() => {

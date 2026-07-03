@@ -11,7 +11,9 @@ export default function architectureSkeletonTest() {
       expect(AppConstants.BASE_URL).assertEqual('https://linux.do');
       expect(AppConstants.CHALLENGE_URL).assertEqual('https://linux.do/challenge');
       expect(AppConstants.DEFAULT_TIMEOUT_MS).assertEqual(15000);
-      expect(AppConstants.DEFAULT_USER_AGENT).assertContain('ArkDO');
+      // Cloudflare 需要真实浏览器 UA；cf_clearance 与 UA 绑定，故不能再用自定义标识 UA。
+      expect(AppConstants.DEFAULT_USER_AGENT).assertContain('Mozilla/5.0');
+      expect(AppConstants.DEFAULT_USER_AGENT).assertContain('Chrome/');
     });
 
     it('allowsMinimalTopicAndUserShape', 0, () => {
@@ -25,6 +27,7 @@ export default function architectureSkeletonTest() {
         id: 100,
         title: 'ArkDO phase one',
         slug: 'arkdo-phase-one',
+        tags: [],
         postsCount: 1,
         replyCount: 0,
         likeCount: 0,

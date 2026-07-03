@@ -71,7 +71,11 @@ export struct CfChallengePage {
         .databaseAccess(true)
         .onlineImageAccess(true)
         .imageAccess(true)
+        .mixedMode(MixedMode.All)
         .cacheMode(CacheMode.Default)
+        .onControllerAttached(() => {
+          WebSessionManager.applyUserAgent(this.controller, 'CfChallengePage');
+        })
         .onPageBegin((event: OnPageBeginEvent) => {
           console.info(`${LOG_TAG} page begin url=${this.safeUrlLabel(event.url)}`);
           this.logDiagnostic('pageBegin', `url=${this.safeUrlLabel(event.url)}`);

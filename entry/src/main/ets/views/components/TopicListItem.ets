@@ -1,12 +1,16 @@
-import { Topic } from '../../models/Topic';
+import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
+import { TopicMetadataBadges } from './TopicBadges';
 import { UserAvatar } from './UserAvatar';
 
 @Component
 export struct TopicListItem {
   topic: Topic = {
     id: 0,
-    title: ''
+    title: '',
+    tags: []
   };
+  category?: TopicCategory;
+  parentCategory?: TopicCategory;
   onTopicClick: (topic: Topic) => void = () => {};
 
   build() {
@@ -20,8 +24,17 @@ export struct TopicListItem {
             .fontSize(17)
             .fontWeight(FontWeight.Medium)
             .fontColor('#111827')
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+
+          if (this.hasBadges()) {
+            TopicMetadataBadges({
+              category: this.category,
+              parentCategory: this.parentCategory,
+              tags: this.topic.tags
+            })
+            .width('100%')
+            .margin({ top: 3})
+          }
 
           Row() {
             Text(this.getAuthorUsername())
@@ -38,7 +51,7 @@ export struct TopicListItem {
               .fontColor('#6B7280')
               .margin({ left: 12 })
           }
-          .margin({ top: 8 })
+          .margin({ top: 4 })
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
@@ -62,5 +75,13 @@ export struct TopicListItem {
       return '未知用户';
     }
     return username;
+  }
+
+  private hasBadges(): boolean {
+    return !!this.category || this.getTags().length > 0;
+  }
+
+  private getTags(): TopicTag[] {
+    return this.topic.tags ? this.topic.tags : [];
   }
 }

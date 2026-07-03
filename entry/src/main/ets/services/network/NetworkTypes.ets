@@ -25,6 +25,10 @@ export interface NetworkResult<T> {
   error?: NetworkError;
 }
 
+export interface JsonRequestOptions {
+  notifyChallenge?: boolean;
+}
+
 export interface JsonNetworkClient {
-  getJson(path: string): Promise<NetworkResult<string>>;
+  getJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
 }

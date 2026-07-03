@@ -1,4 +1,4 @@
-import { Topic } from '../../models/Topic';
+import { Topic, TopicTag } from '../../models/Topic';
 import { TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
@@ -18,6 +18,8 @@ interface DiscourseTopic {
   id?: number;
   title?: string;
   slug?: string;
+  category_id?: number;
+  tags?: Object[];
   posts_count?: number;
   reply_count?: number;
   like_count?: number;
@@ -186,6 +188,8 @@ export class TopicService {
         id: sourceTopic.id,
         title: sourceTopic.title,
         slug: sourceTopic.slug,
+        categoryId: sourceTopic.category_id,
+        tags: this.mapTags(sourceTopic.tags),
         postsCount: sourceTopic.posts_count,
         replyCount: sourceTopic.reply_count,
         likeCount: sourceTopic.like_count,
@@ -195,6 +199,55 @@ export class TopicService {
       });
     }
     return topics;
+  }
+
+  private mapTags(sourceTags?: Object[]): TopicTag[] {
+    const tags: TopicTag[] = [];
+    if (!sourceTags) {
+      return tags;
+    }
+
+    for (let index: number = 0; index < sourceTags.length; index++) {
+      const tag: TopicTag | undefined = this.mapTag(sourceTags[index]);
+      if (tag) {
+        tags.push(tag);
+      }
+    }
+    return tags;
+  }
+
+  private mapTag(sourceTag: Object): TopicTag | undefined {
+    if (sourceTag === undefined || sourceTag === null) {
+      return undefined;
+    }
+
+    if (typeof sourceTag === 'string') {
+      const name: string = (sourceTag as string).trim();
+      return name.length > 0 ? { name } : undefined;
+    }
+
+    if (typeof sourceTag === 'number' || typeof sourceTag === 'boolean') {
+      const name: string = sourceTag.toString().trim();
+      return name.length > 0 ? { name } : undefined;
+    }
+
+    const source: Record<string, Object> = sourceTag as Record<string, Object>;
+    const name: string = this.readString(source['name']);
+    const slug: string = this.readString(source['slug']);
+    const displayName: string = name.length > 0 ? name : slug;
+    if (displayName.length === 0) {
+      return undefined;
+    }
+
+    const tag: TopicTag = { name: displayName };
+    const id: number = this.readNumber(source['id']);
+    if (id > 0) {
+      tag.id = id;
+    }
+    if (slug.length > 0) {
+      tag.slug = slug;
+    }
+    return tag;
   }
 
   private findOriginalPoster(topic: DiscourseTopic, users?: DiscourseUser[]): User | undefined {
@@ -285,6 +338,21 @@ export class TopicService {
 
   private htmlToPlainText(html: string): string {
     return CookedHtmlParser.toPlainText(html);
+  }
+
+  private readString(value: Object | undefined): string {
+    if (value === undefined || value === null) {
+      return '';
+    }
+    return value.toString().trim();
+  }
+
+  private readNumber(value: Object | undefined): number {
+    if (value === undefined || value === null) {
+      return 0;
+    }
+    const numberValue: number = Number(value.toString());
+    return isNaN(numberValue) ? 0 : numberValue;
   }
 
   private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {

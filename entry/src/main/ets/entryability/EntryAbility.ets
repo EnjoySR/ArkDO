@@ -1,6 +1,8 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { LINUXDO_FA_SYMBOLS_RAWFILE, loadFaIconsFromRawContent } from '../views/components/FaIcon';
+import { LINUXDO_TAG_ICONS_RAWFILE, loadTagIconsFromRawContent } from '../views/components/TagIconRegistry';
 
 const DOMAIN = 0x0000;
 
@@ -11,6 +13,7 @@ export default class EntryAbility extends UIAbility {
     } catch (err) {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
+    this.loadIconAssets();
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 
@@ -44,5 +47,25 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+  }
+
+  private loadIconAssets(): void {
+    try {
+      const rawContent: Uint8Array = this.context.resourceManager.getRawFileContentSync(LINUXDO_FA_SYMBOLS_RAWFILE);
+      const iconCount: number = loadFaIconsFromRawContent(rawContent);
+      hilog.info(DOMAIN, 'testTag', 'Loaded Linux.do FontAwesome symbols: %{public}d', iconCount);
+    } catch (err) {
+      hilog.error(DOMAIN, 'testTag', 'Failed to load Linux.do FontAwesome symbols. Cause: %{public}s',
+        JSON.stringify(err));
+    }
+
+    try {
+      const rawContent: Uint8Array = this.context.resourceManager.getRawFileContentSync(LINUXDO_TAG_ICONS_RAWFILE);
+      const tagIconCount: number = loadTagIconsFromRawContent(rawContent);
+      hilog.info(DOMAIN, 'testTag', 'Loaded Linux.do tag icons: %{public}d', tagIconCount);
+    } catch (err) {
+      hilog.error(DOMAIN, 'testTag', 'Failed to load Linux.do tag icons. Cause: %{public}s',
+        JSON.stringify(err));
+    }
   }
 }

@@ -16,7 +16,7 @@ export class ChallengeResolutionProbe {
   }
 
   async canAccessLatestJson(): Promise<boolean> {
-    const result: NetworkResult<string> = await this.client.getJson('/latest.json');
+    const result: NetworkResult<string> = await this.client.getJson('/latest.json', { notifyChallenge: false });
     if (!result.success || result.statusCode !== 200 || result.challengeState !== ChallengeState.NONE || !result.data) {
       return false;
     }

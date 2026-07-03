@@ -1,17 +1,19 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../main/ets/services/network/NetworkTypes';
+import { ChallengeState, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from '../main/ets/services/network/NetworkTypes';
 import { ChallengeResolutionProbe } from '../main/ets/services/challenge/ChallengeResolutionProbe';
 
 class FakeProbeClient implements JsonNetworkClient {
   private result: NetworkResult<string>;
   requestedPath: string = '';
+  notifyChallenge?: boolean = undefined;
 
   constructor(result: NetworkResult<string>) {
     this.result = result;
   }
 
-  getJson(path: string): Promise<NetworkResult<string>> {
+  getJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     this.requestedPath = path;
+    this.notifyChallenge = options?.notifyChallenge;
     return Promise.resolve(this.result);
   }
 }
@@ -30,6 +32,7 @@ export default function challengeResolutionProbeTest() {
       const resolved: boolean = await probe.canAccessLatestJson();
 
       expect(client.requestedPath).assertEqual('/latest.json');
+      expect(client.notifyChallenge).assertFalse();
       expect(resolved).assertTrue();
     });
 

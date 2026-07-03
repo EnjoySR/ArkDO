@@ -9,6 +9,8 @@ import appRoutesTest from './AppRoutes.test';
 import challengeResolutionProbeTest from './ChallengeResolutionProbe.test';
 import challengeCompletionDetectorTest from './ChallengeCompletionDetector.test';
 import cookedHtmlParserTest from './CookedHtmlParser.test';
+import siteServiceTest from './SiteService.test';
+import topicBadgesTest from './TopicBadges.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -22,4 +24,6 @@ export default function testsuite() {
   challengeResolutionProbeTest();
   challengeCompletionDetectorTest();
   cookedHtmlParserTest();
+  siteServiceTest();
+  topicBadgesTest();
 }

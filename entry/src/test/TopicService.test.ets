@@ -38,7 +38,7 @@ class SequenceBridge implements JsonNetworkClient {
 export default function topicServiceTest() {
   describe('topicServiceTest', () => {
     it('loadsLatestTopicsFromDiscoursePayload', 0, async () => {
-      const payload: string = '{"topic_list":{"topics":[{"id":42,"title":"ArkDO 第二阶段","slug":"arkdo-phase-two","posts_count":5,"reply_count":4,"like_count":9,"created_at":"2026-07-03T00:00:00.000Z","last_posted_at":"2026-07-03T00:10:00.000Z","posters":[{"user_id":7,"description":"原始作者"}]}]},"users":[{"id":7,"username":"linuxdo_user","name":"Linux.do User","avatar_template":"/user_avatar/linux.do/linuxdo_user/{size}/1_2.png"}]}';
+      const payload: string = '{"topic_list":{"topics":[{"id":42,"title":"ArkDO 第二阶段","slug":"arkdo-phase-two","category_id":36,"tags":["快问快答",{"name":"高级推广","slug":"1514-tag"}],"posts_count":5,"reply_count":4,"like_count":9,"created_at":"2026-07-03T00:00:00.000Z","last_posted_at":"2026-07-03T00:10:00.000Z","posters":[{"user_id":7,"description":"原始作者"}]}]},"users":[{"id":7,"username":"linuxdo_user","name":"Linux.do User","avatar_template":"/user_avatar/linux.do/linuxdo_user/{size}/1_2.png"}]}';
       const bridge: FakeBridge = new FakeBridge({
         success: true,
         statusCode: 200,
@@ -54,6 +54,11 @@ export default function topicServiceTest() {
       expect(result.data?.length).assertEqual(1);
       expect(result.data?.[0].id).assertEqual(42);
       expect(result.data?.[0].title).assertEqual('ArkDO 第二阶段');
+      expect(result.data?.[0].categoryId).assertEqual(36);
+      expect(result.data?.[0].tags.length).assertEqual(2);
+      expect(result.data?.[0].tags[0].name).assertEqual('快问快答');
+      expect(result.data?.[0].tags[1].name).assertEqual('高级推广');
+      expect(result.data?.[0].tags[1].slug).assertEqual('1514-tag');
       expect(result.data?.[0].postsCount).assertEqual(5);
       expect(result.data?.[0].replyCount).assertEqual(4);
       expect(result.data?.[0].author?.username).assertEqual('linuxdo_user');

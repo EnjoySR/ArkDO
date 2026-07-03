@@ -1,10 +1,11 @@
 import { AppConstants } from '../../common/constants/AppConstants';
-import { Topic } from '../../models/Topic';
+import { Topic, TopicCategory } from '../../models/Topic';
 import { TopicListItem } from '../components/TopicListItem';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
+import { SiteMetadata, SiteService } from '../../services/site/SiteService';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 
@@ -19,6 +20,8 @@ export struct HomePage {
   @State private listMessage: string = '正在准备 ArkWeb 请求环境';
   @State private footerMessage: string = '上拉加载更多';
   @State private requiresChallenge: boolean = false;
+  @State private categories: TopicCategory[] = [];
+  private isSiteMetadataLoading: boolean = false;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   onTopicClick: (topic: Topic) => void = () => {};
@@ -33,6 +36,7 @@ export struct HomePage {
     }
     this.syncSessionVersion();
     if (this.isArkWebReady && this.topics.length === 0) {
+      this.loadSiteMetadataIfNeeded();
       this.refreshLatestTopics();
     }
   }
@@ -82,6 +86,8 @@ export struct HomePage {
           ForEach(this.topics, (topic: Topic) => {
             TopicListItem({
               topic: topic,
+              category: this.findCategory(topic.categoryId),
+              parentCategory: this.findParentCategory(topic.categoryId),
               onTopicClick: (selectedTopic: Topic) => {
                 this.onTopicClick(selectedTopic);
               }
@@ -111,7 +117,8 @@ export struct HomePage {
         }
         .width('100%')
         .height('100%')
-        .padding({ left: 20, right: 20 })
+        .padding({ left: 20, right: 20, bottom: 0 })
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .onReachEnd(() => {
           this.loadMoreTopics();
         })
@@ -120,6 +127,7 @@ export struct HomePage {
       .layoutWeight(1)
       .pullToRefresh(true)
       .refreshOffset(64)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .onRefreshing(() => {
         this.refreshLatestTopics();
       })
@@ -127,6 +135,7 @@ export struct HomePage {
     .width('100%')
     .height('100%')
     .backgroundColor('#FFFFFF')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .alignItems(HorizontalAlign.Start)
   }
 
@@ -135,6 +144,8 @@ export struct HomePage {
       this.listMessage = '正在准备 ArkWeb 请求环境';
       return;
     }
+
+    this.loadSiteMetadataIfNeeded();
 
     if (this.isRefreshing || this.isLoadingMore) {
       return;
@@ -173,6 +184,8 @@ export struct HomePage {
       return;
     }
 
+    this.loadSiteMetadataIfNeeded();
+
     if (this.isRefreshing || this.isLoadingMore || !this.hasMore || this.topics.length === 0) {
       return;
     }
@@ -210,12 +223,53 @@ export struct HomePage {
 
   private handleArkWebReadyChanged(): void {
     if (this.isArkWebReady && this.topics.length === 0) {
+      this.loadSiteMetadataIfNeeded();
       this.refreshLatestTopics();
     }
   }
 
   private syncSessionVersion(): void {
     this.handleSessionChanged(SessionEventBus.getCurrentVersion());
+  }
+
+  private async loadSiteMetadataIfNeeded(): Promise<void> {
+    if (!this.isArkWebReady || this.isSiteMetadataLoading || this.categories.length > 0) {
+      return;
+    }
+
+    this.isSiteMetadataLoading = true;
+    const result: NetworkResult<SiteMetadata> = await new SiteService(this.bridge).getSiteMetadata();
+    this.isSiteMetadataLoading = false;
+
+    if (result.success && result.data) {
+      this.categories = result.data.categories;
+      console.info(`${LOG_TAG} site metadata loaded categories=${result.data.categories.length}`);
+      return;
+    }
+
+    console.info(`${LOG_TAG} site metadata skipped status=${result.statusCode}`);
+  }
+
+  private findCategory(categoryId?: number): TopicCategory | undefined {
+    if (!categoryId || this.categories.length === 0) {
+      return undefined;
+    }
+
+    for (let index: number = 0; index < this.categories.length; index++) {
+      const category: TopicCategory = this.categories[index];
+      if (category.id === categoryId) {
+        return category;
+      }
+    }
+    return undefined;
+  }
+
+  private findParentCategory(categoryId?: number): TopicCategory | undefined {
+    const category: TopicCategory | undefined = this.findCategory(categoryId);
+    if (!category || !category.parentCategoryId) {
+      return undefined;
+    }
+    return this.findCategory(category.parentCategoryId);
   }
 
   private mergeTopics(existingTopics: Topic[], nextTopics: Topic[]): Topic[] {

@@ -5,6 +5,8 @@ import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challe
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { ArkWebHost } from '../components/ArkWebHost';
+import { ensureFaIconsLoaded } from '../components/FaIcon';
+import { ensureTagIconsLoaded } from '../components/TagIconRegistry';
 import { CfChallengePage } from './CfChallengePage';
 import { HomePage } from './HomePage';
 import { LoginPage } from './LoginPage';
@@ -44,6 +46,7 @@ export struct RootTabPage {
   private unsubscribeChallengeRequired?: () => void = undefined;
 
   aboutToAppear(): void {
+    this.ensureIconSymbolsLoaded();
     if (!this.unsubscribeChallengeRequired) {
       this.unsubscribeChallengeRequired = ChallengeEventBus.subscribe((event: ChallengeRequiredEvent) => {
         this.handleChallengeRequired(event);
@@ -71,6 +74,7 @@ export struct RootTabPage {
     .width('100%')
     .height('100%')
     .backgroundColor('#FFFFFF')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .bindSheet($$this.isLoginPageVisible, this.LoginSheetBuilder, {
       height: '90%',
       dragBar: true,
@@ -178,6 +182,7 @@ export struct RootTabPage {
           }
         })
       }
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.buildBottomTabBar(
         $r('sys.symbol.house'),
         $r('sys.symbol.house_fill'),
@@ -193,6 +198,7 @@ export struct RootTabPage {
           }
         })
       }
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       .tabBar(this.buildBottomTabBar(
         $r('sys.symbol.person'),
         $r('sys.symbol.person_fill'),
@@ -201,6 +207,7 @@ export struct RootTabPage {
     }
     .width('100%')
     .height('100%')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .barHeight(68, true)
     .barWidth('76%')
     .barMode(BarMode.Fixed)
@@ -268,6 +275,18 @@ export struct RootTabPage {
 
   private handleArkWebReady(): void {
     this.isArkWebReady = true;
+  }
+
+  private ensureIconSymbolsLoaded(): void {
+    const hostContext: Context | undefined = this.getUIContext().getHostContext();
+    if (!hostContext) {
+      console.info(`${LOG_TAG} icon symbols load skipped: no host context`);
+      return;
+    }
+
+    const iconCount: number = ensureFaIconsLoaded(hostContext.resourceManager);
+    const tagIconCount: number = ensureTagIconsLoaded(hostContext.resourceManager);
+    console.info(`${LOG_TAG} icon assets loaded symbols=${iconCount} tagIcons=${tagIconCount}`);
   }
 
   private handleLoginSuccess(): void {
