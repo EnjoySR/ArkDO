@@ -1,6 +1,7 @@
 import { Topic } from '../../models/Topic';
 import { TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
+import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
 
 interface DiscourseLatestResponse {
@@ -283,28 +284,7 @@ export class TopicService {
   }
 
   private htmlToPlainText(html: string): string {
-    let text: string = html;
-    text = text.replace(/<br\s*\/?>/gi, '\n');
-    text = text.replace(/<\/p>/gi, '\n');
-    text = text.replace(/<\/div>/gi, '\n');
-    text = text.replace(/<\/li>/gi, '\n');
-    text = text.replace(/<li[^>]*>/gi, '- ');
-    text = text.replace(/<[^>]+>/g, '');
-    text = this.decodeHtmlEntities(text);
-    text = text.replace(/[ \t]+\n/g, '\n');
-    text = text.replace(/\n[ \t]+/g, '\n');
-    text = text.replace(/\n{3,}/g, '\n\n');
-    return text.trim();
-  }
-
-  private decodeHtmlEntities(text: string): string {
-    return text
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'");
+    return CookedHtmlParser.toPlainText(html);
   }
 
   private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {

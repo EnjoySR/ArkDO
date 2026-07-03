@@ -1,4 +1,5 @@
 import { TopicPost } from '../../models/TopicDetail';
+import { PostRichContent } from './PostRichContent';
 import { UserAvatar } from './UserAvatar';
 
 @Component
@@ -37,11 +38,10 @@ export struct TopicPostItem {
             .fontColor('#9CA3AF')
             .margin({ top: 4 })
 
-          Text(this.getBodyText())
-            .fontSize(15)
-            .lineHeight(22)
-            .fontColor('#374151')
-            .width('100%')
+          PostRichContent({
+            cookedHtml: this.post.cookedHtml,
+            fallbackText: this.post.plainText
+          })
             .margin({ top: 10 })
         }
         .layoutWeight(1)
@@ -88,10 +88,4 @@ export struct TopicPostItem {
     return this.post.createdAt.replace('T', ' ').substring(0, 16);
   }
 
-  private getBodyText(): string {
-    if (this.post.plainText.length === 0) {
-      return '暂无文本内容';
-    }
-    return this.post.plainText;
-  }
 }

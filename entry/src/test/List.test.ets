@@ -8,6 +8,7 @@ import challengeEventBusTest from './ChallengeEventBus.test';
 import appRoutesTest from './AppRoutes.test';
 import challengeResolutionProbeTest from './ChallengeResolutionProbe.test';
 import challengeCompletionDetectorTest from './ChallengeCompletionDetector.test';
+import cookedHtmlParserTest from './CookedHtmlParser.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -20,4 +21,5 @@ export default function testsuite() {
   appRoutesTest();
   challengeResolutionProbeTest();
   challengeCompletionDetectorTest();
+  cookedHtmlParserTest();
 }
