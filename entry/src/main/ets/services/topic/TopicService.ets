@@ -1,4 +1,5 @@
 import { Topic } from '../../models/Topic';
+import { TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
 
@@ -36,6 +37,37 @@ interface DiscourseUser {
   avatar_template?: string;
 }
 
+interface DiscourseTopicDetail {
+  id?: number;
+  title?: string;
+  slug?: string;
+  posts_count?: number;
+  reply_count?: number;
+  like_count?: number;
+  views?: number;
+  created_at?: string;
+  post_stream?: DiscoursePostStream;
+}
+
+interface DiscoursePostStream {
+  posts?: DiscoursePost[];
+}
+
+interface DiscoursePost {
+  id?: number;
+  topic_id?: number;
+  post_number?: number;
+  user_id?: number;
+  username?: string;
+  name?: string;
+  avatar_template?: string;
+  cooked?: string;
+  created_at?: string;
+  updated_at?: string;
+  reply_count?: number;
+  like_count?: number;
+}
+
 export interface TopicPage {
   topics: Topic[];
   page: number;
@@ -71,17 +103,17 @@ export class TopicService {
   async getLatestTopicsPage(page: number): Promise<NetworkResult<TopicPage>> {
     const response: NetworkResult<string> = await this.bridge.getJson(this.getLatestPath(page));
     if (!response.success) {
-      return this.forwardFailure(response);
+      return this.forwardFailure<TopicPage>(response);
     }
 
     if (response.data === undefined) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应为空。');
+      return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应为空。');
     }
 
     try {
       const payload: DiscourseLatestResponse = JSON.parse(response.data) as DiscourseLatestResponse;
       if (!payload.topic_list || !payload.topic_list.topics) {
-        return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应缺少 topic_list.topics。');
+        return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应缺少 topic_list.topics。');
       }
 
       return {
@@ -95,7 +127,35 @@ export class TopicService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应不是有效 JSON。');
+      return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应不是有效 JSON。');
+    }
+  }
+
+  async getTopicDetail(topicId: number, slug?: string): Promise<NetworkResult<TopicDetail>> {
+    const response: NetworkResult<string> = await this.bridge.getJson(this.getTopicDetailPath(topicId, slug));
+    if (!response.success) {
+      return this.forwardFailure<TopicDetail>(response);
+    }
+
+    if (response.data === undefined) {
+      return this.unexpectedResponse<TopicDetail>(response.statusCode, response.challengeState, 'Linux.do 帖子详情响应为空。');
+    }
+
+    try {
+      const payload: DiscourseTopicDetail = JSON.parse(response.data) as DiscourseTopicDetail;
+      if (typeof payload.id !== 'number' || typeof payload.title !== 'string' ||
+        !payload.post_stream || !payload.post_stream.posts) {
+        return this.unexpectedResponse<TopicDetail>(response.statusCode, response.challengeState, 'Linux.do 帖子详情响应缺少必要字段。');
+      }
+
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: this.mapTopicDetail(payload)
+      };
+    } catch (error) {
+      return this.unexpectedResponse<TopicDetail>(response.statusCode, response.challengeState, 'Linux.do 帖子详情响应不是有效 JSON。');
     }
   }
 
@@ -104,6 +164,13 @@ export class TopicService {
       return '/latest.json';
     }
     return `/latest.json?page=${page}`;
+  }
+
+  private getTopicDetailPath(topicId: number, slug?: string): string {
+    if (slug && slug.length > 0) {
+      return `/t/${encodeURIComponent(slug)}/${topicId}.json`;
+    }
+    return `/t/${topicId}.json`;
   }
 
   private mapTopics(sourceTopics: DiscourseTopic[], sourceUsers?: DiscourseUser[]): Topic[] {
@@ -158,7 +225,89 @@ export class TopicService {
     return typeof topicList.more_topics_url === 'string' && topicList.more_topics_url.length > 0;
   }
 
-  private forwardFailure(response: NetworkResult<string>): NetworkResult<TopicPage> {
+  private mapTopicDetail(sourceTopic: DiscourseTopicDetail): TopicDetail {
+    return {
+      id: sourceTopic.id as number,
+      title: sourceTopic.title as string,
+      slug: sourceTopic.slug,
+      postsCount: sourceTopic.posts_count,
+      replyCount: sourceTopic.reply_count,
+      likeCount: sourceTopic.like_count,
+      viewCount: sourceTopic.views,
+      createdAt: sourceTopic.created_at,
+      posts: this.mapPosts(sourceTopic.post_stream?.posts)
+    };
+  }
+
+  private mapPosts(sourcePosts?: DiscoursePost[]): TopicPost[] {
+    const posts: TopicPost[] = [];
+    if (!sourcePosts) {
+      return posts;
+    }
+
+    for (let index: number = 0; index < sourcePosts.length; index++) {
+      const sourcePost: DiscoursePost = sourcePosts[index];
+      if (typeof sourcePost.id !== 'number' || typeof sourcePost.post_number !== 'number') {
+        continue;
+      }
+
+      const cookedHtml: string = sourcePost.cooked ? sourcePost.cooked : '';
+      posts.push({
+        id: sourcePost.id,
+        topicId: sourcePost.topic_id,
+        postNumber: sourcePost.post_number,
+        cookedHtml: cookedHtml,
+        plainText: this.htmlToPlainText(cookedHtml),
+        createdAt: sourcePost.created_at,
+        updatedAt: sourcePost.updated_at,
+        replyCount: sourcePost.reply_count,
+        likeCount: sourcePost.like_count,
+        author: this.mapPostAuthor(sourcePost)
+      });
+    }
+
+    return posts;
+  }
+
+  private mapPostAuthor(sourcePost: DiscoursePost): User | undefined {
+    if (!sourcePost.username) {
+      return undefined;
+    }
+
+    return {
+      id: typeof sourcePost.user_id === 'number' ? sourcePost.user_id : 0,
+      username: sourcePost.username,
+      displayName: sourcePost.name,
+      avatarTemplate: sourcePost.avatar_template
+    };
+  }
+
+  private htmlToPlainText(html: string): string {
+    let text: string = html;
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    text = text.replace(/<\/p>/gi, '\n');
+    text = text.replace(/<\/div>/gi, '\n');
+    text = text.replace(/<\/li>/gi, '\n');
+    text = text.replace(/<li[^>]*>/gi, '- ');
+    text = text.replace(/<[^>]+>/g, '');
+    text = this.decodeHtmlEntities(text);
+    text = text.replace(/[ \t]+\n/g, '\n');
+    text = text.replace(/\n[ \t]+/g, '\n');
+    text = text.replace(/\n{3,}/g, '\n\n');
+    return text.trim();
+  }
+
+  private decodeHtmlEntities(text: string): string {
+    return text
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+
+  private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
     return {
       success: false,
       statusCode: response.statusCode,
@@ -167,7 +316,7 @@ export class TopicService {
     };
   }
 
-  private unexpectedResponse(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<TopicPage> {
+  private unexpectedResponse<T>(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<T> {
     return {
       success: false,
       statusCode: statusCode,

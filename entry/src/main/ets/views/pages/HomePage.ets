@@ -21,6 +21,7 @@ export struct HomePage {
   @State private requiresChallenge: boolean = false;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
+  onTopicClick: (topic: Topic) => void = () => {};
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
 
@@ -79,7 +80,12 @@ export struct HomePage {
           }
 
           ForEach(this.topics, (topic: Topic) => {
-            TopicListItem({ topic: topic })
+            TopicListItem({
+              topic: topic,
+              onTopicClick: (selectedTopic: Topic) => {
+                this.onTopicClick(selectedTopic);
+              }
+            })
           }, (topic: Topic) => topic.id.toString())
 
           if (this.topics.length > 0) {

@@ -37,7 +37,22 @@ ARKDO_CF_DIAG
 - `pollStart`：开始轮询 `cf_clearance` 可见性。
 - `pollPending`：轮询中，记录轮询次数和 Cookie header 长度。
 - `resolvedByCookie`：当前实现通过可见 `cf_clearance` 判断验证完成。
+- `apiProbeStart`：`cf_clearance` 不可见时，开始用共享 ArkWeb bridge 探测 `/latest.json` 是否已可访问。
+- `apiProbePending`：API 探测未通过，继续停留在可见验证页。
+- `resolvedByApiProbe`：`/latest.json` 已可通过共享 ArkWeb bridge 返回 JSON 200，即使 `cf_clearance` 不可见，也认为验证已完成。
 - `rootChallengeResolved`：Root 收到验证完成，关闭 sheet，并广播会话变化。
+
+## 2026-07-03 复现结论
+
+用户复现日志显示：
+
+- 验证 sheet 只打开了一次。
+- `pageBegin/pageEnd` 持续停留在 `linuxdo_challenge`。
+- `hasCfClearance=false` 持续到至少 `pollCount=35`。
+- `cookieHeaderLength=1468` 稳定不变。
+- Cloudflare challenge resource 间歇返回 `401`，Linux.do challenge 页面间歇返回 `403`。
+
+结论：只依赖 `cf_clearance` Cookie 可见性无法覆盖这个场景。已加入第二个完成条件：每 5 秒通过 Root 传入的共享 `ArkWebNetworkBridge` 请求 `/latest.json`。如果 API 返回 JSON 200，则触发 `resolvedByApiProbe`，关闭 challenge sheet，并通过 `SessionEventBus` 让当前页面重试请求。
 
 ## 下次复现时需要复制的日志
 
@@ -54,6 +69,7 @@ ARKDO_CF_DIAG
 3. 包含进入验证页后的全部 `pageBegin`、`pageEnd`、`httpError`、`pollPending`。
 4. 包含用户勾选验证之后 20 到 40 秒内的所有 `ARKDO_CF_DIAG` 日志。
 5. 如果出现 `resolvedByCookie` 或 `rootChallengeResolved`，也一起复制。
+6. 如果出现 `apiProbeStart`、`apiProbePending` 或 `resolvedByApiProbe`，也一起复制。
 
 重点看这些字段：
 
@@ -61,6 +77,7 @@ ARKDO_CF_DIAG
 - `cookieHeaderLength` 是否变化。
 - `pageBegin/pageEnd url` 是否从 `linuxdo_challenge` 变成 `linuxdo_home` 或 `linuxdo_other`。
 - 是否持续出现 `httpError url=cloudflare_challenge_resource status=401`。
+- `apiProbePending` 是否一直出现，还是最终出现 `resolvedByApiProbe`。
 - Root 是否只出现一次 `rootChallengeOpen`，还是多次出现。
 
 ## 当前待验证假设
@@ -83,6 +100,8 @@ CfChallengePage 可见验证中
 ```
 
 这样不只依赖 Cookie 可见性，而是用“真实 API 已可访问”判断 Cloudflare 是否通过。
+
+该方向已实现：`CfChallengePage` 现在同时支持 `resolvedByCookie` 和 `resolvedByApiProbe`。
 
 如果日志证明 Cloudflare challenge 资源持续 401 且 API 也不可访问，则暂不做自动绕过；继续保留可见验证页，让用户完成真实验证，并根据日志判断是否需要调整加载 URL，例如从 `https://linux.do/challenge` 改为 `https://linux.do/`。
 

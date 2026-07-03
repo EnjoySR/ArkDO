@@ -7,6 +7,7 @@ export struct TopicListItem {
     id: 0,
     title: ''
   };
+  onTopicClick: (topic: Topic) => void = () => {};
 
   build() {
     ListItem() {
@@ -49,6 +50,9 @@ export struct TopicListItem {
         color: '#E5E7EB'
       })
       .alignItems(VerticalAlign.Top)
+      .onClick(() => {
+        this.onTopicClick(this.topic);
+      })
     }
   }
 

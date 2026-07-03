@@ -1,4 +1,6 @@
 import { CommonModifier, SymbolGlyphModifier } from '@ohos.arkui.modifier';
+import { AppRouteName, buildTopicDetailRouteParam, isTopicDetailRouteParam, TopicDetailRouteParam } from '../../navigation/AppRoutes';
+import { Topic } from '../../models/Topic';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
@@ -7,6 +9,7 @@ import { CfChallengePage } from './CfChallengePage';
 import { HomePage } from './HomePage';
 import { LoginPage } from './LoginPage';
 import { ProfilePage } from './ProfilePage';
+import { TopicDetailPage } from './TopicDetailPage';
 
 const LOG_TAG: string = '[ArkDO][Root]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -36,6 +39,7 @@ export struct RootTabPage {
   @State private isChallengePageVisible: boolean = false;
   @State private isArkWebReady: boolean = false;
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
+  private navPathStack: NavPathStack = new NavPathStack();
   private handledChallengeVersion: number = ChallengeEventBus.getCurrentVersion();
   private unsubscribeChallengeRequired?: () => void = undefined;
 
@@ -62,7 +66,7 @@ export struct RootTabPage {
           this.handleArkWebReady();
         }
       })
-      this.RootTabs()
+      this.RootNavigation()
     }
     .width('100%')
     .height('100%')
@@ -88,6 +92,52 @@ export struct RootTabPage {
   }
 
   @Builder
+  private RootNavigation() {
+    Navigation(this.navPathStack) {
+      this.RootTabs()
+    }
+    .width('100%')
+    .height('100%')
+    .hideTitleBar(true)
+    .navDestination(this.NavDestinationBuilder)
+  }
+
+  @Builder
+  private NavDestinationBuilder(name: string, param: Object | undefined) {
+    if (name === AppRouteName.TOPIC_DETAIL && isTopicDetailRouteParam(param)) {
+      NavDestination() {
+        TopicDetailPage({
+          param: param as TopicDetailRouteParam,
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          onBack: () => {
+            this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else {
+      NavDestination() {
+        Column() {
+          Text('页面不存在')
+            .fontSize(18)
+            .fontColor('#111827')
+          Button('返回')
+            .margin({ top: 16 })
+            .onClick(() => {
+              this.popNavigation();
+            })
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor('#FFFFFF')
+      }
+      .hideTitleBar(true)
+    }
+  }
+
+  @Builder
   private LoginSheetBuilder() {
     LoginPage({
       onClose: () => {
@@ -102,6 +152,7 @@ export struct RootTabPage {
   @Builder
   private ChallengeSheetBuilder() {
     CfChallengePage({
+      bridge: this.bridge,
       onClose: () => {
         this.closeChallengePage();
       },
@@ -121,7 +172,10 @@ export struct RootTabPage {
       TabContent() {
         HomePage({
           bridge: this.bridge,
-          isArkWebReady: this.isArkWebReady
+          isArkWebReady: this.isArkWebReady,
+          onTopicClick: (topic: Topic) => {
+            this.openTopicDetail(topic);
+          }
         })
       }
       .tabBar(this.buildBottomTabBar(
@@ -198,6 +252,18 @@ export struct RootTabPage {
 
   private closeChallengePage(): void {
     this.isChallengePageVisible = false;
+  }
+
+  private openTopicDetail(topic: Topic): void {
+    console.info(`${LOG_TAG} open topic detail topicId=${topic.id} title=${topic.title}`);
+    this.navPathStack.pushPath(new NavPathInfo(
+      AppRouteName.TOPIC_DETAIL,
+      buildTopicDetailRouteParam(topic.id, topic.slug, topic.title)
+    ));
+  }
+
+  private popNavigation(): void {
+    this.navPathStack.pop();
   }
 
   private handleArkWebReady(): void {

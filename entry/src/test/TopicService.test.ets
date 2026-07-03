@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { TopicPage, TopicService } from '../main/ets/services/topic/TopicService';
 import { Topic } from '../main/ets/models/Topic';
+import { TopicDetail } from '../main/ets/models/TopicDetail';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../main/ets/services/network/NetworkTypes';
 
 class FakeBridge implements JsonNetworkClient {
@@ -144,6 +145,29 @@ export default function topicServiceTest() {
       expect(secondPage.data?.topics[0].title).assertEqual('第二页');
       expect(secondPage.data?.page).assertEqual(1);
       expect(secondPage.data?.hasMore).assertFalse();
+    });
+
+    it('loadsTopicDetailFromDiscoursePayload', 0, async () => {
+      const payload: string = '{"id":42,"title":"ArkDO 第二阶段","slug":"arkdo-phase-two","posts_count":2,"reply_count":1,"like_count":3,"views":128,"created_at":"2026-07-03T00:00:00.000Z","post_stream":{"posts":[{"id":100,"topic_id":42,"post_number":1,"username":"alice","name":"Alice","avatar_template":"/user_avatar/linux.do/alice/{size}/1_2.png","created_at":"2026-07-03T00:01:00.000Z","cooked":"<p>Hello <strong>ArkDO</strong>&amp; Linux.do</p>","like_count":2},{"id":101,"topic_id":42,"post_number":2,"username":"bob","name":"Bob","avatar_template":"/user_avatar/linux.do/bob/{size}/1_2.png","created_at":"2026-07-03T00:02:00.000Z","cooked":"<p>第二条回复<br>继续讨论</p>","reply_count":1}]}}';
+      const bridge: FakeBridge = new FakeBridge({
+        success: true,
+        statusCode: 200,
+        challengeState: ChallengeState.NONE,
+        data: payload
+      });
+      const service: TopicService = new TopicService(bridge);
+
+      const result: NetworkResult<TopicDetail> = await service.getTopicDetail(42, 'arkdo-phase-two');
+
+      expect(bridge.requestedPath).assertEqual('/t/arkdo-phase-two/42.json');
+      expect(result.success).assertTrue();
+      expect(result.data?.id).assertEqual(42);
+      expect(result.data?.title).assertEqual('ArkDO 第二阶段');
+      expect(result.data?.viewCount).assertEqual(128);
+      expect(result.data?.posts.length).assertEqual(2);
+      expect(result.data?.posts[0].author?.username).assertEqual('alice');
+      expect(result.data?.posts[0].plainText).assertEqual('Hello ArkDO& Linux.do');
+      expect(result.data?.posts[1].plainText).assertEqual('第二条回复\n继续讨论');
     });
   });
 }
