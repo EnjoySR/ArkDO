@@ -3,6 +3,8 @@ import architectureSkeletonTest from './ArchitectureSkeleton.test';
 import challengeDetectorTest from './ChallengeDetector.test';
 import arkWebNetworkBridgeTest from './ArkWebNetworkBridge.test';
 import topicServiceTest from './TopicService.test';
+import authServiceTest from './AuthService.test';
+import challengeEventBusTest from './ChallengeEventBus.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -10,4 +12,6 @@ export default function testsuite() {
   challengeDetectorTest();
   arkWebNetworkBridgeTest();
   topicServiceTest();
+  authServiceTest();
+  challengeEventBusTest();
 }

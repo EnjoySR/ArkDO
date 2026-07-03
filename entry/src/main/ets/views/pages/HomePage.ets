@@ -1,10 +1,12 @@
 import { AppConstants } from '../../common/constants/AppConstants';
 import { Topic } from '../../models/Topic';
-import { ArkWebHost } from '../components/ArkWebHost';
 import { TopicListItem } from '../components/TopicListItem';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
+import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
+
+const LOG_TAG: string = '[ArkDO][Home]';
 
 @Component
 export struct HomePage {
@@ -17,18 +19,32 @@ export struct HomePage {
   @State private listMessage: string = '正在准备 ArkWeb 请求环境';
   @State private footerMessage: string = '上拉加载更多';
   @State private requiresChallenge: boolean = false;
-  private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
-  private topicService: TopicService = new TopicService(this.bridge);
+  bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
+  @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
+  private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
+  private unsubscribeSessionChanged?: () => void = undefined;
+
+  aboutToAppear(): void {
+    if (!this.unsubscribeSessionChanged) {
+      this.unsubscribeSessionChanged = SessionEventBus.subscribe((version: number) => {
+        this.handleSessionChanged(version);
+      });
+    }
+    this.syncSessionVersion();
+    if (this.isArkWebReady && this.topics.length === 0) {
+      this.refreshLatestTopics();
+    }
+  }
+
+  aboutToDisappear(): void {
+    if (this.unsubscribeSessionChanged) {
+      this.unsubscribeSessionChanged();
+      this.unsubscribeSessionChanged = undefined;
+    }
+  }
 
   build() {
     Column() {
-      ArkWebHost({
-        bridge: this.bridge,
-        onReady: () => {
-          this.refreshLatestTopics();
-        }
-      })
-
       Row() {
         Text(AppConstants.APP_NAME)
           .fontSize(28)
@@ -109,6 +125,11 @@ export struct HomePage {
   }
 
   private async refreshLatestTopics(): Promise<void> {
+    if (!this.isArkWebReady) {
+      this.listMessage = '正在准备 ArkWeb 请求环境';
+      return;
+    }
+
     if (this.isRefreshing || this.isLoadingMore) {
       return;
     }
@@ -119,7 +140,7 @@ export struct HomePage {
     this.listMessage = '正在加载最新帖子';
     this.footerMessage = '上拉加载更多';
 
-    const result: NetworkResult<TopicPage> = await this.topicService.getLatestTopicsPage(0);
+    const result: NetworkResult<TopicPage> = await new TopicService(this.bridge).getLatestTopicsPage(0);
     this.isRefreshing = false;
     this.isInitialLoading = false;
 
@@ -141,6 +162,11 @@ export struct HomePage {
   }
 
   private async loadMoreTopics(): Promise<void> {
+    if (!this.isArkWebReady) {
+      this.footerMessage = '正在准备 ArkWeb 请求环境';
+      return;
+    }
+
     if (this.isRefreshing || this.isLoadingMore || !this.hasMore || this.topics.length === 0) {
       return;
     }
@@ -150,7 +176,7 @@ export struct HomePage {
     this.footerMessage = '正在加载更多';
 
     const nextPage: number = this.currentPage + 1;
-    const result: NetworkResult<TopicPage> = await this.topicService.getLatestTopicsPage(nextPage);
+    const result: NetworkResult<TopicPage> = await new TopicService(this.bridge).getLatestTopicsPage(nextPage);
     this.isLoadingMore = false;
 
     if (result.success && result.data) {
@@ -163,6 +189,27 @@ export struct HomePage {
 
     this.requiresChallenge = result.error?.requiresChallenge === true;
     this.footerMessage = result.error?.message ? `${result.error.message}，上拉重试` : '加载失败，上拉重试';
+  }
+
+  private handleSessionChanged(version: number): void {
+    if (version <= this.handledSessionVersion) {
+      return;
+    }
+
+    this.handledSessionVersion = version;
+    console.info(`${LOG_TAG} session changed version=${version}, refresh latest topics`);
+    this.footerMessage = '会话已更新，正在刷新';
+    this.refreshLatestTopics();
+  }
+
+  private handleArkWebReadyChanged(): void {
+    if (this.isArkWebReady && this.topics.length === 0) {
+      this.refreshLatestTopics();
+    }
+  }
+
+  private syncSessionVersion(): void {
+    this.handleSessionChanged(SessionEventBus.getCurrentVersion());
   }
 
   private mergeTopics(existingTopics: Topic[], nextTopics: Topic[]): Topic[] {

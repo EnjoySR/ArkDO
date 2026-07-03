@@ -1,11 +1,11 @@
-import { HomePage } from '../views/pages/HomePage';
+import { RootTabPage } from '../views/pages/RootTabPage';
 
 @Entry
 @Component
 struct Index {
   build() {
     Column() {
-      HomePage()
+      RootTabPage()
     }
     .width('100%')
     .height('100%')

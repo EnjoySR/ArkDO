@@ -1,5 +1,6 @@
 import webview from '@ohos.web.webview';
 import { AppConstants } from '../../common/constants/AppConstants';
+import { ChallengeEventBus } from '../challenge/ChallengeEventBus';
 import { detectChallenge } from './ChallengeDetector';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from './NetworkTypes';
 
@@ -254,6 +255,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     if (challengeState !== ChallengeState.NONE) {
       logNetwork(`GET ${path} requires challenge state=${challengeState}`);
+      ChallengeEventBus.notifyChallengeRequired(path, statusCode, challengeState);
       return {
         success: false,
         statusCode: statusCode,

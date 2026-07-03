@@ -1,6 +1,8 @@
 export class AppConstants {
   static readonly APP_NAME: string = 'ArkDO';
   static readonly BASE_URL: string = 'https://linux.do';
+  static readonly LOGIN_PATH: string = '/login';
+  static readonly LOGIN_URL: string = 'https://linux.do/login';
   static readonly CHALLENGE_PATH: string = '/challenge';
   static readonly CHALLENGE_URL: string = 'https://linux.do/challenge';
   static readonly DEFAULT_TIMEOUT_MS: number = 15000;

@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { ArkWebJsonExecutor, ArkWebNetworkBridge } from '../main/ets/services/network/ArkWebNetworkBridge';
 import { ChallengeState, NetworkErrorCode, NetworkResult } from '../main/ets/services/network/NetworkTypes';
+import { ChallengeEventBus, ChallengeRequiredEvent } from '../main/ets/services/challenge/ChallengeEventBus';
 
 class FakeJsonExecutor implements ArkWebJsonExecutor {
   private result: string;
@@ -55,6 +56,27 @@ export default function arkWebNetworkBridgeTest() {
       expect(result.challengeState).assertEqual(ChallengeState.REQUIRED);
       expect(result.error?.code).assertEqual(NetworkErrorCode.CHALLENGE_REQUIRED);
       expect(result.error?.requiresChallenge).assertTrue();
+    });
+
+    it('publishesChallengeEventForCloudflareHtml', 0, async () => {
+      const executor: FakeJsonExecutor = new FakeJsonExecutor('{"statusCode":403,"contentType":"text/html","body":"<html><title>Just a moment...</title><body>cf-chl</body></html>"}');
+      const bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
+      let receivedSource: string = '';
+      let receivedStatusCode: number = 0;
+      let receivedChallengeState: ChallengeState = ChallengeState.NONE;
+      const unsubscribe: () => void = ChallengeEventBus.subscribe((event: ChallengeRequiredEvent) => {
+        receivedSource = event.source;
+        receivedStatusCode = event.statusCode;
+        receivedChallengeState = event.challengeState;
+      });
+      bridge.setExecutor(executor);
+
+      await bridge.getJson('/latest.json');
+      unsubscribe();
+
+      expect(receivedSource).assertEqual('/latest.json');
+      expect(receivedStatusCode).assertEqual(403);
+      expect(receivedChallengeState).assertEqual(ChallengeState.REQUIRED);
     });
   });
 }
