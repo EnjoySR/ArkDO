@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { AppRouteName, buildTopicDetailRouteParam, isTopicDetailRouteParam, TopicDetailRouteParam } from '../main/ets/navigation/AppRoutes';
+import { AppRouteName, buildProfileRouteParam, buildTopicDetailRouteParam, isTopicDetailRouteParam, ProfileRouteParam, TopicDetailRouteParam } from '../main/ets/navigation/AppRoutes';
 
 interface InvalidTopicIdRouteParam {
   topicId: string;
@@ -20,6 +20,13 @@ export default function appRoutesTest() {
       expect(param.slug).assertEqual('arkdo-phase-two');
       expect(param.title).assertEqual('ArkDO 第二阶段');
       expect(AppRouteName.TOPIC_DETAIL).assertEqual('topicDetail');
+      expect(AppRouteName.PROFILE).assertEqual('profile');
+    });
+
+    it('buildsProfileRouteParam', 0, () => {
+      const param: ProfileRouteParam = buildProfileRouteParam('homeAvatar');
+
+      expect(param.source).assertEqual('homeAvatar');
     });
 
     it('rejectsInvalidTopicDetailRouteParam', 0, () => {

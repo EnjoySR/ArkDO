@@ -1,5 +1,6 @@
 export enum AppRouteName {
-  TOPIC_DETAIL = 'topicDetail'
+  TOPIC_DETAIL = 'topicDetail',
+  PROFILE = 'profile'
 }
 
 export interface TopicDetailRouteParam {
@@ -8,11 +9,21 @@ export interface TopicDetailRouteParam {
   title: string;
 }
 
+export interface ProfileRouteParam {
+  source: string;
+}
+
 export function buildTopicDetailRouteParam(topicId: number, slug: string | undefined, title: string): TopicDetailRouteParam {
   return {
     topicId: topicId,
     slug: slug,
     title: title
+  };
+}
+
+export function buildProfileRouteParam(source: string): ProfileRouteParam {
+  return {
+    source: source
   };
 }
 

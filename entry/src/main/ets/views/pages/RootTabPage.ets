@@ -1,8 +1,10 @@
-import { CommonModifier, SymbolGlyphModifier } from '@ohos.arkui.modifier';
-import { AppRouteName, buildTopicDetailRouteParam, isTopicDetailRouteParam, TopicDetailRouteParam } from '../../navigation/AppRoutes';
+import { AppRouteName, buildProfileRouteParam, buildTopicDetailRouteParam, isTopicDetailRouteParam, TopicDetailRouteParam } from '../../navigation/AppRoutes';
 import { Topic } from '../../models/Topic';
+import { User } from '../../models/User';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
+import { AuthService } from '../../services/auth/AuthService';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
+import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { ArkWebHost } from '../components/ArkWebHost';
 import { ensureFaIconsLoaded } from '../components/FaIcon';
@@ -16,34 +18,21 @@ import { TopicDetailPage } from './TopicDetailPage';
 const LOG_TAG: string = '[ArkDO][Root]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
 
-class FloatingTabBarModifier extends CommonModifier {
-  applyNormalAttribute(instance: CommonAttribute): void {
-    instance
-      .margin({ bottom: 18 })
-      .borderRadius(34)
-      .shadow({
-        radius: 24,
-        color: '#24000000',
-        offsetY: 8
-      })
-  }
-}
-
-enum RootTab {
-  HOME = 0,
-  PROFILE = 1
-}
-
 @Component
 export struct RootTabPage {
-  @State private selectedTab: number = RootTab.HOME;
   @State private isLoginPageVisible: boolean = false;
   @State private isChallengePageVisible: boolean = false;
   @State private isArkWebReady: boolean = false;
+  @State private currentUser?: User = undefined;
+  @State private isCheckingSession: boolean = false;
+  @State private hasCheckedSession: boolean = false;
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   private navPathStack: NavPathStack = new NavPathStack();
+  private sessionCheckSequence: number = 0;
+  private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private handledChallengeVersion: number = ChallengeEventBus.getCurrentVersion();
   private unsubscribeChallengeRequired?: () => void = undefined;
+  private unsubscribeSessionChanged?: () => void = undefined;
 
   aboutToAppear(): void {
     this.ensureIconSymbolsLoaded();
@@ -52,12 +41,21 @@ export struct RootTabPage {
         this.handleChallengeRequired(event);
       });
     }
+    if (!this.unsubscribeSessionChanged) {
+      this.unsubscribeSessionChanged = SessionEventBus.subscribe((version: number) => {
+        this.handleSessionChanged(version);
+      });
+    }
   }
 
   aboutToDisappear(): void {
     if (this.unsubscribeChallengeRequired) {
       this.unsubscribeChallengeRequired();
       this.unsubscribeChallengeRequired = undefined;
+    }
+    if (this.unsubscribeSessionChanged) {
+      this.unsubscribeSessionChanged();
+      this.unsubscribeSessionChanged = undefined;
     }
   }
 
@@ -98,7 +96,7 @@ export struct RootTabPage {
   @Builder
   private RootNavigation() {
     Navigation(this.navPathStack) {
-      this.RootTabs()
+      this.HomeRoot()
     }
     .width('100%')
     .height('100%')
@@ -116,6 +114,17 @@ export struct RootTabPage {
           isArkWebReady: this.isArkWebReady,
           onBack: () => {
             this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else if (name === AppRouteName.PROFILE) {
+      NavDestination() {
+        ProfilePage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          onLoginClick: () => {
+            this.openLoginPage();
           }
         })
       }
@@ -167,86 +176,24 @@ export struct RootTabPage {
   }
 
   @Builder
-  private RootTabs() {
-    Tabs({
-      barPosition: BarPosition.End,
-      index: this.selectedTab,
-      barModifier: new FloatingTabBarModifier()
-    }) {
-      TabContent() {
-        HomePage({
-          bridge: this.bridge,
-          isArkWebReady: this.isArkWebReady,
-          onTopicClick: (topic: Topic) => {
-            this.openTopicDetail(topic);
-          }
-        })
+  private HomeRoot() {
+    HomePage({
+      bridge: this.bridge,
+      isArkWebReady: this.isArkWebReady,
+      accountUser: this.currentUser ?? this.getAnonymousUser(),
+      isLoggedIn: this.currentUser !== undefined,
+      isCheckingSession: this.isCheckingSession,
+      hasCheckedSession: this.hasCheckedSession,
+      onAccountClick: () => {
+        this.handleAccountClick();
+      },
+      onTopicClick: (topic: Topic) => {
+        this.openTopicDetail(topic);
       }
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.buildBottomTabBar(
-        $r('sys.symbol.house'),
-        $r('sys.symbol.house_fill'),
-        '首页'
-      ))
-
-      TabContent() {
-        ProfilePage({
-          bridge: this.bridge,
-          isArkWebReady: this.isArkWebReady,
-          onLoginClick: () => {
-            this.openLoginPage();
-          }
-        })
-      }
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .tabBar(this.buildBottomTabBar(
-        $r('sys.symbol.person'),
-        $r('sys.symbol.person_fill'),
-        '我的'
-      ))
-    }
+    })
     .width('100%')
     .height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-    .barHeight(68, true)
-    .barWidth('76%')
-    .barMode(BarMode.Fixed)
-    .barOverlap(true)
-    .barBackgroundColor('#E6FFFFFF')
-    .barBackgroundBlurStyle(BlurStyle.Regular)
-    .animation({ duration: 180, curve: Curve.EaseOut })
-    .onChange((index: number) => {
-      this.selectTab(index);
-    })
-  }
-
-  private selectTab(tab: number): void {
-    this.selectedTab = tab;
-  }
-
-  private buildTabSymbol(icon: Resource, color: ResourceColor): SymbolGlyphModifier {
-    const modifier: SymbolGlyphModifier = new SymbolGlyphModifier(icon);
-    modifier.fontSize(24);
-    modifier.fontColor([color]);
-    modifier.renderingStrategy(SymbolRenderingStrategy.SINGLE);
-    return modifier;
-  }
-
-  private buildBottomTabBar(normalIcon: Resource, selectedIcon: Resource, label: string): BottomTabBarStyle {
-    return BottomTabBarStyle
-      .of({
-        normal: this.buildTabSymbol(normalIcon, '#99182431'),
-        selected: this.buildTabSymbol(selectedIcon, '#FF2563EB')
-      }, label)
-      .labelStyle({
-        selectedColor: '#2563EB',
-        unselectedColor: '#4B5563',
-        font: {
-          size: 11,
-          weight: FontWeight.Medium
-        }
-      })
-      .padding({ top: 6, bottom: 5, left: 8, right: 8 });
   }
 
   private openLoginPage(): void {
@@ -275,6 +222,7 @@ export struct RootTabPage {
 
   private handleArkWebReady(): void {
     this.isArkWebReady = true;
+    this.checkCurrentUser();
   }
 
   private ensureIconSymbolsLoaded(): void {
@@ -291,7 +239,62 @@ export struct RootTabPage {
 
   private handleLoginSuccess(): void {
     SessionEventBus.notifySessionChanged();
+    this.checkCurrentUser();
     this.closeLoginPage();
+  }
+
+  private handleAccountClick(): void {
+    if (this.currentUser) {
+      this.openProfilePage();
+      return;
+    }
+    this.openLoginPage();
+  }
+
+  private openProfilePage(): void {
+    this.navPathStack.pushPath(new NavPathInfo(AppRouteName.PROFILE, buildProfileRouteParam('homeAvatar')));
+  }
+
+  private getAnonymousUser(): User {
+    return {
+      id: 0,
+      username: ''
+    };
+  }
+
+  private async checkCurrentUser(): Promise<void> {
+    if (!this.isArkWebReady || this.isCheckingSession) {
+      return;
+    }
+
+    const requestId: number = this.sessionCheckSequence + 1;
+    this.sessionCheckSequence = requestId;
+    this.isCheckingSession = true;
+    this.hasCheckedSession = false;
+    const result: NetworkResult<User | undefined> = await new AuthService(this.bridge).getCurrentUser();
+    if (requestId !== this.sessionCheckSequence) {
+      return;
+    }
+
+    this.isCheckingSession = false;
+    this.hasCheckedSession = true;
+    if (result.success) {
+      this.currentUser = result.data;
+      console.info(`${LOG_TAG} current user checked loggedIn=${this.currentUser !== undefined} username=${this.currentUser?.username ?? ''} hasAvatar=${this.currentUser?.avatarTemplate !== undefined}`);
+      return;
+    }
+
+    this.currentUser = undefined;
+    console.info(`${LOG_TAG} current user check failed status=${result.statusCode} challenge=${result.challengeState}`);
+  }
+
+  private handleSessionChanged(version: number): void {
+    if (version <= this.handledSessionVersion) {
+      return;
+    }
+
+    this.handledSessionVersion = version;
+    this.checkCurrentUser();
   }
 
   private handleChallengeRequired(event: ChallengeRequiredEvent): void {
@@ -315,5 +318,6 @@ export struct RootTabPage {
     console.info(`${DIAG_TAG} stage=rootChallengeResolved challengeVisible=${this.isChallengePageVisible}`);
     this.closeChallengePage();
     SessionEventBus.notifySessionChanged();
+    this.checkCurrentUser();
   }
 }

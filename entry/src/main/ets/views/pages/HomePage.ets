@@ -1,6 +1,8 @@
 import { AppConstants } from '../../common/constants/AppConstants';
+import { User } from '../../models/User';
 import { Topic, TopicCategory } from '../../models/Topic';
 import { TopicListItem } from '../components/TopicListItem';
+import { UserAvatar } from '../components/UserAvatar';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
@@ -24,6 +26,11 @@ export struct HomePage {
   private isSiteMetadataLoading: boolean = false;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
+  @Prop accountUser: User = { id: 0, username: '' };
+  @Prop isLoggedIn: boolean = false;
+  @Prop isCheckingSession: boolean = false;
+  @Prop hasCheckedSession: boolean = false;
+  onAccountClick: () => void = () => {};
   onTopicClick: (topic: Topic) => void = () => {};
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
@@ -55,8 +62,13 @@ export struct HomePage {
           .fontSize(28)
           .fontWeight(FontWeight.Bold)
           .fontColor('#111827')
+
+        Blank()
+
+        this.AccountEntry()
       }
       .width('100%')
+      .height(56)
       .padding({ left: 20, right: 20, top: 20, bottom: 12 })
 
       Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
@@ -137,6 +149,48 @@ export struct HomePage {
     .backgroundColor('#FFFFFF')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  private AccountEntry() {
+    if (!this.hasCheckedSession && !this.isCheckingSession) {
+      Blank()
+        .width(42)
+        .height(42)
+    } else {
+      Button() {
+        Stack() {
+          if (this.isCheckingSession) {
+            LoadingProgress()
+              .width(22)
+              .height(22)
+              .color('#2563EB')
+          } else if (this.isLoggedIn) {
+            UserAvatar({
+              user: this.accountUser,
+              avatarSize: 34
+            })
+          } else {
+            SymbolGlyph($r('sys.symbol.person'))
+              .fontSize(28)
+              .fontColor(['#2563EB'])
+              .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+          }
+        }
+        .width(38)
+        .height(38)
+        .alignContent(Alignment.Center)
+      }
+      .width(42)
+      .height(42)
+      .borderRadius(21)
+      .backgroundColor('#F3F4F6')
+      .padding(0)
+      .enabled(!this.isCheckingSession)
+      .onClick(() => {
+        this.onAccountClick();
+      })
+    }
   }
 
   private async refreshLatestTopics(): Promise<void> {
