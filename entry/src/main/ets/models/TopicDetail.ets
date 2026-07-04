@@ -12,6 +12,8 @@ export interface TopicPost {
   replyCount?: number;
   likeCount?: number;
   author?: User;
+  read?: boolean;
+  userTitle?: string;
 }
 
 export interface TopicDetail {
@@ -26,4 +28,7 @@ export interface TopicDetail {
   viewCount?: number;
   createdAt?: string;
   posts: TopicPost[];
+  lastReadPostNumber?: number;
+  highestPostNumber?: number;
+  unreadPosts?: number;
 }

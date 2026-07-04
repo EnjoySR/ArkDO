@@ -3,4 +3,5 @@ export interface User {
   username: string;
   displayName?: string;
   avatarTemplate?: string;
+  animatedAvatar?: string;
 }

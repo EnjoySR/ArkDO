@@ -9,15 +9,15 @@ export default function cookedHtmlParserTest() {
       expect(blocks.length).assertEqual(1);
       expect(blocks[0].type).assertEqual(RichBlockType.PARAGRAPH);
       const inlines: RichInlineNode[] = blocks[0].inlines ? blocks[0].inlines as RichInlineNode[] : [];
-      expect(inlines.length).assertEqual(5);
+      expect(inlines.length).assertEqual(6);
       expect(inlines[0].text).assertEqual('Hello ');
       expect(inlines[1].text).assertEqual('ArkDO');
       expect(inlines[1].bold).assertTrue();
       expect(inlines[3].type).assertEqual(RichInlineType.LINK);
       expect(inlines[3].text).assertEqual('Linux.do');
       expect(inlines[3].href).assertEqual('https://linux.do/t/123');
-      expect(inlines[4].type).assertEqual(RichInlineType.CODE);
-      expect(inlines[4].text).assertEqual('x()');
+      expect(inlines[5].type).assertEqual(RichInlineType.CODE);
+      expect(inlines[5].text).assertEqual('x()');
     });
 
     it('parsesQuoteCodeImageListAndDividerBlocks', 0, () => {
@@ -41,6 +41,93 @@ export default function cookedHtmlParserTest() {
       expect(blocks[3].ordered).assertFalse();
       expect(blocks[3].items?.length).assertEqual(2);
       expect(blocks[4].type).assertEqual(RichBlockType.DIVIDER);
+    });
+
+    it('parsesDiscourseUploadPreviewLinksAsImageBlocks', 0, () => {
+      const html: string = '<p><a href="/uploads/default/original/1X/full.png">' +
+        '<img src="/uploads/default/optimized/1X/thumb.png" width="1684" height="236"></a>' +
+        '<a class="attachment" href="/uploads/default/original/1X/full.png">image1684×236 22.4 KB</a></p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.IMAGE);
+      expect(blocks[0].src).assertEqual('https://linux.do/uploads/default/optimized/1X/thumb.png');
+      expect(blocks[0].href).assertEqual('https://linux.do/uploads/default/original/1X/full.png');
+      expect(blocks[0].width).assertEqual(1684);
+      expect(blocks[0].height).assertEqual(236);
+    });
+
+    it('parsesDiscourseLightboxImagesAsImageBlocks', 0, () => {
+      const html: string = '<div class="lightbox-wrapper"><a class="lightbox" href="/uploads/default/original/2X/full.jpeg" data-download-href="/uploads/default/xxx" title="加州街景">' +
+        '<img src="/uploads/default/optimized/2X/opt.jpeg" alt="加州街景" width="1080" height="1920">' +
+        '<div class="meta"><svg class="fa d-icon d-icon-far-image svg-icon"><use href="#far-image"></use></svg>' +
+        '<span class="filename">加州街景</span><span class="informations">1080×1920 426 KB</span>' +
+        '<svg class="fa d-icon d-icon-discourse-expand svg-icon"><use href="#discourse-expand"></use></svg></div></a></div>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.IMAGE);
+      expect(blocks[0].src).assertEqual('https://linux.do/uploads/default/optimized/2X/opt.jpeg');
+      expect(blocks[0].href).assertEqual('https://linux.do/uploads/default/original/2X/full.jpeg');
+      expect(blocks[0].width).assertEqual(1080);
+      expect(blocks[0].height).assertEqual(1920);
+    });
+
+    it('splitsLightboxImageAndTextInSameParagraph', 0, () => {
+      const html: string = '<p><div class="lightbox-wrapper"><a class="lightbox" href="https://cdn.ldstatic.com/original/x.png" title="image" rel="noopener nofollow ugc">' +
+        '<img src="https://cdn.ldstatic.com/optimized/x_690x432.png" alt="image" width="690" height="432" data-dominant-color="DCE0E0">' +
+        '<div class="meta"><svg class="fa d-icon"><use href="#far-image"></use></svg>' +
+        '<span class="filename">image</span><span class="informations">701×439 45.5 KB</span></div></a></div><br>\n' +
+        '真是欲哭无泪啊 月底清零 真的6</p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(2);
+      expect(blocks[0].type).assertEqual(RichBlockType.IMAGE);
+      expect(blocks[0].src).assertEqual('https://cdn.ldstatic.com/optimized/x_690x432.png');
+      expect(blocks[0].href).assertEqual('https://cdn.ldstatic.com/original/x.png');
+      expect(blocks[0].width).assertEqual(690);
+      expect(blocks[0].height).assertEqual(432);
+      expect(blocks[1].type).assertEqual(RichBlockType.PARAGRAPH);
+      const textInlines: RichInlineNode[] = blocks[1].inlines ? blocks[1].inlines as RichInlineNode[] : [];
+      expect(textInlines[0].text).assertEqual('真是欲哭无泪啊 月底清零 真的6');
+    });
+
+    it('parsesDetailsBlocksAsDisclosureBlocks', 0, () => {
+      const html: string = '<details><summary>总结</summary><p>我的用户名是： Ryan119911</p></details>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.DISCLOSURE);
+      expect(blocks[0].title).assertEqual('总结');
+      expect(blocks[0].blocks?.length).assertEqual(1);
+      expect(blocks[0].blocks?.[0].type).assertEqual(RichBlockType.PARAGRAPH);
+    });
+
+    it('rendersDiscourseAsideQuoteWithoutBlankLinesOrNestedQuote', 0, () => {
+      const html: string = '<aside class="quote group-g-merchant2" data-username="claudemaster" data-display-name="opuscheap">\n' +
+        '<div class="title">\n<div class="quote-controls"></div>\n' +
+        '<img alt="" width="24" height="24" src="https://cdn.ldstatic.com/avatar.png" class="avatar"> opuscheap:</div>\n' +
+        '<blockquote>\n<p>claudemaster</p>\n</blockquote>\n</aside>\n' +
+        '<p>用户名： zuiying<br>\n谢谢佬</p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(2);
+      expect(blocks[0].type).assertEqual(RichBlockType.QUOTE);
+      const quoteBlocks: RichBlock[] = blocks[0].blocks ? blocks[0].blocks as RichBlock[] : [];
+      // 恰好两段：来源标题 + 引用正文；无空白段落，正文未被再包一层 QUOTE。
+      expect(quoteBlocks.length).assertEqual(2);
+      expect(quoteBlocks[0].type).assertEqual(RichBlockType.PARAGRAPH);
+      const titleInlines: RichInlineNode[] = quoteBlocks[0].inlines ? quoteBlocks[0].inlines as RichInlineNode[] : [];
+      expect(titleInlines[0].type).assertEqual(RichInlineType.IMAGE);
+      expect(quoteBlocks[1].type).assertEqual(RichBlockType.PARAGRAPH);
+      const bodyInlines: RichInlineNode[] = quoteBlocks[1].inlines ? quoteBlocks[1].inlines as RichInlineNode[] : [];
+      expect(bodyInlines[0].text).assertEqual('claudemaster');
+      expect(blocks[1].type).assertEqual(RichBlockType.PARAGRAPH);
     });
 
     it('marksUnsupportedDiscourseBlocksAsTodo', 0, () => {

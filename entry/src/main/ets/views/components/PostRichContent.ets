@@ -13,6 +13,7 @@ const LOG_TAG: string = '[ArkDO][PostRichContent]';
 export struct PostRichContent {
   cookedHtml: string = '';
   fallbackText: string = '';
+  @State private expandedDisclosures: string[] = [];
 
   build() {
     Column() {
@@ -38,6 +39,8 @@ export struct PostRichContent {
       this.ImageBlock(block, index > 0 ? 12 : 0)
     } else if (block.type === RichBlockType.LIST) {
       this.ListBlock(block, index > 0 ? 10 : 0)
+    } else if (block.type === RichBlockType.DISCLOSURE) {
+      this.DisclosureBlock(block, index, index > 0 ? 12 : 0)
     } else if (block.type === RichBlockType.DIVIDER) {
       Divider()
         .strokeWidth(1)
@@ -117,28 +120,25 @@ export struct PostRichContent {
 
   @Builder
   private QuoteBlock(block: RichBlock, marginTop: number) {
-    Row() {
-      Divider()
-        .vertical(true)
-        .strokeWidth(3)
-        .color('#CBD5E1')
-        .height('100%')
-        .margin({ right: 10 })
-
+    Column() {
       Column() {
         ForEach(this.safeBlocks(block), (inner: RichBlock, index: number) => {
           this.BlockView(inner, index)
         }, (inner: RichBlock, index: number) => `${index}-${inner.type}`)
       }
-      .layoutWeight(1)
+      .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
     .padding({ left: 10, right: 10, top: 10, bottom: 10 })
     .backgroundColor('#F8FAFC')
-    .borderRadius(8)
+    .border({
+      width: { left: 3 },
+      color: '#CBD5E1'
+    })
+    // .borderRadius(8)
     .margin({ top: marginTop })
-    .alignItems(VerticalAlign.Top)
+    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder
@@ -176,19 +176,26 @@ export struct PostRichContent {
   @Builder
   private ImageBlock(block: RichBlock, marginTop: number) {
     Column() {
-      Image(block.src ? block.src : '')
-        .width('100%')
-        .height(this.getImageDisplayHeight(block))
-        .objectFit(ImageFit.Contain)
-        .backgroundColor('#F3F4F6')
-        .borderRadius(8)
-        .onClick(() => {
-          if (block.href && block.href.length > 0) {
-            this.openLink(block.href);
-          } else if (block.src && block.src.length > 0) {
-            this.openLink(block.src);
-          }
-        })
+      if (this.hasImageSize(block)) {
+        Image(block.src ? block.src : '')
+          .width('100%')
+          .aspectRatio(this.getImageAspectRatio(block))
+          .constraintSize({ maxHeight: 520 })
+          .objectFit(ImageFit.Contain)
+          .backgroundColor('#F3F4F6')
+          .onClick(() => {
+            this.openImageLink(block);
+          })
+      } else {
+        Image(block.src ? block.src : '')
+          .width('100%')
+          .height(260)
+          .objectFit(ImageFit.Contain)
+          .backgroundColor('#F3F4F6')
+          .onClick(() => {
+            this.openImageLink(block);
+          })
+      }
 
       if (block.alt && block.alt.length > 0) {
         Text(block.alt)
@@ -261,6 +268,47 @@ export struct PostRichContent {
     .alignItems(HorizontalAlign.Start)
   }
 
+  @Builder
+  private DisclosureBlock(block: RichBlock, index: number, marginTop: number) {
+    Column() {
+      Row() {
+        Text('▼')
+          .fontSize(18)
+          .fontColor('#111827')
+          .width(28)
+          .textAlign(TextAlign.Center)
+          .rotate({ angle: this.isDisclosureExpanded(index) ? 0 : -90 })
+
+        Text(this.getDisclosureTitle(block))
+          .fontSize(16)
+          .fontWeight(FontWeight.Regular)
+          .fontColor('#111827')
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .height(40)
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => {
+        this.toggleDisclosure(index);
+      })
+
+      if (this.isDisclosureExpanded(index)) {
+        Column() {
+          ForEach(this.safeBlocks(block), (inner: RichBlock, childIndex: number) => {
+            this.BlockView(inner, childIndex)
+          }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+        }
+        .width('100%')
+        .padding({ left: 28, right: 0, bottom: 12 })
+        .alignItems(HorizontalAlign.Start)
+      }
+    }
+    .width('100%')
+    .backgroundColor('#F5F5F5')
+    .margin({ top: marginTop })
+    .alignItems(HorizontalAlign.Start)
+  }
+
   private getRenderableBlocks(): RichBlock[] {
     const parsed: RichBlock[] = CookedHtmlParser.parse(this.cookedHtml);
     if (parsed.length > 0) {
@@ -305,6 +353,35 @@ export struct PostRichContent {
     return '暂未支持内容';
   }
 
+  private getDisclosureTitle(block: RichBlock): string {
+    if (block.title && block.title.length > 0) {
+      return block.title;
+    }
+    return '详情';
+  }
+
+  private isDisclosureExpanded(index: number): boolean {
+    return this.expandedDisclosures.indexOf(index.toString()) >= 0;
+  }
+
+  private toggleDisclosure(index: number): void {
+    const key: string = index.toString();
+    const next: string[] = [];
+    let removed: boolean = false;
+    for (let itemIndex: number = 0; itemIndex < this.expandedDisclosures.length; itemIndex++) {
+      const item: string = this.expandedDisclosures[itemIndex];
+      if (item === key) {
+        removed = true;
+        continue;
+      }
+      next.push(item);
+    }
+    if (!removed) {
+      next.push(key);
+    }
+    this.expandedDisclosures = next;
+  }
+
   private getHeadingFontSize(level: number): number {
     if (level <= 1) {
       return 22;
@@ -325,14 +402,26 @@ export struct PostRichContent {
     return 23;
   }
 
-  private getImageDisplayHeight(block: RichBlock): number {
+  private hasImageSize(block: RichBlock): boolean {
     const width: number = block.width ? block.width : 0;
     const height: number = block.height ? block.height : 0;
-    if (width > 0 && height > 0) {
-      const ratioHeight: number = Math.round(280 * height / width);
-      return Math.max(96, Math.min(360, ratioHeight));
+    return width > 0 && height > 0;
+  }
+
+  private getImageAspectRatio(block: RichBlock): number {
+    const width: number = block.width ? block.width : 1;
+    const height: number = block.height ? block.height : 1;
+    return width / height;
+  }
+
+  private openImageLink(block: RichBlock): void {
+    if (block.href && block.href.length > 0) {
+      this.openLink(block.href);
+      return;
     }
-    return 220;
+    if (block.src && block.src.length > 0) {
+      this.openLink(block.src);
+    }
   }
 
   private openLink(url: string): void {

@@ -88,7 +88,7 @@ export struct TopicDetailPage {
           }
 
           ForEach(this.posts, (post: TopicPost) => {
-            TopicPostItem({ post: post })
+            TopicPostItem({ post: post, lastReadPostNumber: this.detail?.lastReadPostNumber ?? -1 })
           }, (post: TopicPost) => post.id.toString())
         }
         .width('100%')

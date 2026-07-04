@@ -12,6 +12,7 @@ interface DiscourseCurrentUser {
   username?: string;
   name?: string;
   avatar_template?: string;
+  animated_avatar?: string;
 }
 
 export class AuthService {
@@ -55,7 +56,8 @@ export class AuthService {
           id: sourceUser.id,
           username: sourceUser.username,
           displayName: sourceUser.name,
-          avatarTemplate: sourceUser.avatar_template
+          avatarTemplate: sourceUser.avatar_template,
+          animatedAvatar: sourceUser.animated_avatar ? sourceUser.animated_avatar : undefined
         }
       };
     } catch (error) {

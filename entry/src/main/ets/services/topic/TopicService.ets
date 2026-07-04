@@ -38,6 +38,7 @@ interface DiscourseUser {
   username?: string;
   name?: string;
   avatar_template?: string;
+  animated_avatar?: string;
 }
 
 interface DiscourseTopicDetail {
@@ -52,6 +53,9 @@ interface DiscourseTopicDetail {
   views?: number;
   created_at?: string;
   post_stream?: DiscoursePostStream;
+  last_read_post_number?: number;
+  highest_post_number?: number;
+  unread_posts?: number;
 }
 
 interface DiscoursePostStream {
@@ -66,11 +70,14 @@ interface DiscoursePost {
   username?: string;
   name?: string;
   avatar_template?: string;
+  animated_avatar?: string;
   cooked?: string;
   created_at?: string;
   updated_at?: string;
   reply_count?: number;
   like_count?: number;
+  read?: boolean;
+  user_title?: string;
 }
 
 export interface TopicPage {
@@ -269,7 +276,8 @@ export class TopicService {
           id: sourceUser.id,
           username: sourceUser.username,
           displayName: sourceUser.name,
-          avatarTemplate: sourceUser.avatar_template
+          avatarTemplate: sourceUser.avatar_template,
+          animatedAvatar: sourceUser.animated_avatar ? sourceUser.animated_avatar : undefined
         };
       }
     }
@@ -293,7 +301,10 @@ export class TopicService {
       likeCount: sourceTopic.like_count,
       viewCount: sourceTopic.views,
       createdAt: sourceTopic.created_at,
-      posts: this.mapPosts(sourceTopic.post_stream?.posts)
+      posts: this.mapPosts(sourceTopic.post_stream?.posts),
+      lastReadPostNumber: typeof sourceTopic.last_read_post_number === 'number' ? sourceTopic.last_read_post_number : undefined,
+      highestPostNumber: typeof sourceTopic.highest_post_number === 'number' ? sourceTopic.highest_post_number : undefined,
+      unreadPosts: typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined
     };
   }
 
@@ -320,7 +331,9 @@ export class TopicService {
         updatedAt: sourcePost.updated_at,
         replyCount: sourcePost.reply_count,
         likeCount: sourcePost.like_count,
-        author: this.mapPostAuthor(sourcePost)
+        author: this.mapPostAuthor(sourcePost),
+        read: typeof sourcePost.read === 'boolean' ? sourcePost.read : undefined,
+        userTitle: typeof sourcePost.user_title === 'string' ? sourcePost.user_title : undefined
       });
     }
 
@@ -336,7 +349,8 @@ export class TopicService {
       id: typeof sourcePost.user_id === 'number' ? sourcePost.user_id : 0,
       username: sourcePost.username,
       displayName: sourcePost.name,
-      avatarTemplate: sourcePost.avatar_template
+      avatarTemplate: sourcePost.avatar_template,
+      animatedAvatar: sourcePost.animated_avatar ? sourcePost.animated_avatar : undefined
     };
   }
 

@@ -40,12 +40,17 @@ export struct UserAvatar {
   }
 
   private getAvatarUrl(): string {
+    const animatedAvatar: string | undefined = this.user?.animatedAvatar;
     const avatarTemplate: string | undefined = this.user?.avatarTemplate;
-    if (!avatarTemplate) {
+    // 优先使用 animated_avatar（gif 动图），没有再回退到静态 avatar_template。
+    const rawAvatar: string = (animatedAvatar && animatedAvatar.length > 0)
+      ? animatedAvatar
+      : (avatarTemplate ? avatarTemplate : '');
+    if (rawAvatar.length === 0) {
       return '';
     }
 
-    const sizedAvatar: string = avatarTemplate.replace('{size}', this.avatarImageSize);
+    const sizedAvatar: string = rawAvatar.replace('{size}', this.avatarImageSize);
     if (sizedAvatar.startsWith('http://') || sizedAvatar.startsWith('https://')) {
       return sizedAvatar;
     }

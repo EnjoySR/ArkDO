@@ -179,5 +179,44 @@ export default function topicServiceTest() {
       expect(result.data?.posts[0].plainText).assertEqual('Hello ArkDO& Linux.do');
       expect(result.data?.posts[1].plainText).assertEqual('第二条回复\n继续讨论');
     });
+
+    it('mapsAnimatedAvatarForPostAuthor', 0, async () => {
+      const payload: string = '{"id":7,"title":"动图头像","post_stream":{"posts":[{"id":70,"topic_id":7,"post_number":1,"username":"torvalds","name":"Linus","avatar_template":"/user_avatar/linux.do/torvalds/{size}/1_2.png","animated_avatar":"//cdn.ldstatic.com/original/4X/a/b/c.gif","cooked":"<p>hi</p>"}]}}';
+      const bridge: FakeBridge = new FakeBridge({
+        success: true,
+        statusCode: 200,
+        challengeState: ChallengeState.NONE,
+        data: payload
+      });
+      const service: TopicService = new TopicService(bridge);
+
+      const result: NetworkResult<TopicDetail> = await service.getTopicDetail(7, 'topic');
+
+      expect(result.success).assertTrue();
+      expect(result.data?.posts[0].author?.animatedAvatar).assertEqual('//cdn.ldstatic.com/original/4X/a/b/c.gif');
+      expect(result.data?.posts[0].author?.avatarTemplate).assertEqual('/user_avatar/linux.do/torvalds/{size}/1_2.png');
+    });
+
+    it('mapsReadStateFromTopicDetailPayload', 0, async () => {
+      const payload: string = '{"id":88,"title":"已读状态","last_read_post_number":2,"highest_post_number":3,"unread_posts":1,"post_stream":{"posts":[{"id":1,"topic_id":88,"post_number":1,"username":"a","cooked":"<p>1</p>","read":true},{"id":2,"topic_id":88,"post_number":2,"username":"b","cooked":"<p>2</p>","read":false},{"id":3,"topic_id":88,"post_number":3,"username":"c","cooked":"<p>3</p>"}]}}';
+      const bridge: FakeBridge = new FakeBridge({
+        success: true,
+        statusCode: 200,
+        challengeState: ChallengeState.NONE,
+        data: payload
+      });
+      const service: TopicService = new TopicService(bridge);
+
+      const result: NetworkResult<TopicDetail> = await service.getTopicDetail(88);
+
+      expect(result.success).assertTrue();
+      expect(result.data?.lastReadPostNumber).assertEqual(2);
+      expect(result.data?.highestPostNumber).assertEqual(3);
+      expect(result.data?.unreadPosts).assertEqual(1);
+      expect(result.data?.posts[0].read).assertEqual(true);
+      expect(result.data?.posts[1].read).assertEqual(false);
+      // 无 read 字段的楼层保持 undefined,交给水位线兜底。
+      expect(result.data?.posts[2].read === undefined).assertTrue();
+    });
   });
 }
