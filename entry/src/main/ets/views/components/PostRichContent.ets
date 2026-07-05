@@ -6,6 +6,7 @@ import {
   RichInlineType,
   RichListItem
 } from '../../services/content/CookedHtmlParser';
+import { ViewerImage } from './ImageViewer';
 
 const LOG_TAG: string = '[ArkDO][PostRichContent]';
 
@@ -13,6 +14,9 @@ const LOG_TAG: string = '[ArkDO][PostRichContent]';
 export struct PostRichContent {
   cookedHtml: string = '';
   fallbackText: string = '';
+  // 图片浏览器提到页面级渲染（bindContentCover 内部内容不会随状态刷新），
+  // 这里只负责收集本帖图片并把「打开」请求回调给上层页面。
+  onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   @State private expandedDisclosures: string[] = [];
 
   build() {
@@ -415,13 +419,56 @@ export struct PostRichContent {
   }
 
   private openImageLink(block: RichBlock): void {
-    if (block.href && block.href.length > 0) {
-      this.openLink(block.href);
+    const images: ViewerImage[] = this.collectImages();
+    if (images.length === 0) {
       return;
     }
-    if (block.src && block.src.length > 0) {
-      this.openLink(block.src);
+    const clickedUrl: string = this.primaryImageUrl(block);
+    let index: number = 0;
+    for (let i: number = 0; i < images.length; i++) {
+      if (images[i].url === clickedUrl) {
+        index = i;
+        break;
+      }
     }
+    // 交给上层页面在页面级渲染图片浏览器
+    this.onOpenImages(images, index);
+  }
+
+  // 收集当前 post 内所有块级图片（含嵌在引用/折叠块里的），按出现顺序，
+  // 看图用高清原图 href；行内 emoji 不计入。
+  private collectImages(): ViewerImage[] {
+    const result: ViewerImage[] = [];
+    this.collectImagesFrom(this.getRenderableBlocks(), result);
+    return result;
+  }
+
+  private collectImagesFrom(blocks: RichBlock[], result: ViewerImage[]): void {
+    for (let i: number = 0; i < blocks.length; i++) {
+      const block: RichBlock = blocks[i];
+      if (block.type === RichBlockType.IMAGE) {
+        const primary: string = this.primaryImageUrl(block);
+        if (primary.length > 0) {
+          // 兜底用优化图 src（与帖子内联同源、多已缓存），原图加载失败时回退
+          const optimized: string = block.src && block.src !== primary ? block.src : '';
+          result.push({ url: primary, fallbackUrl: optimized });
+        }
+      }
+      if (block.blocks && block.blocks.length > 0) {
+        this.collectImagesFrom(block.blocks, result);
+      }
+    }
+  }
+
+  // 看图优先用高清原图 href（lightbox 全尺寸）；缺失时才用优化图 src
+  private primaryImageUrl(block: RichBlock): string {
+    if (block.href && block.href.length > 0) {
+      return block.href;
+    }
+    if (block.src && block.src.length > 0) {
+      return block.src;
+    }
+    return '';
   }
 
   private openLink(url: string): void {

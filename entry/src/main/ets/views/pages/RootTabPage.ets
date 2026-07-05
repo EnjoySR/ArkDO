@@ -18,10 +18,17 @@ import { TopicDetailPage } from './TopicDetailPage';
 const LOG_TAG: string = '[ArkDO][Root]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
 
+enum RootSheet {
+  NONE = 0,
+  LOGIN = 1,
+  CHALLENGE = 2
+}
+
 @Component
 export struct RootTabPage {
-  @State private isLoginPageVisible: boolean = false;
-  @State private isChallengePageVisible: boolean = false;
+  // 单一 bindSheet:同一组件链多个 bindSheet 只有最后一个生效,会导致登录 sheet 不显示。
+  @State private isSheetVisible: boolean = false;
+  @State private activeSheet: RootSheet = RootSheet.NONE;
   @State private isArkWebReady: boolean = false;
   @State private currentUser?: User = undefined;
   @State private isCheckingSession: boolean = false;
@@ -73,23 +80,17 @@ export struct RootTabPage {
     .height('100%')
     .backgroundColor('#FFFFFF')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-    .bindSheet($$this.isLoginPageVisible, this.LoginSheetBuilder, {
+    .bindSheet($$this.isSheetVisible, this.RootSheetBuilder, {
       height: '90%',
       dragBar: true,
       showClose: true,
       maskColor: '#33000000',
       backgroundColor: '#FFFFFF',
       preferType: SheetType.BOTTOM,
-      enableOutsideInteractive: false
-    })
-    .bindSheet($$this.isChallengePageVisible, this.ChallengeSheetBuilder, {
-      height: '90%',
-      dragBar: true,
-      showClose: true,
-      maskColor: '#33000000',
-      backgroundColor: '#FFFFFF',
-      preferType: SheetType.BOTTOM,
-      enableOutsideInteractive: false
+      enableOutsideInteractive: false,
+      onDisappear: () => {
+        this.activeSheet = RootSheet.NONE;
+      }
     })
   }
 
@@ -151,28 +152,27 @@ export struct RootTabPage {
   }
 
   @Builder
-  private LoginSheetBuilder() {
-    LoginPage({
-      onClose: () => {
-        this.closeLoginPage();
-      },
-      onLoginSuccess: () => {
-        this.handleLoginSuccess();
-      }
-    })
-  }
-
-  @Builder
-  private ChallengeSheetBuilder() {
-    CfChallengePage({
-      bridge: this.bridge,
-      onClose: () => {
-        this.closeChallengePage();
-      },
-      onChallengeResolved: () => {
-        this.handleChallengeResolved();
-      }
-    })
+  private RootSheetBuilder() {
+    if (this.activeSheet === RootSheet.CHALLENGE) {
+      CfChallengePage({
+        bridge: this.bridge,
+        onClose: () => {
+          this.closeChallengePage();
+        },
+        onChallengeResolved: () => {
+          this.handleChallengeResolved();
+        }
+      })
+    } else {
+      LoginPage({
+        onClose: () => {
+          this.closeLoginPage();
+        },
+        onLoginSuccess: () => {
+          this.handleLoginSuccess();
+        }
+      })
+    }
   }
 
   @Builder
@@ -197,15 +197,18 @@ export struct RootTabPage {
   }
 
   private openLoginPage(): void {
-    this.isLoginPageVisible = true;
+    this.activeSheet = RootSheet.LOGIN;
+    this.isSheetVisible = true;
   }
 
   private closeLoginPage(): void {
-    this.isLoginPageVisible = false;
+    this.isSheetVisible = false;
+    this.activeSheet = RootSheet.NONE;
   }
 
   private closeChallengePage(): void {
-    this.isChallengePageVisible = false;
+    this.isSheetVisible = false;
+    this.activeSheet = RootSheet.NONE;
   }
 
   private openTopicDetail(topic: Topic): void {
@@ -238,6 +241,8 @@ export struct RootTabPage {
   }
 
   private handleLoginSuccess(): void {
+    // 会话变化会触发 host webview 重载,先关闭就绪门闩,确保随后并发的 fetch 排队到重载完成后。
+    this.bridge.markHostReloading();
     SessionEventBus.notifySessionChanged();
     this.checkCurrentUser();
     this.closeLoginPage();
@@ -304,19 +309,22 @@ export struct RootTabPage {
 
     this.handledChallengeVersion = event.version;
     console.info(`${LOG_TAG} challenge required version=${event.version} source=${event.source} status=${event.statusCode} state=${event.challengeState}`);
-    console.info(`${DIAG_TAG} stage=rootChallengeRequired version=${event.version} source=${event.source} status=${event.statusCode} state=${event.challengeState} challengeVisible=${this.isChallengePageVisible} loginVisible=${this.isLoginPageVisible}`);
-    if (this.isChallengePageVisible || this.isLoginPageVisible) {
+    console.info(`${DIAG_TAG} stage=rootChallengeRequired version=${event.version} source=${event.source} status=${event.statusCode} state=${event.challengeState} activeSheet=${this.activeSheet} sheetVisible=${this.isSheetVisible}`);
+    if (this.isSheetVisible) {
       return;
     }
 
-    this.isChallengePageVisible = true;
+    this.activeSheet = RootSheet.CHALLENGE;
+    this.isSheetVisible = true;
     console.info(`${DIAG_TAG} stage=rootChallengeOpen version=${event.version}`);
   }
 
   private handleChallengeResolved(): void {
     console.info(`${LOG_TAG} challenge resolved`);
-    console.info(`${DIAG_TAG} stage=rootChallengeResolved challengeVisible=${this.isChallengePageVisible}`);
+    console.info(`${DIAG_TAG} stage=rootChallengeResolved sheetVisible=${this.isSheetVisible}`);
     this.closeChallengePage();
+    // 会话变化会触发 host webview 重载,先关闭就绪门闩,确保随后并发的 fetch 排队到重载完成后。
+    this.bridge.markHostReloading();
     SessionEventBus.notifySessionChanged();
     this.checkCurrentUser();
   }

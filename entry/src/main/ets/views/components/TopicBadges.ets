@@ -22,7 +22,7 @@ export struct TopicMetadataBadges {
           TopicTagBadge({ tag: tag })
         }, (tag: TopicTag, index: number) => `${index}-${tag.name}`)
       }
-      .height(16)
+      .height(20)
       .constraintSize({ minWidth: '100%' })
     }
     .scrollable(ScrollDirection.Horizontal)

@@ -1,12 +1,15 @@
 import { User } from './User';
 import { TopicTag } from './Topic';
 
-export interface TopicPost {
-  id: number;
+// @Observed:楼层的 read 变化要能驱动 TopicPostItem(@ObjectLink)重渲染,
+// 从而让蓝点淡出动画生效。
+@Observed
+export class TopicPost {
+  id: number = 0;
   topicId?: number;
-  postNumber: number;
-  cookedHtml: string;
-  plainText: string;
+  postNumber: number = 0;
+  cookedHtml: string = '';
+  plainText: string = '';
   createdAt?: string;
   updatedAt?: string;
   replyCount?: number;
@@ -31,4 +34,5 @@ export interface TopicDetail {
   lastReadPostNumber?: number;
   highestPostNumber?: number;
   unreadPosts?: number;
+  stream?: number[];
 }

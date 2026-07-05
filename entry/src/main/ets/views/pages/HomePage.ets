@@ -6,6 +6,7 @@ import { UserAvatar } from '../components/UserAvatar';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
+import { TopicReadState, TopicReadStateEventBus } from '../../services/session/TopicReadStateEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { SiteMetadata, SiteService } from '../../services/site/SiteService';
 
@@ -22,6 +23,7 @@ export struct HomePage {
   @State private listMessage: string = '正在准备 ArkWeb 请求环境';
   @State private footerMessage: string = '上拉加载更多';
   @State private requiresChallenge: boolean = false;
+  @State private loadFailed: boolean = false;
   @State private categories: TopicCategory[] = [];
   private isSiteMetadataLoading: boolean = false;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
@@ -34,11 +36,18 @@ export struct HomePage {
   onTopicClick: (topic: Topic) => void = () => {};
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
+  private unsubscribeTopicReadState?: () => void = undefined;
 
   aboutToAppear(): void {
     if (!this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged = SessionEventBus.subscribe((version: number) => {
         this.handleSessionChanged(version);
+      });
+    }
+    if (!this.unsubscribeTopicReadState) {
+      // 从详情页返回时同步该主题的已读状态(消蓝点、更新未读徽标)。
+      this.unsubscribeTopicReadState = TopicReadStateEventBus.subscribe((state: TopicReadState) => {
+        this.handleTopicReadStateChanged(state);
       });
     }
     this.syncSessionVersion();
@@ -52,6 +61,10 @@ export struct HomePage {
     if (this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged();
       this.unsubscribeSessionChanged = undefined;
+    }
+    if (this.unsubscribeTopicReadState) {
+      this.unsubscribeTopicReadState();
+      this.unsubscribeTopicReadState = undefined;
     }
   }
 
@@ -69,80 +82,113 @@ export struct HomePage {
       }
       .width('100%')
       .height(56)
-      .padding({ left: 20, right: 20, top: 20, bottom: 12 })
+      .padding({ left: 12, right: 12, top: 20, bottom: 12 })
 
-      Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
-        List() {
-          if (this.topics.length === 0) {
-            ListItem() {
-              Column() {
-                if (this.isInitialLoading) {
-                  LoadingProgress()
-                    .width(28)
-                    .height(28)
-                    .color($r('app.color.brand'))
-                    .margin({ bottom: 12 })
+      Stack() {
+        Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
+          List() {
+            ForEach(this.topics, (topic: Topic) => {
+              TopicListItem({
+                topic: topic,
+                category: this.findCategory(topic.categoryId),
+                parentCategory: this.findParentCategory(topic.categoryId),
+                onTopicClick: (selectedTopic: Topic) => {
+                  // 点击即清除蓝点(乐观已读);未读徽标待返回时由详情页结算的真实未读数同步。
+                  selectedTopic.unseen = false;
+                  this.onTopicClick(selectedTopic);
                 }
+              })
+            }, (topic: Topic) => topic.id.toString())
 
-                Text(this.listMessage)
-                  .fontSize(15)
-                  .fontColor(this.requiresChallenge ? $r('app.color.warning') : $r('app.color.text_secondary'))
-                  .textAlign(TextAlign.Center)
+            if (this.topics.length > 0) {
+              ListItem() {
+                Row() {
+                  if (this.isLoadingMore) {
+                    LoadingProgress()
+                      .width(18)
+                      .height(18)
+                      .color($r('app.color.brand'))
+                      .margin({ right: 8 })
+                  }
+
+                  Text(this.footerMessage)
+                    .fontSize(13)
+                    .fontColor(this.requiresChallenge ? $r('app.color.warning') : $r('app.color.text_secondary'))
+                }
+                .width('100%')
+                .height(54)
+                .justifyContent(FlexAlign.Center)
               }
-              .width('100%')
-              .height(240)
-              .justifyContent(FlexAlign.Center)
             }
           }
-
-          ForEach(this.topics, (topic: Topic) => {
-            TopicListItem({
-              topic: topic,
-              category: this.findCategory(topic.categoryId),
-              parentCategory: this.findParentCategory(topic.categoryId),
-              onTopicClick: (selectedTopic: Topic) => {
-                this.onTopicClick(selectedTopic);
-              }
-            })
-          }, (topic: Topic) => topic.id.toString())
-
-          if (this.topics.length > 0) {
-            ListItem() {
-              Row() {
-                if (this.isLoadingMore) {
-                  LoadingProgress()
-                    .width(18)
-                    .height(18)
-                    .color($r('app.color.brand'))
-                    .margin({ right: 8 })
-                }
-
-                Text(this.footerMessage)
-                  .fontSize(13)
-                  .fontColor(this.requiresChallenge ? $r('app.color.warning') : $r('app.color.text_secondary'))
-              }
-              .width('100%')
-              .height(54)
-              .justifyContent(FlexAlign.Center)
-            }
-          }
+          .width('100%')
+          .height('100%')
+          .padding({ left: 12, right: 12, bottom: 0 })
+          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+          .onReachEnd(() => {
+            this.loadMoreTopics();
+          })
         }
         .width('100%')
         .height('100%')
-        .padding({ left: 20, right: 20, bottom: 0 })
+        // Refresh 会把子 List 裁剪到自身边界;子 List 的 expandSafeArea 无法穿透,
+        // 需在 Refresh 上同样声明,否则列表底部无法延伸覆盖底部操作条(安全区)。
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-        .onReachEnd(() => {
-          this.loadMoreTopics();
+        .pullToRefresh(true)
+        .refreshOffset(64)
+        .onRefreshing(() => {
+          this.refreshLatestTopics();
         })
+
+        if (this.topics.length === 0) {
+          Column() {
+            if (!this.isArkWebReady) {
+              Image($r('app.media.linuxdo_logo'))
+                .width(64)
+                .height(64)
+                .margin({ bottom: 16 })
+
+              Text('准备环境中...')
+                .fontSize(15)
+                .fontColor($r('app.color.text_secondary'))
+                .textAlign(TextAlign.Center)
+            } else {
+              if (this.isInitialLoading) {
+                LoadingProgress()
+                  .width(28)
+                  .height(28)
+                  .color($r('app.color.brand'))
+                  .margin({ bottom: 12 })
+              }
+
+              Text(this.listMessage)
+                .fontSize(15)
+                .fontColor(this.requiresChallenge ? $r('app.color.warning') : $r('app.color.text_secondary'))
+                .textAlign(TextAlign.Center)
+
+              if (this.loadFailed && !this.isInitialLoading) {
+                Button('重试')
+                  .fontSize(15)
+                  .fontColor($r('app.color.brand'))
+                  .backgroundColor($r('app.color.surface_muted'))
+                  .borderRadius(20)
+                  .padding({ left: 28, right: 28, top: 8, bottom: 8 })
+                  .margin({ top: 16 })
+                  .onClick(() => {
+                    this.refreshLatestTopics();
+                  })
+              }
+            }
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
+          .hitTestBehavior(HitTestMode.Transparent)
+        }
       }
       .width('100%')
       .layoutWeight(1)
-      .pullToRefresh(true)
-      .refreshOffset(64)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .onRefreshing(() => {
-        this.refreshLatestTopics();
-      })
     }
     .width('100%')
     .height('100%')
@@ -201,13 +247,15 @@ export struct HomePage {
 
     this.loadSiteMetadataIfNeeded();
 
-    if (this.isRefreshing || this.isLoadingMore) {
+    if (this.isRefreshing || this.isLoadingMore || this.isInitialLoading) {
       return;
     }
 
-    this.isRefreshing = true;
-    this.isInitialLoading = this.topics.length === 0;
+    const isFirstLoad: boolean = this.topics.length === 0;
+    this.isInitialLoading = isFirstLoad;
+    this.isRefreshing = !isFirstLoad;
     this.requiresChallenge = false;
+    this.loadFailed = false;
     this.listMessage = '正在加载最新帖子';
     this.footerMessage = '上拉加载更多';
 
@@ -225,10 +273,14 @@ export struct HomePage {
     }
 
     this.requiresChallenge = result.error?.requiresChallenge === true;
+    const friendlyMessage: string = this.requiresChallenge
+      ? '内容加载遇到访问验证,请稍后重试'
+      : '加载失败,请检查网络后重试';
     if (this.topics.length === 0) {
-      this.listMessage = result.error?.message ? result.error.message : '最新帖子加载失败';
+      this.loadFailed = true;
+      this.listMessage = friendlyMessage;
     } else {
-      this.footerMessage = result.error?.message ? result.error.message : '刷新失败';
+      this.footerMessage = '刷新失败,请重试';
     }
   }
 
@@ -273,6 +325,19 @@ export struct HomePage {
     console.info(`${LOG_TAG} session changed version=${version}, refresh latest topics`);
     this.footerMessage = '会话已更新，正在刷新';
     this.refreshLatestTopics();
+  }
+
+  private handleTopicReadStateChanged(state: TopicReadState): void {
+    for (let index: number = 0; index < this.topics.length; index++) {
+      const topic: Topic = this.topics[index];
+      if (topic.id === state.topicId) {
+        // @Observed 实例赋值 → 对应 TopicListItem(@ObjectLink)精准重渲染。
+        topic.unseen = state.unseen;
+        topic.unreadPosts = state.unreadPosts;
+        console.info(`${LOG_TAG} topic read state synced topicId=${state.topicId} unreadPosts=${state.unreadPosts}`);
+        return;
+      }
+    }
   }
 
   private handleArkWebReadyChanged(): void {

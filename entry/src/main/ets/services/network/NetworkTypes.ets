@@ -31,4 +31,5 @@ export interface JsonRequestOptions {
 
 export interface JsonNetworkClient {
   getJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
+  postForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
 }

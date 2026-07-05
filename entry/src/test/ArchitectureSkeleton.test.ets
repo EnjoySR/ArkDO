@@ -23,18 +23,17 @@ export default function architectureSkeletonTest() {
         displayName: 'Linux.do User',
         avatarTemplate: '/user_avatar/linux.do/linuxdo_user/{size}/1_2.png'
       };
-      const topic: Topic = {
-        id: 100,
-        title: 'ArkDO phase one',
-        slug: 'arkdo-phase-one',
-        tags: [],
-        postsCount: 1,
-        replyCount: 0,
-        likeCount: 0,
-        createdAt: '2026-07-03T00:00:00.000Z',
-        lastPostedAt: '2026-07-03T00:00:00.000Z',
-        author: user
-      };
+      const topic: Topic = new Topic();
+      topic.id = 100;
+      topic.title = 'ArkDO phase one';
+      topic.slug = 'arkdo-phase-one';
+      topic.tags = [];
+      topic.postsCount = 1;
+      topic.replyCount = 0;
+      topic.likeCount = 0;
+      topic.createdAt = '2026-07-03T00:00:00.000Z';
+      topic.lastPostedAt = '2026-07-03T00:00:00.000Z';
+      topic.author = user;
 
       expect(topic.id).assertEqual(100);
       expect(topic.author?.username).assertEqual('linuxdo_user');

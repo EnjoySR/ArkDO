@@ -48,13 +48,13 @@ export struct TopicCategoryBadge {
       }
 
       Text(this.category.name)
-        .fontSize(10)
+        .fontSize(14)
         .fontColor($r('app.color.text_secondary'))
-        .fontWeight(FontWeight.Medium)
+        .fontWeight(FontWeight.Regular)
     }
-    .height(16)
+    .height(18)
     .alignItems(VerticalAlign.Center)
-    .margin({ right: 8, bottom: 4 })
+    .margin({ right: 8 })
   }
 
   private getIcon(): FaIconDefinition | undefined {

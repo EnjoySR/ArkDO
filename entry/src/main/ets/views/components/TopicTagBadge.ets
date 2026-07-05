@@ -22,16 +22,16 @@ export struct TopicTagBadge {
       }
 
       Text(this.tag.name)
-        .fontSize(10)
+        .fontSize(14)
         .fontColor($r('app.color.text_secondary'))
-        .fontWeight(FontWeight.Medium)
+        .fontWeight(FontWeight.Regular)
     }
-    .height(16)
+    .height(20)
     .padding({ left: 4, right: 4 })
     .backgroundColor($r('app.color.surface_muted'))
     .borderRadius(2)
     .alignItems(VerticalAlign.Center)
-    .margin({ right: 7, bottom: 4 })
+    .margin({ right: 7 })
   }
 
   private getIcon(): FaIconDefinition | undefined {

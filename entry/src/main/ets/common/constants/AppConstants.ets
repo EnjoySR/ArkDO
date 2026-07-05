@@ -6,6 +6,9 @@ export class AppConstants {
   static readonly CHALLENGE_PATH: string = '/challenge';
   static readonly CHALLENGE_URL: string = 'https://linux.do/challenge';
   static readonly DEFAULT_TIMEOUT_MS: number = 15000;
+  // host webview 因 session 变化被 loadUrl 重载时，注入式 fetch 会排队等待其 onPageEnd。
+  // 该超时用于兜底：万一 onPageEnd 因异常始终不触发，等待者也不会永久悬住。
+  static readonly HOST_RELOAD_READY_TIMEOUT_MS: number = 5000;
   // Cloudflare 会校验 UA，且 cf_clearance 与请求时的 UA 绑定。验证页与后台请求页必须使用
   // 完全一致的真实浏览器 UA，否则验证页拿到的 cf_clearance 在后台 fetch 时会被判定失效。
   static readonly DEFAULT_USER_AGENT: string =

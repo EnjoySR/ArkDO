@@ -7,6 +7,8 @@ import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } fr
 class FakeBridge implements JsonNetworkClient {
   private result: NetworkResult<string>;
   requestedPath: string = '';
+  postedPath: string = '';
+  postedBody: string = '';
 
   constructor(result: NetworkResult<string>) {
     this.result = result;
@@ -14,6 +16,12 @@ class FakeBridge implements JsonNetworkClient {
 
   getJson(path: string): Promise<NetworkResult<string>> {
     this.requestedPath = path;
+    return Promise.resolve(this.result);
+  }
+
+  postForm(path: string, body: string): Promise<NetworkResult<string>> {
+    this.postedPath = path;
+    this.postedBody = body;
     return Promise.resolve(this.result);
   }
 }
@@ -28,6 +36,13 @@ class SequenceBridge implements JsonNetworkClient {
   }
 
   getJson(path: string): Promise<NetworkResult<string>> {
+    this.requestedPaths.push(path);
+    const result: NetworkResult<string> = this.results[this.index];
+    this.index++;
+    return Promise.resolve(result);
+  }
+
+  postForm(path: string, body: string): Promise<NetworkResult<string>> {
     this.requestedPaths.push(path);
     const result: NetworkResult<string> = this.results[this.index];
     this.index++;
@@ -217,6 +232,25 @@ export default function topicServiceTest() {
       expect(result.data?.posts[1].read).assertEqual(false);
       // 无 read 字段的楼层保持 undefined,交给水位线兜底。
       expect(result.data?.posts[2].read === undefined).assertTrue();
+    });
+
+    it('encodesTimingsReportAsFormBody', 0, async () => {
+      const bridge: FakeBridge = new FakeBridge({
+        success: true,
+        statusCode: 200,
+        challengeState: ChallengeState.NONE,
+        data: ''
+      });
+      const service: TopicService = new TopicService(bridge);
+      const timings: Map<number, number> = new Map();
+      timings.set(1, 1001);
+      timings.set(2, 3000);
+
+      const result: NetworkResult<string> = await service.reportTimings(2117030, timings, 4001);
+
+      expect(result.success).assertTrue();
+      expect(bridge.postedPath).assertEqual('/topics/timings');
+      expect(bridge.postedBody).assertEqual('timings%5B1%5D=1001&timings%5B2%5D=3000&topic_time=4001&topic_id=2117030');
     });
   });
 }

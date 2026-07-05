@@ -119,9 +119,48 @@ class WebviewJsonExecutor implements ArkWebJsonExecutor, ArkWebResultReceiver {
 export class ArkWebNetworkBridge implements JsonNetworkClient {
   private executor?: ArkWebJsonExecutor;
   private webviewExecutor?: WebviewJsonExecutor;
+  // host webview 是否正在被 loadUrl 重载。重载期间注入的 fetch 会落在正被销毁的文档上,
+  // 因此排队等待,直到重载后的 onPageEnd 再执行。默认 false = 就绪,不影响正常请求。
+  private reloading: boolean = false;
+  private readyWaiters: Array<() => void> = [];
 
   attachController(controller: webview.WebviewController): void {
     this.setExecutor(this.ensureWebviewExecutor(controller));
+  }
+
+  // host webview 开始 loadUrl 重载：关闭门闩，随后的注入式 fetch 排队等待。
+  markHostReloading(): void {
+    this.reloading = true;
+  }
+
+  // host webview 重载完成（onPageEnd）：放行所有排队的 fetch，令其注入到刷新后的文档。
+  markHostReady(): void {
+    this.reloading = false;
+    if (this.readyWaiters.length === 0) {
+      return;
+    }
+    const waiters: Array<() => void> = this.readyWaiters;
+    this.readyWaiters = [];
+    for (let index: number = 0; index < waiters.length; index++) {
+      waiters[index]();
+    }
+  }
+
+  private whenHostReady(): Promise<void> {
+    if (!this.reloading) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve: () => void) => {
+      // 兜底超时:万一重载信号丢失(onPageEnd 始终不触发),自愈放行并恢复就绪态,
+      // 既不让本次请求永久悬住,也避免后续请求持续等待。
+      const timeoutId: number = setTimeout(() => {
+        this.markHostReady();
+      }, AppConstants.HOST_RELOAD_READY_TIMEOUT_MS);
+      this.readyWaiters.push(() => {
+        clearTimeout(timeoutId);
+        resolve();
+      });
+    });
   }
 
   createJavaScriptProxy(controller: webview.WebviewController): JavaScriptProxy {
@@ -156,12 +195,53 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       };
     }
 
+    await this.whenHostReady();
+
     try {
       const rawResult: string = await this.executor.run(this.createFetchScript(requestPath));
       logNetwork(`GET ${requestPath} raw envelope received length=${rawResult.length}`);
       return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, options);
     } catch (error) {
       logNetwork(`GET ${requestPath} failed before response envelope`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 请求失败。',
+          requiresChallenge: false
+        }
+      };
+    }
+  }
+
+  async postForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    const requestPath: string = this.normalizePath(path);
+    logNetwork(`POST ${requestPath} start bodyLength=${body.length}`);
+
+    if (!this.executor) {
+      logNetwork(`POST ${requestPath} skipped: ArkWeb host is not ready`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 宿主尚未就绪。',
+          requiresChallenge: false
+        }
+      };
+    }
+
+    await this.whenHostReady();
+
+    try {
+      const rawResult: string = await this.executor.run(this.createPostFormScript(requestPath, body));
+      logNetwork(`POST ${requestPath} raw envelope received length=${rawResult.length}`);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, options);
+    } catch (error) {
+      logNetwork(`POST ${requestPath} failed before response envelope`);
       return {
         success: false,
         statusCode: 0,
@@ -213,6 +293,63 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
           errorMessage: String(error)
         }));
       });
+      return requestId;
+    })();`;
+  }
+
+  private createPostFormScript(path: string, body: string): string {
+    const encodedPath: string = JSON.stringify(path);
+    const encodedBody: string = JSON.stringify(body);
+
+    // 同源脚本:先取 CSRF token(优先 /session/csrf.json,兜底页面 meta),再带头 POST。
+    // cookie 靠 credentials:'include' 自动携带;结果照旧走 window.ArkDOBridge.onJsonResult。
+    return `(() => {
+      const requestId = '${REQUEST_ID_TOKEN}';
+      const requestUrl = new URL(${encodedPath}, window.location.origin);
+      const fail = (error) => {
+        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+          statusCode: 0,
+          contentType: '',
+          body: '',
+          errorMessage: String(error)
+        }));
+      };
+      const metaCsrf = () => {
+        const el = document.querySelector('meta[name="csrf-token"]');
+        return el ? (el.getAttribute('content') || '') : '';
+      };
+      const readCsrf = () => {
+        return fetch(new URL('/session/csrf.json', window.location.origin).toString(), {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+        }).then((r) => r.json()).then((j) => (j && j.csrf) ? j.csrf : '').catch(() => '');
+      };
+      Promise.resolve(readCsrf()).then((token) => {
+        const csrf = token || metaCsrf();
+        return fetch(requestUrl.toString(), {
+          method: 'POST',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Accept': 'application/json',
+            'X-CSRF-Token': csrf,
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-SILENCE-LOGGER': 'true',
+            'Discourse-Background': 'true'
+          },
+          body: ${encodedBody}
+        });
+      }).then((response) => {
+        response.text().then((body) => {
+          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+            statusCode: response.status,
+            contentType: response.headers.get('content-type') || '',
+            body: body
+          }));
+        }).catch(fail);
+      }).catch(fail);
       return requestId;
     })();`;
   }

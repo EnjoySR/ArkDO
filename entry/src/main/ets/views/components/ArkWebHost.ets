@@ -50,6 +50,7 @@ export struct ArkWebHost {
         this.isControllerReady = true;
         WebSessionManager.saveCookies('ArkWebHost');
         this.bridge.attachController(this.controller);
+        this.bridge.markHostReady();
         this.syncSessionVersion();
         if (!this.hasNotifiedReady) {
           this.hasNotifiedReady = true;
@@ -74,8 +75,12 @@ export struct ArkWebHost {
     try {
       this.handledSessionVersion = version;
       console.info(`${LOG_TAG} reload base url for session version=${version}`);
+      // 重载开始前先关门:注入式 fetch 会排队等到重载后的 onPageEnd 再执行,避免落在被销毁的文档上。
+      this.bridge.markHostReloading();
       this.controller.loadUrl(AppConstants.BASE_URL);
     } catch (error) {
+      // loadUrl 抛异常时不会有后续 onPageEnd,需立即放行等待者以免请求悬住。
+      this.bridge.markHostReady();
       console.info(`${LOG_TAG} reload base url failed version=${version} error=${JSON.stringify(error)}`);
     }
   }

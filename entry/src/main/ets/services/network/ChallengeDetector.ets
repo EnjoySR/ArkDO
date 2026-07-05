@@ -11,8 +11,17 @@ const CLOUDFLARE_MARKERS: string[] = [
 export function detectChallenge(statusCode: number, contentType: string, body: string): ChallengeState {
   const normalizedContentType: string = contentType.toLowerCase();
   const normalizedBody: string = body.toLowerCase();
+  const isJson: boolean =
+    normalizedContentType.indexOf('application/json') >= 0 || looksLikeJson(normalizedBody);
 
-  if (containsCloudflareMarker(normalizedBody)) {
+  // 真正的 Cloudflare 校验页永远是 HTML（text/html，状态码 403/503 等），绝不会是合法 JSON。
+  // 因此对 2xx + 合法 JSON 的响应直接放行，避免帖子标题里的 "Cloudflare" 等子串被误判成校验。
+  if (isJson && statusCode >= 200 && statusCode < 300) {
+    return ChallengeState.NONE;
+  }
+
+  // 关键字子串匹配只作用于非 JSON（HTML/文本）正文。
+  if (!isJson && containsCloudflareMarker(normalizedBody)) {
     return ChallengeState.REQUIRED;
   }
 
@@ -20,7 +29,7 @@ export function detectChallenge(statusCode: number, contentType: string, body: s
     return ChallengeState.SUSPECTED;
   }
 
-  if (isHtmlResponse(normalizedContentType, normalizedBody) && !looksLikeJson(normalizedBody)) {
+  if (isHtmlResponse(normalizedContentType, normalizedBody) && !isJson) {
     return ChallengeState.SUSPECTED;
   }
 

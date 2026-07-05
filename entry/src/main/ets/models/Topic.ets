@@ -18,16 +18,22 @@ export interface TopicCategory {
   readRestricted?: boolean;
 }
 
-export interface Topic {
-  id: number;
-  title: string;
+// @Observed:列表项的 unseen / unreadPosts 变化(点击已读、返回同步)要能驱动
+// TopicListItem(@ObjectLink)精准重渲染,只刷新那一行的蓝点/未读徽标。
+@Observed
+export class Topic {
+  id: number = 0;
+  title: string = '';
   slug?: string;
   categoryId?: number;
-  tags: TopicTag[];
+  tags: TopicTag[] = [];
   postsCount?: number;
   replyCount?: number;
   likeCount?: number;
   createdAt?: string;
   lastPostedAt?: string;
+  // unseen:全新未读主题(标题后蓝点);unreadPosts:已读过但又有新回复的未读数(数字徽标)。
+  unseen?: boolean;
+  unreadPosts?: number;
   author?: User;
 }

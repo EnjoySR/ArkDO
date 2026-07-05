@@ -25,6 +25,8 @@ interface DiscourseTopic {
   like_count?: number;
   created_at?: string;
   last_posted_at?: string;
+  unseen?: boolean;
+  unread_posts?: number;
   posters?: DiscoursePoster[];
 }
 
@@ -60,6 +62,7 @@ interface DiscourseTopicDetail {
 
 interface DiscoursePostStream {
   posts?: DiscoursePost[];
+  stream?: number[];
 }
 
 interface DiscoursePost {
@@ -171,6 +174,52 @@ export class TopicService {
     }
   }
 
+  async loadMorePosts(topicId: number, postIds: number[]): Promise<NetworkResult<TopicPost[]>> {
+    if (postIds.length === 0) {
+      return { success: true, statusCode: 200, challengeState: ChallengeState.NONE, data: [] };
+    }
+
+    const params: string[] = [];
+    for (let index: number = 0; index < postIds.length; index++) {
+      params.push(`post_ids%5B%5D=${postIds[index]}`);
+    }
+    const path: string = `/t/${topicId}/posts.json?${params.join('&')}&include_suggested=false`;
+
+    const response: NetworkResult<string> = await this.bridge.getJson(path);
+    if (!response.success) {
+      return this.forwardFailure<TopicPost[]>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, 'Linux.do 加载更多楼层响应为空。');
+    }
+
+    try {
+      const payload: DiscourseTopicDetail = JSON.parse(response.data) as DiscourseTopicDetail;
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: this.mapPosts(payload.post_stream?.posts)
+      };
+    } catch (error) {
+      return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, 'Linux.do 加载更多楼层响应不是有效 JSON。');
+    }
+  }
+
+  async reportTimings(topicId: number, timings: Map<number, number>, topicTime: number): Promise<NetworkResult<string>> {
+    // 编码成 Discourse 期望的 application/x-www-form-urlencoded:
+    // timings%5B楼号%5D=毫秒&...&topic_time=毫秒&topic_id=id
+    const parts: string[] = [];
+    timings.forEach((milliseconds: number, postNumber: number) => {
+      parts.push(`timings%5B${postNumber}%5D=${Math.round(milliseconds)}`);
+    });
+    parts.push(`topic_time=${Math.round(topicTime)}`);
+    parts.push(`topic_id=${topicId}`);
+    const body: string = parts.join('&');
+    // 后台上报不弹 CF 验证页(notifyChallenge:false)。
+    return this.bridge.postForm('/topics/timings', body, { notifyChallenge: false });
+  }
+
   private getLatestPath(page: number): string {
     if (page <= 0) {
       return '/latest.json';
@@ -193,19 +242,22 @@ export class TopicService {
         continue;
       }
 
-      topics.push({
-        id: sourceTopic.id,
-        title: sourceTopic.title,
-        slug: sourceTopic.slug,
-        categoryId: sourceTopic.category_id,
-        tags: this.mapTags(sourceTopic.tags),
-        postsCount: sourceTopic.posts_count,
-        replyCount: sourceTopic.reply_count,
-        likeCount: sourceTopic.like_count,
-        createdAt: sourceTopic.created_at,
-        lastPostedAt: sourceTopic.last_posted_at,
-        author: this.findOriginalPoster(sourceTopic, sourceUsers)
-      });
+      // Topic 现为 @Observed class,须 new 实例(对象字面量不会被 @ObjectLink 观测)。
+      const topic: Topic = new Topic();
+      topic.id = sourceTopic.id;
+      topic.title = sourceTopic.title;
+      topic.slug = sourceTopic.slug;
+      topic.categoryId = sourceTopic.category_id;
+      topic.tags = this.mapTags(sourceTopic.tags);
+      topic.postsCount = sourceTopic.posts_count;
+      topic.replyCount = sourceTopic.reply_count;
+      topic.likeCount = sourceTopic.like_count;
+      topic.createdAt = sourceTopic.created_at;
+      topic.lastPostedAt = sourceTopic.last_posted_at;
+      topic.unseen = typeof sourceTopic.unseen === 'boolean' ? sourceTopic.unseen : undefined;
+      topic.unreadPosts = typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined;
+      topic.author = this.findOriginalPoster(sourceTopic, sourceUsers);
+      topics.push(topic);
     }
     return topics;
   }
@@ -304,8 +356,23 @@ export class TopicService {
       posts: this.mapPosts(sourceTopic.post_stream?.posts),
       lastReadPostNumber: typeof sourceTopic.last_read_post_number === 'number' ? sourceTopic.last_read_post_number : undefined,
       highestPostNumber: typeof sourceTopic.highest_post_number === 'number' ? sourceTopic.highest_post_number : undefined,
-      unreadPosts: typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined
+      unreadPosts: typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined,
+      stream: this.mapStream(sourceTopic.post_stream?.stream)
     };
+  }
+
+  private mapStream(stream?: number[]): number[] {
+    const out: number[] = [];
+    if (!stream) {
+      return out;
+    }
+    for (let index: number = 0; index < stream.length; index++) {
+      const value: number = stream[index];
+      if (typeof value === 'number') {
+        out.push(value);
+      }
+    }
+    return out;
   }
 
   private mapPosts(sourcePosts?: DiscoursePost[]): TopicPost[] {
@@ -321,20 +388,21 @@ export class TopicService {
       }
 
       const cookedHtml: string = sourcePost.cooked ? sourcePost.cooked : '';
-      posts.push({
-        id: sourcePost.id,
-        topicId: sourcePost.topic_id,
-        postNumber: sourcePost.post_number,
-        cookedHtml: cookedHtml,
-        plainText: this.htmlToPlainText(cookedHtml),
-        createdAt: sourcePost.created_at,
-        updatedAt: sourcePost.updated_at,
-        replyCount: sourcePost.reply_count,
-        likeCount: sourcePost.like_count,
-        author: this.mapPostAuthor(sourcePost),
-        read: typeof sourcePost.read === 'boolean' ? sourcePost.read : undefined,
-        userTitle: typeof sourcePost.user_title === 'string' ? sourcePost.user_title : undefined
-      });
+      // TopicPost 现为 @Observed class,须 new 实例(对象字面量不会被 @ObjectLink 观测)。
+      const post: TopicPost = new TopicPost();
+      post.id = sourcePost.id;
+      post.topicId = sourcePost.topic_id;
+      post.postNumber = sourcePost.post_number;
+      post.cookedHtml = cookedHtml;
+      post.plainText = this.htmlToPlainText(cookedHtml);
+      post.createdAt = sourcePost.created_at;
+      post.updatedAt = sourcePost.updated_at;
+      post.replyCount = sourcePost.reply_count;
+      post.likeCount = sourcePost.like_count;
+      post.author = this.mapPostAuthor(sourcePost);
+      post.read = typeof sourcePost.read === 'boolean' ? sourcePost.read : undefined;
+      post.userTitle = typeof sourcePost.user_title === 'string' ? sourcePost.user_title : undefined;
+      posts.push(post);
     }
 
     return posts;

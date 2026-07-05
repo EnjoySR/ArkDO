@@ -1,16 +1,17 @@
 import { TopicPost } from '../../models/TopicDetail';
+import { RelativeTime } from '../../common/utils/RelativeTime';
 import { PostRichContent } from './PostRichContent';
+import { ViewerImage } from './ImageViewer';
 import { UserAvatar } from './UserAvatar';
 
 @Component
 export struct TopicPostItem {
-  post: TopicPost = {
-    id: 0,
-    postNumber: 0,
-    cookedHtml: '',
-    plainText: ''
-  };
+  // @ObjectLink 绑定 @Observed 的 TopicPost:楼层 read 翻真时精准触发本组件重渲染,
+  // 蓝点 opacity 过渡才会播放。由父组件 ForEach 传入,不能有默认值。
+  @ObjectLink post: TopicPost;
   lastReadPostNumber: number = -1;
+  // 图片浏览器在页面级渲染，这里把 PostRichContent 的「打开」请求继续上抛给页面
+  onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
 
   build() {
     ListItem() {
@@ -19,7 +20,8 @@ export struct TopicPostItem {
 
         PostRichContent({
           cookedHtml: this.post.cookedHtml,
-          fallbackText: this.post.plainText
+          fallbackText: this.post.plainText,
+          onOpenImages: this.onOpenImages
         })
           .width('100%')
           .margin({ top: 12 })
@@ -37,7 +39,7 @@ export struct TopicPostItem {
   @Builder
   private PostAuthorHeader() {
     Row() {
-      UserAvatar({ user: this.post.author, avatarSize: 48 })
+      UserAvatar({ user: this.post.author, avatarSize: 40 })
         .margin({ right: 12 })
 
       // 昵称在上,姓名 + 称号一行在下。
@@ -76,13 +78,14 @@ export struct TopicPostItem {
           .fontSize(13)
           .fontColor('#9CA3AF')
 
-        if (!this.isPostRead()) {
-          Circle()
-            .width(8)
-            .height(8)
-            .fill('#66CCFF')
-            .margin({ left: 8 })
-        }
+        // 蓝点常驻占位:读后 opacity 1→0 渐隐(~1.2s),槽位保留,左侧时间不位移。
+        Circle()
+          .width(8)
+          .height(8)
+          .fill('#66CCFF')
+          .margin({ left: 2 })
+          .opacity(this.isPostRead() ? 0 : 1)
+          .animation({ duration: 1200, curve: Curve.EaseInOut })
       }
       .alignItems(VerticalAlign.Center)
       .margin({ left: 8 })
@@ -139,72 +142,7 @@ export struct TopicPostItem {
   }
 
   private getRelativeTime(): string {
-    const createdAt: string | undefined = this.post.createdAt;
-    if (!createdAt || createdAt.length === 0) {
-      return '';
-    }
-    const then: number = this.parseUtcMillis(createdAt);
-    if (isNaN(then)) {
-      return '';
-    }
-    let seconds: number = Math.floor((Date.now() - then) / 1000);
-    if (seconds < 0) {
-      seconds = 0;
-    }
-    // 分档与取整对齐 Discourse 的 relativeAgeTiny(小时、天都用 Math.round,
-    // 否则在小时边界处会比网页少 1,例如 17.5 小时网页显示 18、我们显示 17)。
-    const minutes: number = Math.round(seconds / 60);
-    if (minutes < 1) {
-      return '刚刚';
-    }
-    if (minutes <= 44) {
-      return `${minutes} 分钟`;
-    }
-    if (minutes <= 89) {
-      return '1 小时';
-    }
-    if (minutes <= 1409) {
-      return `${Math.round(minutes / 60)} 小时`;
-    }
-    if (minutes <= 2519) {
-      return '1 天';
-    }
-    if (minutes <= 20160) {
-      return `${Math.round(minutes / 1440)} 天`;
-    }
-    return this.formatAbsoluteDate(createdAt);
-  }
-
-  private formatAbsoluteDate(iso: string): string {
-    const match: RegExpMatchArray | null = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (!match) {
-      return '';
-    }
-    const year: number = Number(match[1]);
-    const month: number = Number(match[2]);
-    const day: number = Number(match[3]);
-    if (year === new Date().getFullYear()) {
-      return `${month}月${day}日`;
-    }
-    return `${year}年${month}月${day}日`;
-  }
-
-  // Discourse 的 created_at 恒为 UTC(结尾带 Z)。用 Date.UTC 按 UTC 解析,
-  // 避免 ArkTS 的 Date.parse 对带时区 ISO 字符串再叠加一次本地偏移(会把时间算到未来)。
-  private parseUtcMillis(iso: string): number {
-    const match: RegExpMatchArray | null =
-      iso.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
-    if (!match) {
-      return NaN;
-    }
-    return Date.UTC(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-      Number(match[4]),
-      Number(match[5]),
-      Number(match[6])
-    );
+    return RelativeTime.fromNow(this.post.createdAt);
   }
 
 }
