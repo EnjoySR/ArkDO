@@ -3,6 +3,7 @@ import { TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
+import { AppConstants } from '../../common/constants/AppConstants';
 
 interface DiscourseLatestResponse {
   topic_list?: DiscourseTopicList;
@@ -216,8 +217,10 @@ export class TopicService {
     parts.push(`topic_time=${Math.round(topicTime)}`);
     parts.push(`topic_id=${topicId}`);
     const body: string = parts.join('&');
+    // 把 Referer 设成帖子页(对齐官方 timings 请求),让 CF 不再把这条后台 POST 当异常拦下。
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
     // 后台上报不弹 CF 验证页(notifyChallenge:false)。
-    return this.bridge.postForm('/topics/timings', body, { notifyChallenge: false });
+    return this.bridge.postForm('/topics/timings', body, { notifyChallenge: false, referrer: referrer });
   }
 
   private getLatestPath(page: number): string {

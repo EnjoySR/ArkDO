@@ -1,4 +1,4 @@
-import { NetworkResult } from '../network/NetworkTypes';
+import { ChallengeState, NetworkResult } from '../network/NetworkTypes';
 
 // ArkTS 版 Discourse screen-track:详情页停留时按 1 秒 tick 累加在屏楼层时间,
 // 满足条件即 POST /topics/timings 上报;上报成功后回调标记这些楼层已读(蓝点淡出)。
@@ -273,8 +273,13 @@ export class ReadingTracker {
           onRead(postNumbers);
         }
       } else {
-        console.info(`${LOG_TAG} report failed topicId=${item.topicId} status=${result.statusCode} posts=${item.timings.size}`);
-        this.handleFailure(item, result.statusCode);
+        console.info(`${LOG_TAG} report failed topicId=${item.topicId} status=${result.statusCode} challenge=${result.challengeState} posts=${item.timings.size}`);
+        if (result.challengeState !== ChallengeState.NONE) {
+          // 命中 CF 质询:请求隐藏 host 静默刷新 clearance,成功后重试一次(Method B 验证路径)。
+          this.handleChallenge(item);
+        } else {
+          this.handleFailure(item, result.statusCode);
+        }
       }
     }).catch((error: Object) => {
       this.inProgress = false;
@@ -303,6 +308,12 @@ export class ReadingTracker {
         console.info(`${LOG_TAG} drain report topicId=${item.topicId} posts=${postCount} error=${JSON.stringify(error)}`);
       });
     }
+  }
+
+  // 命中 CF 质询:静默丢弃本批。Referer 修复后 403 已很少,且多发生在从后台回前台的头一两分钟;
+  // 这些楼层仍在屏、会随下一次周期 flush 自然重试并成功(日志已验证),因此无需弹验证、无需特殊处理。
+  private handleChallenge(item: ConsolidatedTiming): void {
+    console.info(`${LOG_TAG} challenge detected, drop batch silently (will retry on next flush) topicId=${item.topicId} posts=${item.timings.size}`);
   }
 
   private handleFailure(item: ConsolidatedTiming, statusCode: number): void {

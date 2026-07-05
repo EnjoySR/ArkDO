@@ -28,6 +28,9 @@ interface WebFetchEnvelope {
   contentType?: string;
   body?: string;
   errorMessage?: string;
+  // POST 诊断:本次使用的 CSRF token 来源(session/meta/none)与长度,用于定位 403 是否为 CSRF 不匹配。
+  csrfSource?: string;
+  csrfLength?: number;
 }
 
 class PendingJsonRequest {
@@ -200,7 +203,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     try {
       const rawResult: string = await this.executor.run(this.createFetchScript(requestPath));
       logNetwork(`GET ${requestPath} raw envelope received length=${rawResult.length}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, options);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'GET', options);
     } catch (error) {
       logNetwork(`GET ${requestPath} failed before response envelope`);
       return {
@@ -237,9 +240,10 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     await this.whenHostReady();
 
     try {
-      const rawResult: string = await this.executor.run(this.createPostFormScript(requestPath, body));
-      logNetwork(`POST ${requestPath} raw envelope received length=${rawResult.length}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, options);
+      const referrer: string = options?.referrer ? options.referrer : '';
+      const rawResult: string = await this.executor.run(this.createPostFormScript(requestPath, body, referrer));
+      logNetwork(`POST ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
     } catch (error) {
       logNetwork(`POST ${requestPath} failed before response envelope`);
       return {
@@ -297,21 +301,26 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     })();`;
   }
 
-  private createPostFormScript(path: string, body: string): string {
+  private createPostFormScript(path: string, body: string, referrer: string): string {
     const encodedPath: string = JSON.stringify(path);
     const encodedBody: string = JSON.stringify(body);
+    const encodedReferrer: string = JSON.stringify(referrer);
 
     // 同源脚本:先取 CSRF token(优先 /session/csrf.json,兜底页面 meta),再带头 POST。
     // cookie 靠 credentials:'include' 自动携带;结果照旧走 window.ArkDOBridge.onJsonResult。
     return `(() => {
       const requestId = '${REQUEST_ID_TOKEN}';
       const requestUrl = new URL(${encodedPath}, window.location.origin);
+      let csrfSource = 'none';
+      let csrfLength = 0;
       const fail = (error) => {
         window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
           statusCode: 0,
           contentType: '',
           body: '',
-          errorMessage: String(error)
+          errorMessage: String(error),
+          csrfSource: csrfSource,
+          csrfLength: csrfLength
         }));
       };
       const metaCsrf = () => {
@@ -326,27 +335,44 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
         }).then((r) => r.json()).then((j) => (j && j.csrf) ? j.csrf : '').catch(() => '');
       };
       Promise.resolve(readCsrf()).then((token) => {
-        const csrf = token || metaCsrf();
-        return fetch(requestUrl.toString(), {
+        let csrf = token;
+        csrfSource = token ? 'session' : 'none';
+        if (!csrf) {
+          csrf = metaCsrf();
+          csrfSource = csrf ? 'meta' : 'none';
+        }
+        csrfLength = csrf ? csrf.length : 0;
+        const fetchOptions = {
           method: 'POST',
           credentials: 'include',
           cache: 'no-store',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'Accept': 'application/json',
+            'Accept': '*/*',
             'X-CSRF-Token': csrf,
             'X-Requested-With': 'XMLHttpRequest',
             'X-SILENCE-LOGGER': 'true',
-            'Discourse-Background': 'true'
+            'Discourse-Background': 'true',
+            'Discourse-Present': 'true',
+            'Discourse-Logged-In': 'true'
           },
           body: ${encodedBody}
-        });
+        };
+        // 把 Referer 设成同源帖子页(对齐官方请求),让 CF 不再把这条后台 POST 当异常。
+        const _ref = ${encodedReferrer};
+        if (_ref) {
+          fetchOptions.referrer = _ref;
+          fetchOptions.referrerPolicy = 'strict-origin-when-cross-origin';
+        }
+        return fetch(requestUrl.toString(), fetchOptions);
       }).then((response) => {
         response.text().then((body) => {
           window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
             statusCode: response.status,
             contentType: response.headers.get('content-type') || '',
-            body: body
+            body: body,
+            csrfSource: csrfSource,
+            csrfLength: csrfLength
           }));
         }).catch(fail);
       }).catch(fail);
@@ -368,9 +394,16 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     return `/${path}`;
   }
 
-  private convertEnvelope(path: string, envelope: WebFetchEnvelope, options?: JsonRequestOptions): NetworkResult<string> {
+  private convertEnvelope(path: string, envelope: WebFetchEnvelope, method: string, options?: JsonRequestOptions): NetworkResult<string> {
+    // POST 专属诊断:打印本次 CSRF token 的来源与长度,用于比对成功/403 时 token 是否不同,定位 CSRF 问题。
+    if (method === 'POST') {
+      const csrfSource: string = envelope.csrfSource ? envelope.csrfSource : 'unknown';
+      const csrfLength: number = envelope.csrfLength ? envelope.csrfLength : 0;
+      logNetwork(`POST ${path} csrf source=${csrfSource} length=${csrfLength}`);
+    }
+
     if (envelope.errorMessage) {
-      logNetwork(`GET ${path} envelope error=${envelope.errorMessage}`);
+      logNetwork(`${method} ${path} envelope error=${envelope.errorMessage}`);
       return {
         success: false,
         statusCode: 0,
@@ -387,11 +420,11 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     const contentType: string = envelope.contentType ? envelope.contentType : '';
     const body: string = envelope.body ? envelope.body : '';
     const challengeState: ChallengeState = detectChallenge(statusCode, contentType, body);
-    logNetwork(`GET ${path} response status=${statusCode} contentType=${contentType} bodyLength=${body.length} challenge=${challengeState}`);
-    this.logResponseBody(path, contentType, body);
+    logNetwork(`${method} ${path} response status=${statusCode} contentType=${contentType} bodyLength=${body.length} challenge=${challengeState}`);
+    this.logResponseBody(path, contentType, body, method);
 
     if (challengeState !== ChallengeState.NONE) {
-      logNetwork(`GET ${path} requires challenge state=${challengeState}`);
+      logNetwork(`${method} ${path} requires challenge state=${challengeState}`);
       if (options?.notifyChallenge !== false) {
         ChallengeEventBus.notifyChallengeRequired(path, statusCode, challengeState);
       }
@@ -408,7 +441,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
 
     if (statusCode < 200 || statusCode >= 300) {
-      logNetwork(`GET ${path} unexpected status=${statusCode}`);
+      logNetwork(`${method} ${path} unexpected status=${statusCode}`);
       return {
         success: false,
         statusCode: statusCode,
@@ -428,25 +461,25 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       data: body
     };
 
-    logNetwork(`GET ${path} success status=${statusCode} bodyLength=${body.length}`);
+    logNetwork(`${method} ${path} success status=${statusCode} bodyLength=${body.length}`);
     return result;
   }
 
-  private logResponseBody(path: string, contentType: string, body: string): void {
+  private logResponseBody(path: string, contentType: string, body: string, method: string): void {
     const formattedBody: string = this.formatBodyForLog(contentType, body);
     const chunkCount: number = Math.ceil(formattedBody.length / BODY_LOG_CHUNK_SIZE);
 
-    logNetworkBody(`GET ${path} body begin contentType=${contentType} rawLength=${body.length} formattedLength=${formattedBody.length} chunks=${chunkCount}`);
+    logNetworkBody(`${method} ${path} body begin contentType=${contentType} rawLength=${body.length} formattedLength=${formattedBody.length} chunks=${chunkCount}`);
     if (formattedBody.length === 0) {
-      logNetworkBody(`GET ${path} body chunk 1/1: `);
+      logNetworkBody(`${method} ${path} body chunk 1/1: `);
     }
 
     for (let start: number = 0; start < formattedBody.length; start += BODY_LOG_CHUNK_SIZE) {
       const chunkIndex: number = Math.floor(start / BODY_LOG_CHUNK_SIZE) + 1;
       const chunk: string = formattedBody.substring(start, start + BODY_LOG_CHUNK_SIZE);
-      logNetworkBody(`GET ${path} body chunk ${chunkIndex}/${chunkCount}: ${chunk}`);
+      logNetworkBody(`${method} ${path} body chunk ${chunkIndex}/${chunkCount}: ${chunk}`);
     }
-    logNetworkBody(`GET ${path} body end`);
+    logNetworkBody(`${method} ${path} body end`);
   }
 
   private formatBodyForLog(contentType: string, body: string): string {

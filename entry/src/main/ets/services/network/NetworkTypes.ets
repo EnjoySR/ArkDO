@@ -27,6 +27,8 @@ export interface NetworkResult<T> {
 
 export interface JsonRequestOptions {
   notifyChallenge?: boolean;
+  // POST 专用:把请求的 Referer 设成同源的某个页面(如帖子页),让请求更像浏览器真实发出的。
+  referrer?: string;
 }
 
 export interface JsonNetworkClient {
