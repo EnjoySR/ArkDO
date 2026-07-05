@@ -32,6 +32,8 @@ export struct TopicDetailPage {
   @State private showImageViewer: boolean = false;
   @State private viewerImages: ViewerImage[] = [];
   @State private viewerStartIndex: number = 0;
+  // 顶部摘要(标题/分类/标签)是否可见:滑出视口后,头部由"帖子详情"切换为显示帖子标题与分类标签行。
+  @State private summaryVisible: boolean = true;
   param: TopicDetailRouteParam = {
     topicId: 0,
     title: ''
@@ -97,27 +99,67 @@ export struct TopicDetailPage {
   build() {
     Stack() {
     Column() {
-      Row() {
-        Button('返回')
-          .fontSize(15)
-          .fontColor('#2563EB')
-          .backgroundColor('#F3F4F6')
-          .height(36)
-          .padding({ left: 16, right: 16 })
-          .borderRadius(18)
-          .onClick(() => {
-            this.onBack();
-          })
+      Row({ space: 8 }) {
+        Button({ type: ButtonType.Circle, stateEffect: true }) {
+          SymbolGlyph($r('sys.symbol.chevron_left'))
+            .fontSize(28)
+            .fontColor([Color.Black])
+            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+        }
+        .width(40)
+        .height(40)
+        .backgroundColor('#E6E8E9')
+        .onClick(() => {
+          this.onBack();
+        })
 
-        Text('帖子详情')
-          .fontSize(20)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#111827')
-          .margin({ left: 16 })
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        // 两种标题内容始终挂载、叠层显示,靠 opacity+translate 随 summaryVisible 做淡入+竖向上滑切换。
+        Stack({ alignContent: Alignment.Start }) {
+          // 图层 A:摘要在视口内时显示的静态标题「帖子详情」。
+          Text('帖子详情')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('sys.color.font_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+            .opacity(this.summaryVisible ? 1 : 0)
+            .translate({ y: this.summaryVisible ? 0 : -8 })
+            .hitTestBehavior(this.summaryVisible ? HitTestMode.Default : HitTestMode.None)
+            .animation({ duration: 250, curve: Curve.EaseInOut })
+
+          // 图层 B:摘要滑出后显示的帖子标题 + 分类/标签行。
+          Column({ space: 2 }) {
+            Text(this.getTitle())
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('sys.color.font_primary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+
+            if (this.hasBadges()) {
+              TopicMetadataBadges({
+                category: this.findCategory(this.detail?.categoryId),
+                parentCategory: this.findParentCategory(this.detail?.categoryId),
+                tags: this.getTags()
+              })
+              .width('100%')
+            }
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .justifyContent(FlexAlign.Center)
+          .opacity(this.summaryVisible ? 0 : 1)
+          .translate({ y: this.summaryVisible ? 8 : 0 })
+          .hitTestBehavior(this.summaryVisible ? HitTestMode.None : HitTestMode.Default)
+          .animation({ duration: 250, curve: Curve.EaseInOut })
+        }
+        .layoutWeight(1)
+        .alignContent(Alignment.Start)
       }
       .width('100%')
+      .justifyContent(FlexAlign.Start)
       .height(60)
       .padding({ left: 16, right: 16 })
       .backgroundColor('#FFFFFF')
@@ -165,12 +207,14 @@ export struct TopicDetailPage {
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: 20, right: 20 })
+        .padding({ left: 10, right: 10 })
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .onScrollIndex((start: number, end: number) => {
           this.trackMaxSeenPostNumber(end);
           this.updateOnscreenPosts(start, end);
           this.readingTracker.scrolled();
+          // 摘要 ListItem 固定为 index 0:仍在视口内(start===0)显示"帖子详情",滑出后显示帖子标题与分类标签。
+          this.summaryVisible = start === 0;
         })
         .onReachEnd(() => {
           this.loadMorePosts();
