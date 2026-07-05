@@ -9,6 +9,9 @@ import {
 import { ViewerImage } from './ImageViewer';
 
 const LOG_TAG: string = '[ArkDO][PostRichContent]';
+// 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
+// 不撑满栏宽，避免小表情被 .width('100%') 拉成大方块。
+const SMALL_IMAGE_MAX: number = 48;
 
 @Component
 export struct PostRichContent {
@@ -180,7 +183,17 @@ export struct PostRichContent {
   @Builder
   private ImageBlock(block: RichBlock, marginTop: number) {
     Column() {
-      if (this.hasImageSize(block)) {
+      if (this.isSmallImage(block)) {
+        // 小图（如 emoji、图标）：按 cooked 自带的真实尺寸显示，左对齐、不撑满、不显示 alt
+        Image(block.src ? block.src : '')
+          .width(block.width ? block.width : 20)
+          .height(block.height ? block.height : 20)
+          .objectFit(ImageFit.Contain)
+          .draggable(false)
+          .onClick(() => {
+            this.openImageLink(block);
+          })
+      } else if (this.hasImageSize(block)) {
         Image(block.src ? block.src : '')
           .width('100%')
           .aspectRatio(this.getImageAspectRatio(block))
@@ -201,7 +214,7 @@ export struct PostRichContent {
           })
       }
 
-      if (block.alt && block.alt.length > 0) {
+      if (!this.isSmallImage(block) && block.alt && block.alt.length > 0) {
         Text(block.alt)
           .fontSize(12)
           .fontColor('#6B7280')
@@ -410,6 +423,13 @@ export struct PostRichContent {
     const width: number = block.width ? block.width : 0;
     const height: number = block.height ? block.height : 0;
     return width > 0 && height > 0;
+  }
+
+  // 图片自带尺寸很小（如 emoji 20×20、小图标）：按真实尺寸显示而非撑满栏宽
+  private isSmallImage(block: RichBlock): boolean {
+    const width: number = block.width ? block.width : 0;
+    const height: number = block.height ? block.height : 0;
+    return width > 0 && height > 0 && width <= SMALL_IMAGE_MAX && height <= SMALL_IMAGE_MAX;
   }
 
   private getImageAspectRatio(block: RichBlock): number {
