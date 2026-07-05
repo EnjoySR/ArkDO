@@ -105,6 +105,7 @@ export struct FaIconView {
       .objectFit(ImageFit.Contain)
       .renderMode(ImageRenderMode.Template)
       .fillColor(this.color)
+      .draggable(false)
       .width(this.getFrameSize())
       .height(this.getFrameSize())
   }

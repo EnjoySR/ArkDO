@@ -12,6 +12,7 @@ import cookedHtmlParserTest from './CookedHtmlParser.test';
 import siteServiceTest from './SiteService.test';
 import topicBadgesTest from './TopicBadges.test';
 import themeManagerTest from './ThemeManager.test';
+import reactionMutationTest from './ReactionMutation.test';
 
 export default function testsuite() {
   localUnitTest();

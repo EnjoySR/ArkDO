@@ -22,6 +22,12 @@ class FakeProbeClient implements JsonNetworkClient {
     this.notifyChallenge = options?.notifyChallenge;
     return Promise.resolve(this.result);
   }
+
+  putJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    this.requestedPath = path;
+    this.notifyChallenge = options?.notifyChallenge;
+    return Promise.resolve(this.result);
+  }
 }
 
 export default function challengeResolutionProbeTest() {

@@ -1,5 +1,5 @@
 import { Topic, TopicTag } from '../../models/Topic';
-import { TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { PostReaction, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
@@ -66,6 +66,18 @@ interface DiscoursePostStream {
   stream?: number[];
 }
 
+interface DiscourseReaction {
+  id?: string;
+  type?: string;
+  count?: number;
+}
+
+interface DiscourseCurrentReaction {
+  id?: string;
+  type?: string;
+  can_undo?: boolean;
+}
+
 interface DiscoursePost {
   id?: number;
   topic_id?: number;
@@ -82,6 +94,9 @@ interface DiscoursePost {
   like_count?: number;
   read?: boolean;
   user_title?: string;
+  reactions?: DiscourseReaction[];
+  reaction_users_count?: number;
+  current_user_reaction?: DiscourseCurrentReaction;
 }
 
 export interface TopicPage {
@@ -221,6 +236,14 @@ export class TopicService {
     const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
     // 后台上报不弹 CF 验证页(notifyChallenge:false)。
     return this.bridge.postForm('/topics/timings', body, { notifyChallenge: false, referrer: referrer });
+  }
+
+  // discourse-reactions:切换某楼的表情回应(点亮/取消/切换)。PUT 空 body,同一楼同一用户只保留一个回应。
+  async toggleReaction(postId: number, topicId: number, reaction: string): Promise<NetworkResult<string>> {
+    const path: string =
+      `/discourse-reactions/posts/${postId}/custom-reactions/${encodeURIComponent(reaction)}/toggle.json`;
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    return this.bridge.putJson(path, { notifyChallenge: false, referrer: referrer });
   }
 
   private getLatestPath(page: number): string {
@@ -405,10 +428,34 @@ export class TopicService {
       post.author = this.mapPostAuthor(sourcePost);
       post.read = typeof sourcePost.read === 'boolean' ? sourcePost.read : undefined;
       post.userTitle = typeof sourcePost.user_title === 'string' ? sourcePost.user_title : undefined;
+      post.reactions = this.mapReactions(sourcePost.reactions);
+      post.reactionUsersCount =
+        typeof sourcePost.reaction_users_count === 'number' ? sourcePost.reaction_users_count : undefined;
+      const currentReactionId: string | undefined = sourcePost.current_user_reaction?.id;
+      post.currentUserReaction =
+        typeof currentReactionId === 'string' && currentReactionId.length > 0 ? currentReactionId : undefined;
       posts.push(post);
     }
 
     return posts;
+  }
+
+  private mapReactions(source?: DiscourseReaction[]): PostReaction[] {
+    const reactions: PostReaction[] = [];
+    if (!source) {
+      return reactions;
+    }
+    for (let index: number = 0; index < source.length; index++) {
+      const item: DiscourseReaction = source[index];
+      if (typeof item.id !== 'string' || item.id.length === 0) {
+        continue;
+      }
+      reactions.push({
+        id: item.id,
+        count: typeof item.count === 'number' ? item.count : 0
+      });
+    }
+    return reactions;
   }
 
   private mapPostAuthor(sourcePost: DiscoursePost): User | undefined {

@@ -24,6 +24,11 @@ class FakeBridge implements JsonNetworkClient {
     this.postedBody = body;
     return Promise.resolve(this.result);
   }
+
+  putJson(path: string): Promise<NetworkResult<string>> {
+    this.postedPath = path;
+    return Promise.resolve(this.result);
+  }
 }
 
 class SequenceBridge implements JsonNetworkClient {
@@ -43,6 +48,13 @@ class SequenceBridge implements JsonNetworkClient {
   }
 
   postForm(path: string, body: string): Promise<NetworkResult<string>> {
+    this.requestedPaths.push(path);
+    const result: NetworkResult<string> = this.results[this.index];
+    this.index++;
+    return Promise.resolve(result);
+  }
+
+  putJson(path: string): Promise<NetworkResult<string>> {
     this.requestedPaths.push(path);
     const result: NetworkResult<string> = this.results[this.index];
     this.index++;

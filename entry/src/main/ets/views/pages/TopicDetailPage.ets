@@ -7,6 +7,7 @@ import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { AppStateEventBus } from '../../services/session/AppStateEventBus';
 import { TopicReadStateEventBus } from '../../services/session/TopicReadStateEventBus';
 import { ReadingTracker } from '../../services/reading/ReadingTracker';
+import { ReactionMutation, ReactionSnapshot } from '../../services/topic/ReactionMutation';
 import { TopicService } from '../../services/topic/TopicService';
 import { SiteMetadata, SiteService } from '../../services/site/SiteService';
 import { TopicMetadataBadges } from '../components/TopicBadges';
@@ -180,6 +181,9 @@ export struct TopicDetailPage {
               lastReadPostNumber: this.detail?.lastReadPostNumber ?? -1,
               onOpenImages: (images: ViewerImage[], startIndex: number) => {
                 this.openImageViewer(images, startIndex);
+              },
+              onToggleReaction: (targetPost: TopicPost, reaction: string, snapshot: ReactionSnapshot) => {
+                this.handleToggleReaction(targetPost, reaction, snapshot);
               }
             })
           }, (post: TopicPost) => post.id.toString())
@@ -456,6 +460,18 @@ export struct TopicDetailPage {
   // 离开详情页时把该主题的已读状态回传给列表页:
   // 蓝点消失(unseen=false),未读徽标 = 最高楼号 − 已读到的最高楼号(可能只加载了部分楼层,
   // 但 highestPostNumber/stream 在首屏就给了全量总数,所以未读数依然准确)。
+  // 切换某楼表情回应:先乐观更新(@Observed 即时重渲染),再发 PUT;失败回滚到快照。
+  private async handleToggleReaction(post: TopicPost, reaction: string, snapshot: ReactionSnapshot): Promise<void> {
+    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
+    const result: NetworkResult<string> =
+      await new TopicService(this.bridge).toggleReaction(post.id, topicId, reaction);
+
+    if (!result.success) {
+      console.info(`${LOG_TAG} toggle reaction failed postId=${post.id} reaction=${reaction} status=${result.statusCode}, rollback`);
+      ReactionMutation.restore(post, snapshot);
+    }
+  }
+
   private publishReadStateToList(): void {
     const detail: TopicDetail | undefined = this.detail;
     if (!detail) {
