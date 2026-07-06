@@ -241,7 +241,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     try {
       const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(this.createPostFormScript(requestPath, body, referrer));
+      const rawResult: string = await this.executor.run(this.createFormScript('POST', requestPath, body, referrer));
       logNetwork(`POST ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
       return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
     } catch (error) {
@@ -339,6 +339,56 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
+  async putForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    return this.sendFormWithBody('PUT', path, body, options);
+  }
+
+  async deleteForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    return this.sendFormWithBody('DELETE', path, body, options);
+  }
+
+  // PUT/DELETE + form body 的公共实现(投票/撤销投票用)。与 postForm 同源取 CSRF、带 cookie,
+  // 仅 HTTP method 不同。
+  private async sendFormWithBody(method: string, path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    const requestPath: string = this.normalizePath(path);
+    logNetwork(`${method} ${requestPath} start bodyLength=${body.length}`);
+
+    if (!this.executor) {
+      logNetwork(`${method} ${requestPath} skipped: ArkWeb host is not ready`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 宿主尚未就绪。',
+          requiresChallenge: false
+        }
+      };
+    }
+
+    await this.whenHostReady();
+
+    try {
+      const referrer: string = options?.referrer ? options.referrer : '';
+      const rawResult: string = await this.executor.run(this.createFormScript(method, requestPath, body, referrer));
+      logNetwork(`${method} ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, method, options);
+    } catch (error) {
+      logNetwork(`${method} ${requestPath} failed before response envelope`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 请求失败。',
+          requiresChallenge: false
+        }
+      };
+    }
+  }
+
   private createFetchScript(path: string): string {
     const encodedPath: string = JSON.stringify(path);
 
@@ -381,12 +431,14 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     })();`;
   }
 
-  private createPostFormScript(path: string, body: string, referrer: string): string {
+  // 表单请求脚本(POST/PUT/DELETE + application/x-www-form-urlencoded body)。method 由入参决定。
+  private createFormScript(method: string, path: string, body: string, referrer: string): string {
     const encodedPath: string = JSON.stringify(path);
     const encodedBody: string = JSON.stringify(body);
     const encodedReferrer: string = JSON.stringify(referrer);
+    const encodedMethod: string = JSON.stringify(method);
 
-    // 同源脚本:先取 CSRF token(优先 /session/csrf.json,兜底页面 meta),再带头 POST。
+    // 同源脚本:先取 CSRF token(优先 /session/csrf.json,兜底页面 meta),再带头发请求。
     // cookie 靠 credentials:'include' 自动携带;结果照旧走 window.ArkDOBridge.onJsonResult。
     return `(() => {
       const requestId = '${REQUEST_ID_TOKEN}';
@@ -423,7 +475,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
         }
         csrfLength = csrf ? csrf.length : 0;
         const fetchOptions = {
-          method: 'POST',
+          method: ${encodedMethod},
           credentials: 'include',
           cache: 'no-store',
           headers: {
@@ -438,7 +490,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
           },
           body: ${encodedBody}
         };
-        // 把 Referer 设成同源帖子页(对齐官方请求),让 CF 不再把这条后台 POST 当异常。
+        // 把 Referer 设成同源帖子页(对齐官方请求),让 CF 不再把这条后台请求当异常。
         const _ref = ${encodedReferrer};
         if (_ref) {
           fetchOptions.referrer = _ref;

@@ -38,4 +38,8 @@ export interface JsonNetworkClient {
   postJson(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
   // PUT + 空 body(表情回应 toggle 用),CSRF/cookie 与 postForm 同源自动处理。
   putJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
+  // PUT + application/x-www-form-urlencoded body(投票 PUT /polls/vote 用),CSRF/cookie 同源自动处理。
+  putForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
+  // DELETE + application/x-www-form-urlencoded body(撤销投票 DELETE /polls/vote 用),CSRF/cookie 同源自动处理。
+  deleteForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
 }

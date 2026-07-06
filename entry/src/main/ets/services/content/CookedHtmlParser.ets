@@ -9,6 +9,7 @@ export enum RichBlockType {
   LIST = 'list',
   DISCLOSURE = 'disclosure',
   DIVIDER = 'divider',
+  POLL = 'poll',
   UNSUPPORTED = 'unsupported'
 }
 
@@ -51,6 +52,8 @@ export interface RichBlock {
   href?: string;
   ordered?: boolean;
   level?: number;
+  // POLL 块:data-poll-name,用于在正文正确位置占位、并按名字关联 TopicPost.polls 的动态数据。
+  pollName?: string;
 }
 
 class InlineState {
@@ -239,6 +242,17 @@ export class CookedHtmlParser {
 
     if (tagName === 'ul' || tagName === 'ol') {
       return [CookedHtmlParser.listBlockFromHtml(innerHtml, tagName === 'ol')];
+    }
+
+    // discourse-poll:<div class="poll" data-poll-name="...">。产出轻量 POLL 占位块(只带 name),
+    // 保持它在正文流的正确位置;真正的票数/选项/交互由渲染层按 name 关联 TopicPost.polls 的动态数据。
+    if (CookedHtmlParser.hasClassContaining(openTag, 'poll') ||
+      CookedHtmlParser.extractAttr(openTag, 'data-poll-name').length > 0) {
+      const pollName: string = CookedHtmlParser.extractAttr(openTag, 'data-poll-name');
+      return [{
+        type: RichBlockType.POLL,
+        pollName: pollName.length > 0 ? pollName : 'poll'
+      }];
     }
 
     const unsupportedKind: string = CookedHtmlParser.detectUnsupportedKind(tagName, openTag, innerHtml);
@@ -971,6 +985,10 @@ export class CookedHtmlParser {
     }
     if (block.type === RichBlockType.DISCLOSURE) {
       return (!!block.title && block.title.length > 0) || (!!block.blocks && block.blocks.length > 0);
+    }
+    if (block.type === RichBlockType.POLL) {
+      // POLL 块无 inlines/blocks,仅靠 pollName 占位,别被内容过滤器丢掉。
+      return true;
     }
     return true;
   }

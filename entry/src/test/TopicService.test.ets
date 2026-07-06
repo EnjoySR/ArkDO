@@ -29,6 +29,24 @@ class FakeBridge implements JsonNetworkClient {
     this.postedPath = path;
     return Promise.resolve(this.result);
   }
+
+  postJson(path: string, body: string): Promise<NetworkResult<string>> {
+    this.postedPath = path;
+    this.postedBody = body;
+    return Promise.resolve(this.result);
+  }
+
+  putForm(path: string, body: string): Promise<NetworkResult<string>> {
+    this.postedPath = path;
+    this.postedBody = body;
+    return Promise.resolve(this.result);
+  }
+
+  deleteForm(path: string, body: string): Promise<NetworkResult<string>> {
+    this.postedPath = path;
+    this.postedBody = body;
+    return Promise.resolve(this.result);
+  }
 }
 
 class SequenceBridge implements JsonNetworkClient {
@@ -55,6 +73,27 @@ class SequenceBridge implements JsonNetworkClient {
   }
 
   putJson(path: string): Promise<NetworkResult<string>> {
+    this.requestedPaths.push(path);
+    const result: NetworkResult<string> = this.results[this.index];
+    this.index++;
+    return Promise.resolve(result);
+  }
+
+  postJson(path: string, body: string): Promise<NetworkResult<string>> {
+    this.requestedPaths.push(path);
+    const result: NetworkResult<string> = this.results[this.index];
+    this.index++;
+    return Promise.resolve(result);
+  }
+
+  putForm(path: string, body: string): Promise<NetworkResult<string>> {
+    this.requestedPaths.push(path);
+    const result: NetworkResult<string> = this.results[this.index];
+    this.index++;
+    return Promise.resolve(result);
+  }
+
+  deleteForm(path: string, body: string): Promise<NetworkResult<string>> {
     this.requestedPaths.push(path);
     const result: NetworkResult<string> = this.results[this.index];
     this.index++;

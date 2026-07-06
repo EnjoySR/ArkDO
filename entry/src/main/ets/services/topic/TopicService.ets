@@ -1,5 +1,5 @@
 import { Topic, TopicTag } from '../../models/Topic';
-import { PostBoost, PostReaction, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { Poll, PollOption, PollVoteResult, PostBoost, PostReaction, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
@@ -94,6 +94,25 @@ interface DiscourseBoost {
   user?: DiscourseBoostUser;
 }
 
+// discourse-poll:一个投票选项(id + 展示 html + 票数)。
+interface DiscoursePollOption {
+  id?: string;
+  html?: string;
+  votes?: number;
+}
+
+// discourse-poll:一个投票的服务端结构。
+interface DiscoursePoll {
+  name?: string;
+  type?: string;
+  status?: string;
+  public?: boolean;
+  results?: string;
+  options?: DiscoursePollOption[];
+  voters?: number;
+  title?: string;
+}
+
 interface DiscoursePost {
   id?: number;
   topic_id?: number;
@@ -115,6 +134,16 @@ interface DiscoursePost {
   current_user_reaction?: DiscourseCurrentReaction;
   boosts?: DiscourseBoost[];
   can_boost?: boolean;
+  // discourse-poll:该楼的投票列表、当前用户各投票的已投项、能否投票。
+  polls?: DiscoursePoll[];
+  polls_votes?: Record<string, string[]>;
+  can_vote?: boolean;
+}
+
+// PUT/DELETE /polls/vote 的响应外壳:poll 为更新后的投票,vote 为当前用户已投项(撤销时缺省)。
+interface DiscoursePollVoteResponse {
+  poll?: DiscoursePoll;
+  vote?: string[];
 }
 
 // POST /posts 的响应外壳:真正的楼层在 post 字段里,不在顶层。
@@ -302,6 +331,57 @@ export class TopicService {
       `/discourse-reactions/posts/${postId}/custom-reactions/${encodeURIComponent(reaction)}/toggle.json`;
     const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
     return this.bridge.putJson(path, { notifyChallenge: false, referrer: referrer });
+  }
+
+  // discourse-poll:给某楼的投票投票。PUT /polls/vote,form body:post_id、poll_name、options[]。
+  // 响应 200 返回 { poll:{更新后}, vote:[已投项] };解析出票数/人数/已投项供本地校正。
+  async votePoll(postId: number, topicId: number, pollName: string, optionIds: string[]): Promise<NetworkResult<PollVoteResult>> {
+    const parts: string[] = [`post_id=${postId}`, `poll_name=${encodeURIComponent(pollName)}`];
+    for (let index: number = 0; index < optionIds.length; index++) {
+      parts.push(`options%5B%5D=${encodeURIComponent(optionIds[index])}`);
+    }
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    const response: NetworkResult<string> =
+      await this.bridge.putForm('/polls/vote', parts.join('&'), { notifyChallenge: false, referrer: referrer });
+    return this.parsePollVoteResponse(response);
+  }
+
+  // discourse-poll:撤销某楼投票。DELETE /polls/vote,form body:post_id、poll_name。
+  // 响应 200 返回 { poll:{更新后} }(无 vote,即已投项为空)。
+  async removePollVote(postId: number, topicId: number, pollName: string): Promise<NetworkResult<PollVoteResult>> {
+    const body: string = `post_id=${postId}&poll_name=${encodeURIComponent(pollName)}`;
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    const response: NetworkResult<string> =
+      await this.bridge.deleteForm('/polls/vote', body, { notifyChallenge: false, referrer: referrer });
+    return this.parsePollVoteResponse(response);
+  }
+
+  private parsePollVoteResponse(response: NetworkResult<string>): NetworkResult<PollVoteResult> {
+    if (!response.success) {
+      return this.forwardFailure<PollVoteResult>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, 'Linux.do 投票响应为空。');
+    }
+    try {
+      const wrapper: DiscoursePollVoteResponse = JSON.parse(response.data) as DiscoursePollVoteResponse;
+      if (!wrapper.poll) {
+        return this.unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, 'Linux.do 投票响应缺少 poll 字段。');
+      }
+      const chosen: string[] = Array.isArray(wrapper.vote) ? wrapper.vote.slice() : [];
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: {
+          options: this.mapPollOptions(wrapper.poll.options),
+          voters: typeof wrapper.poll.voters === 'number' ? wrapper.poll.voters : 0,
+          chosenOptionIds: chosen
+        }
+      };
+    } catch (error) {
+      return this.unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, 'Linux.do 投票响应不是有效 JSON。');
+    }
   }
 
   // 发表评论/回复:POST /posts,body 为 JSON(对齐官方 composer 提交)。
@@ -607,6 +687,7 @@ export class TopicService {
         typeof currentReactionId === 'string' && currentReactionId.length > 0 ? currentReactionId : undefined;
       post.boosts = this.mapBoosts(sourcePost.boosts);
       post.canBoost = sourcePost.can_boost === true;
+      post.polls = this.mapPolls(sourcePost);
       posts.push(post);
     }
 
@@ -652,6 +733,53 @@ export class TopicService {
       });
     }
     return boosts;
+  }
+
+  private mapPolls(sourcePost: DiscoursePost): Poll[] {
+    const polls: Poll[] = [];
+    const source: DiscoursePoll[] | undefined = sourcePost.polls;
+    if (!source) {
+      return polls;
+    }
+    const canVote: boolean = sourcePost.can_vote === true;
+    const votesMap: Record<string, string[]> | undefined = sourcePost.polls_votes;
+    for (let index: number = 0; index < source.length; index++) {
+      const item: DiscoursePoll = source[index];
+      // Poll 为 @Observed class,须 new 实例(对象字面量不会被 @ObjectLink 观测)。
+      const poll: Poll = new Poll();
+      poll.name = typeof item.name === 'string' && item.name.length > 0 ? item.name : 'poll';
+      poll.title = typeof item.title === 'string' ? item.title : undefined;
+      poll.type = typeof item.type === 'string' ? item.type : 'regular';
+      poll.status = typeof item.status === 'string' ? item.status : 'open';
+      poll.isPublic = item.public === true;
+      poll.results = typeof item.results === 'string' ? item.results : 'always';
+      poll.options = this.mapPollOptions(item.options);
+      poll.voters = typeof item.voters === 'number' ? item.voters : 0;
+      const chosen: string[] | undefined = votesMap ? votesMap[poll.name] : undefined;
+      poll.chosenOptionIds = Array.isArray(chosen) ? chosen.slice() : [];
+      poll.canVote = canVote;
+      polls.push(poll);
+    }
+    return polls;
+  }
+
+  private mapPollOptions(source?: DiscoursePollOption[]): PollOption[] {
+    const options: PollOption[] = [];
+    if (!source) {
+      return options;
+    }
+    for (let index: number = 0; index < source.length; index++) {
+      const item: DiscoursePollOption = source[index];
+      if (typeof item.id !== 'string' || item.id.length === 0) {
+        continue;
+      }
+      options.push({
+        id: item.id,
+        label: CookedHtmlParser.toPlainText(item.html ? item.html : ''),
+        votes: typeof item.votes === 'number' ? item.votes : 0
+      });
+    }
+    return options;
   }
 
   private mapBoostUser(source?: DiscourseBoostUser): User | undefined {

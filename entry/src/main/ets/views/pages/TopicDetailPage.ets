@@ -1,6 +1,6 @@
 import window from '@ohos.window';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
-import { PostBoost, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { Poll, PollVoteResult, PostBoost, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { TopicCategory, TopicTag } from '../../models/Topic';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
@@ -9,6 +9,7 @@ import { AppStateEventBus } from '../../services/session/AppStateEventBus';
 import { TopicReadStateEventBus } from '../../services/session/TopicReadStateEventBus';
 import { ReadingTracker } from '../../services/reading/ReadingTracker';
 import { ReactionMutation, ReactionSnapshot } from '../../services/topic/ReactionMutation';
+import { PollMutation, PollSnapshot } from '../../services/topic/PollMutation';
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
 import { SiteMetadata, SiteService } from '../../services/site/SiteService';
 import { TopicMetadataBadges } from '../components/TopicBadges';
@@ -256,6 +257,12 @@ export struct TopicDetailPage {
               },
               onAddBoost: (targetPost: TopicPost) => {
                 this.openComposerForBoost(targetPost);
+              },
+              onVote: (targetPost: TopicPost, poll: Poll, optionIds: string[]) => {
+                return this.handleVote(targetPost, poll, optionIds);
+              },
+              onRemoveVote: (targetPost: TopicPost, poll: Poll) => {
+                return this.handleRemoveVote(targetPost, poll);
               }
             })
           }, (post: TopicPost) => post.id.toString())
@@ -710,6 +717,42 @@ export struct TopicDetailPage {
       console.info(`${LOG_TAG} toggle reaction failed postId=${post.id} reaction=${reaction} status=${result.statusCode}, rollback`);
       ReactionMutation.restore(post, snapshot);
     }
+  }
+
+  // 投票:先乐观更新模型,再发 PUT;成功用服务端真实值校正模型并回传给 PollView,失败回滚并回传 null。
+  private async handleVote(post: TopicPost, poll: Poll, optionIds: string[]): Promise<PollVoteResult | null> {
+    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
+    const snapshot: PollSnapshot = PollMutation.snapshot(poll);
+    PollMutation.applyVote(poll, optionIds);
+
+    const result: NetworkResult<PollVoteResult> =
+      await new TopicService(this.bridge).votePoll(post.id, topicId, poll.name, optionIds);
+
+    if (result.success && result.data) {
+      PollMutation.applyServerResult(poll, result.data);
+      return result.data;
+    }
+    console.info(`${LOG_TAG} vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
+    PollMutation.restore(poll, snapshot);
+    return null;
+  }
+
+  // 撤销投票:先乐观更新模型,再发 DELETE;成功用服务端真实值校正模型并回传,失败回滚并回传 null。
+  private async handleRemoveVote(post: TopicPost, poll: Poll): Promise<PollVoteResult | null> {
+    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
+    const snapshot: PollSnapshot = PollMutation.snapshot(poll);
+    PollMutation.applyRemove(poll);
+
+    const result: NetworkResult<PollVoteResult> =
+      await new TopicService(this.bridge).removePollVote(post.id, topicId, poll.name);
+
+    if (result.success && result.data) {
+      PollMutation.applyServerResult(poll, result.data);
+      return result.data;
+    }
+    console.info(`${LOG_TAG} remove vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
+    PollMutation.restore(poll, snapshot);
+    return null;
   }
 
   private publishReadStateToList(): void {

@@ -7,6 +7,8 @@ import {
   RichListItem
 } from '../../services/content/CookedHtmlParser';
 import { ViewerImage } from './ImageViewer';
+import { Poll, PollVoteResult } from '../../models/TopicDetail';
+import { PollView } from './PollView';
 
 const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
@@ -20,7 +22,19 @@ export struct PostRichContent {
   // 图片浏览器提到页面级渲染（bindContentCover 内部内容不会随状态刷新），
   // 这里只负责收集本帖图片并把「打开」请求回调给上层页面。
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
+  // 该 post 的投票列表(动态票数/已投项);cooked 里的 POLL 块按 name 关联到这里的 Poll 对象。
+  polls: Poll[] = [];
+  // 投票/撤销回调上抛给页面做乐观闭环。返回服务端校正结果;null=失败(供 PollView 回滚本地态)。
+  onVote: (poll: Poll, optionIds: string[]) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
+  onRemoveVote: (poll: Poll) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
+  // @State 副本(持有与 polls 相同的 @Observed 实例)。PollView 的 @ObjectLink 必须以「状态变量的数组项」
+  // 作为数据源,才能在投票/撤销就地改 Poll 字段后重渲染;若直接源自普通输入属性 polls,deep 变更不会传播。
+  @State private renderablePolls: Poll[] = [];
   @State private expandedDisclosures: string[] = [];
+
+  aboutToAppear(): void {
+    this.renderablePolls = this.polls;
+  }
 
   build() {
     Column() {
@@ -53,9 +67,33 @@ export struct PostRichContent {
         .strokeWidth(1)
         .color('#E5E7EB')
         .margin({ top: index > 0 ? 14 : 4, bottom: 4 })
+    } else if (block.type === RichBlockType.POLL) {
+      this.PollBlock(block, index > 0 ? 12 : 0)
     } else {
       this.UnsupportedBlock(block, index > 0 ? 10 : 0)
     }
+  }
+
+  @Builder
+  private PollBlock(block: RichBlock, marginTop: number) {
+    // 直接 ForEach @State 数组,把匹配的 Poll 实例作为循环变量传给 PollView 的 @ObjectLink
+    // (数据源须是「状态变量的数组项」,投票/撤销就地改字段后才会重渲染)。名字匹配的才渲染。
+    Column() {
+      ForEach(this.renderablePolls, (poll: Poll) => {
+        if (this.pollMatchesBlock(poll, block.pollName)) {
+          Column() {
+            PollView({
+              poll: poll,
+              onVote: this.onVote,
+              onRemoveVote: this.onRemoveVote
+            })
+          }
+          .width('100%')
+        }
+      }, (poll: Poll) => poll.name)
+    }
+    .width('100%')
+    .margin({ top: marginTop })
   }
 
   @Builder
@@ -361,6 +399,23 @@ export struct PostRichContent {
 
   private safeItems(block: RichBlock): RichListItem[] {
     return block.items ? block.items : [];
+  }
+
+  // POLL 块只带 name,按 name 关联到 renderablePolls 里的动态 Poll。精确匹配优先;
+  // 无精确匹配且仅一个投票时兜底给它(cooked 的 data-poll-name 与 API name 偶有差异)。
+  private pollMatchesBlock(poll: Poll, name?: string): boolean {
+    const target: string = name && name.length > 0 ? name : 'poll';
+    if (poll.name === target) {
+      return true;
+    }
+    let hasExact: boolean = false;
+    for (let index: number = 0; index < this.renderablePolls.length; index++) {
+      if (this.renderablePolls[index].name === target) {
+        hasExact = true;
+        break;
+      }
+    }
+    return !hasExact && this.renderablePolls.length === 1;
   }
 
   private getUnsupportedLabel(block: RichBlock): string {

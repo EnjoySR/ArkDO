@@ -25,6 +25,21 @@ class FakeBridge implements JsonNetworkClient {
     this.requestedPath = path;
     return Promise.resolve(this.result);
   }
+
+  postJson(path: string, body: string): Promise<NetworkResult<string>> {
+    this.requestedPath = path;
+    return Promise.resolve(this.result);
+  }
+
+  putForm(path: string, body: string): Promise<NetworkResult<string>> {
+    this.requestedPath = path;
+    return Promise.resolve(this.result);
+  }
+
+  deleteForm(path: string, body: string): Promise<NetworkResult<string>> {
+    this.requestedPath = path;
+    return Promise.resolve(this.result);
+  }
 }
 
 export default function authServiceTest() {

@@ -130,19 +130,26 @@ export default function cookedHtmlParserTest() {
       expect(blocks[1].type).assertEqual(RichBlockType.PARAGRAPH);
     });
 
-    it('marksUnsupportedDiscourseBlocksAsTodo', 0, () => {
-      const html: string = '<div class="poll" data-poll-name="poll"><div class="poll-container">选项 A</div></div>' +
-        '<table><tr><td>A</td></tr></table>';
+    it('parsesPollBlockWithName', 0, () => {
+      const html: string =
+        '<div class="poll" data-poll-name="poll"><div class="poll-container">选项 A</div></div>';
 
       const blocks: RichBlock[] = CookedHtmlParser.parse(html);
 
-      expect(blocks.length).assertEqual(2);
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.POLL);
+      expect(blocks[0].pollName).assertEqual('poll');
+    });
+
+    it('marksUnsupportedDiscourseBlocksAsTodo', 0, () => {
+      const html: string = '<table><tr><td>A</td></tr></table>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
       expect(blocks[0].type).assertEqual(RichBlockType.UNSUPPORTED);
-      expect(blocks[0].unsupportedKind).assertEqual('投票');
-      expect(blocks[0].text).assertEqual('选项 A');
-      expect(blocks[1].type).assertEqual(RichBlockType.UNSUPPORTED);
-      expect(blocks[1].unsupportedKind).assertEqual('表格');
-      expect(blocks[1].text).assertEqual('A');
+      expect(blocks[0].unsupportedKind).assertEqual('表格');
+      expect(blocks[0].text).assertEqual('A');
     });
   });
 }

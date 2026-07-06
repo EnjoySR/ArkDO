@@ -1,5 +1,5 @@
 import { curves } from '@kit.ArkUI';
-import { PostBoost, PostReaction, TopicPost } from '../../models/TopicDetail';
+import { Poll, PollVoteResult, PostBoost, PostReaction, TopicPost } from '../../models/TopicDetail';
 import { CookedHtmlParser, RichInlineNode, RichInlineType } from '../../services/content/CookedHtmlParser';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { ReactionMutation, ReactionSnapshot } from '../../services/topic/ReactionMutation';
@@ -38,6 +38,9 @@ export struct TopicPostItem {
   onReply: (post: TopicPost) => void = () => {};
   // 点火箭:把整条 post 上抛给页面,由页面打开 boost 输入浮层。
   onAddBoost: (post: TopicPost) => void = () => {};
+  // 投票/撤销:把整条 post 与目标 poll 上抛给页面做乐观闭环。返回服务端校正结果;null=失败。
+  onVote: (post: TopicPost, poll: Poll, optionIds: string[]) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
+  onRemoveVote: (post: TopicPost, poll: Poll) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
   @State private showReactionPicker: boolean = false;
   // 点赞按钮图标的弹簧缩放:每次切换回应时做一次 pop(先缩到 0.7,再用弹簧回弹到 1,带 overshoot)。
   @State private likeIconScale: number = 1;
@@ -50,7 +53,14 @@ export struct TopicPostItem {
         PostRichContent({
           cookedHtml: this.post.cookedHtml,
           fallbackText: this.post.plainText,
-          onOpenImages: this.onOpenImages
+          onOpenImages: this.onOpenImages,
+          polls: this.post.polls ? this.post.polls : [],
+          onVote: (poll: Poll, optionIds: string[]) => {
+            return this.onVote(this.post, poll, optionIds);
+          },
+          onRemoveVote: (poll: Poll) => {
+            return this.onRemoveVote(this.post, poll);
+          }
         })
           .width('100%')
           .margin({ top: 12 })
