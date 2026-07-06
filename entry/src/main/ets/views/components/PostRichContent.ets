@@ -23,6 +23,8 @@ export struct PostRichContent {
   // 图片浏览器提到页面级渲染（bindContentCover 内部内容不会随状态刷新），
   // 这里只负责收集本帖图片并把「打开」请求回调给上层页面。
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
+  // 点击正文链接 / onebox 卡片时上抛给页面,由页面经 LinkRouter 判断跳原生详情或通用 WebView。
+  onOpenLink: (url: string) => void = () => {};
   // 该 post 的投票列表(动态票数/已投项);cooked 里的 POLL 块按 name 关联到这里的 Poll 对象。
   polls: Poll[] = [];
   // 投票/撤销回调上抛给页面做乐观闭环。返回服务端校正结果;null=失败(供 PollView 回滚本地态)。
@@ -70,6 +72,8 @@ export struct PostRichContent {
         .margin({ top: index > 0 ? 14 : 4, bottom: 4 })
     } else if (block.type === RichBlockType.POLL) {
       this.PollBlock(block, index > 0 ? 12 : 0)
+    } else if (block.type === RichBlockType.ONEBOX) {
+      this.OneboxBlock(block, index > 0 ? 12 : 0)
     } else {
       this.UnsupportedBlock(block, index > 0 ? 10 : 0)
     }
@@ -126,6 +130,19 @@ export struct PostRichContent {
     } else if (token.type === RichInlineType.LINE_BREAK) {
       Span('\n')
     } else if (token.type === RichInlineType.LINK && token.href && token.href.length > 0) {
+      if (token.attachment) {
+        // 附件下载链接:前置下载图标(与官方一致),图标与文字同为一个可点区域。
+        // 用已填充链接蓝的 SVG 变体——ImageSpan 无 fillColor,且 colorFilter 对矢量 SVG 不生效。
+        ImageSpan($rawfile('fa_icons/download_blue.svg'))
+          .width(16)
+          .height(16)
+          .objectFit(ImageFit.Contain)
+          .verticalAlign(ImageSpanAlignment.CENTER)
+          .margin({ right: 4 })
+          .onClick(() => {
+            this.openLink(token.href as string);
+          })
+      }
       Span(token.text)
         .fontSize(15)
         .fontColor('#2563EB')
@@ -335,6 +352,78 @@ export struct PostRichContent {
     .width('100%')
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
+  }
+
+  // 链接预览卡片(onebox)。样式对齐官方 .onebox:白底 + 双层描边(内 1px #D3D3D3、外 4px #F2F2F2)、
+  // 2px 圆角、16px 内边距。外层留 4px 内边距给 outline 让位,避免被父容器裁掉。
+  @Builder
+  private OneboxBlock(block: RichBlock, marginTop: number) {
+    Column() {
+      Column() {
+        if (this.hasOneboxHeader(block)) {
+          Row() {
+            if (block.faviconUrl && block.faviconUrl.length > 0) {
+              Image(block.faviconUrl)
+                .width(16)
+                .height(16)
+                .objectFit(ImageFit.Contain)
+                .borderRadius(3)
+                .margin({ right: 8 })
+                .draggable(false)
+            }
+            Text(block.domain ? block.domain : '')
+              .fontSize(14)
+              .fontColor('#6B7280')
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+        }
+
+        if (block.title && block.title.length > 0) {
+          Text(block.title)
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#2563EB')
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+            .margin({ top: this.hasOneboxHeader(block) ? 10 : 0 })
+        }
+
+        if (block.description && block.description.length > 0) {
+          Text(block.description)
+            .fontSize(15)
+            .lineHeight(22)
+            .fontColor('#222222')
+            .wordBreak(WordBreak.BREAK_ALL)
+            .maxLines(3)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+            .margin({ top: (block.title && block.title.length > 0) || this.hasOneboxHeader(block) ? 8 : 0 })
+        }
+      }
+      .width('100%')
+      .padding(16)
+      .backgroundColor('#FFFFFF')
+      .borderRadius(2)
+      .border({ width: 1, color: '#D3D3D3' })
+      .outline({ width: 4, color: '#F2F2F2', radius: 2 })
+      .alignItems(HorizontalAlign.Start)
+      .onClick(() => {
+        this.openLink(block.href ? block.href : '');
+      })
+    }
+    .width('100%')
+    .padding({ left: 4, right: 4, bottom: 4 })
+    .margin({ top: marginTop })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  private hasOneboxHeader(block: RichBlock): boolean {
+    return (!!block.domain && block.domain.length > 0) || (!!block.faviconUrl && block.faviconUrl.length > 0);
   }
 
   @Builder
@@ -595,6 +684,7 @@ export struct PostRichContent {
       return;
     }
     console.info(`${LOG_TAG} link clicked url=${this.safeLinkLabel(url)}`);
+    this.onOpenLink(url);
   }
 
   private safeLinkLabel(url: string): string {

@@ -3,10 +3,13 @@ import { User } from '../../models/User';
 import { Topic, TopicCategory } from '../../models/Topic';
 import { TopicListItem } from '../components/TopicListItem';
 import { UserAvatar } from '../components/UserAvatar';
+import { NotificationBell } from '../components/NotificationBell';
+import { PulsingHalo } from '../components/PulsingHalo';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { TopicReadState, TopicReadStateEventBus } from '../../services/session/TopicReadStateEventBus';
+import { NotificationEventBus, NotificationSnapshot } from '../../services/notification/NotificationEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { SiteMetadata, SiteService } from '../../services/site/SiteService';
 
@@ -25,6 +28,9 @@ export struct HomePage {
   @State private requiresChallenge: boolean = false;
   @State private loadFailed: boolean = false;
   @State private categories: TopicCategory[] = [];
+  // 头像铃铛未读数:由 NotificationEventBus 广播驱动(NotificationService 前台轮询产出)。
+  @State private unreadNotifications: number = 0;
+  private unsubscribeNotifications?: () => void = undefined;
   private isSiteMetadataLoading: boolean = false;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
@@ -33,6 +39,7 @@ export struct HomePage {
   @Prop isCheckingSession: boolean = false;
   @Prop hasCheckedSession: boolean = false;
   onAccountClick: () => void = () => {};
+  onOpenNotifications: () => void = () => {};
   onTopicClick: (topic: Topic) => void = () => {};
   // 按帖子 ID 直接跳转详情(通用入口,不依赖完整 Topic 对象)。
   onOpenTopicById: (topicId: number) => void = () => {};
@@ -63,6 +70,13 @@ export struct HomePage {
         this.handleTopicReadStateChanged(state);
       });
     }
+    if (!this.unsubscribeNotifications) {
+      // 先取当前已知值(避免首帧空窗),再订阅后续变化。
+      this.unreadNotifications = NotificationEventBus.current().unread;
+      this.unsubscribeNotifications = NotificationEventBus.subscribe((snapshot: NotificationSnapshot) => {
+        this.unreadNotifications = snapshot.unread;
+      });
+    }
     this.syncSessionVersion();
     if (this.isArkWebReady && this.topics.length === 0) {
       this.loadSiteMetadataIfNeeded();
@@ -79,6 +93,10 @@ export struct HomePage {
       this.unsubscribeTopicReadState();
       this.unsubscribeTopicReadState = undefined;
     }
+    if (this.unsubscribeNotifications) {
+      this.unsubscribeNotifications();
+      this.unsubscribeNotifications = undefined;
+    }
   }
 
   build() {
@@ -92,6 +110,18 @@ export struct HomePage {
         Blank()
 
         this.JumpButton()
+
+        // 仅在会话已确认且已登录时显示铃铛(未登录/未确认不出现)。
+        if (this.hasCheckedSession && this.isLoggedIn) {
+          NotificationBell({
+            unreadCount: this.unreadNotifications,
+            onBellClick: () => {
+              // 打开通知页(进页会发 recent=true 让服务端 bump seen);本地先乐观清零红点。
+              this.unreadNotifications = 0;
+              this.onOpenNotifications();
+            }
+          })
+        }
 
         this.AccountEntry()
       }
@@ -252,10 +282,14 @@ export struct HomePage {
               .height(22)
               .color($r('app.color.brand'))
           } else if (this.isLoggedIn) {
-            UserAvatar({
-              user: this.accountUser,
-              avatarSize: 34
-            })
+            // 光圈在底层(先声明)、头像在顶层(后声明),头像后方一圈圈向外扩散。
+            Stack() {
+              PulsingHalo({ baseSize: 34, color: $r('app.color.brand') })
+              UserAvatar({
+                user: this.accountUser,
+                avatarSize: 34
+              })
+            }
           } else {
             SymbolGlyph($r('sys.symbol.person'))
               .fontSize(28)
@@ -270,8 +304,10 @@ export struct HomePage {
       .width(42)
       .height(42)
       .borderRadius(21)
-      .backgroundColor($r('app.color.surface_muted'))
+      .backgroundColor(Color.Transparent)
       .padding(0)
+      // 放行溢出:头像光圈会扩散到 42 之外,默认圆角裁剪会切掉,需关闭裁剪。
+      .clip(false)
       .enabled(!this.isCheckingSession)
       .onClick(() => {
         this.onAccountClick();

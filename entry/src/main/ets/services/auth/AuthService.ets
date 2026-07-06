@@ -13,6 +13,8 @@ interface DiscourseCurrentUser {
   name?: string;
   avatar_template?: string;
   animated_avatar?: string;
+  unread_notifications?: number;
+  unread_high_priority_notifications?: number;
 }
 
 export class AuthService {
@@ -57,7 +59,9 @@ export class AuthService {
           username: sourceUser.username,
           displayName: sourceUser.name,
           avatarTemplate: sourceUser.avatar_template,
-          animatedAvatar: sourceUser.animated_avatar ? sourceUser.animated_avatar : undefined
+          animatedAvatar: sourceUser.animated_avatar ? sourceUser.animated_avatar : undefined,
+          unreadNotifications: typeof sourceUser.unread_notifications === 'number' ? sourceUser.unread_notifications : 0,
+          unreadHighPriorityNotifications: typeof sourceUser.unread_high_priority_notifications === 'number' ? sourceUser.unread_high_priority_notifications : 0
         }
       };
     } catch (error) {

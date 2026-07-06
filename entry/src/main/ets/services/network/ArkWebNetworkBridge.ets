@@ -1,6 +1,9 @@
 import webview from '@ohos.web.webview';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { ChallengeEventBus } from '../challenge/ChallengeEventBus';
+import { DownloadEventBus } from '../content/DownloadEventBus';
 import { detectChallenge } from './ChallengeDetector';
 import { ChallengeState, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from './NetworkTypes';
 
@@ -126,9 +129,78 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   // 因此排队等待,直到重载后的 onPageEnd 再执行。默认 false = 就绪,不影响正常请求。
   private reloading: boolean = false;
   private readyWaiters: Array<() => void> = [];
+  // host webview 控制器与其原生下载委托:附件下载走它,天然带会话 Cookie、自动跟随 302 到 CDN、不受 CORS 限制。
+  private controller?: webview.WebviewController;
+  private downloadContext?: Context;
+  private downloadDelegateReady: boolean = false;
 
   attachController(controller: webview.WebviewController): void {
+    this.controller = controller;
     this.setExecutor(this.ensureWebviewExecutor(controller));
+    this.configureDownloadDelegate();
+  }
+
+  // 记录用于保存下载文件的沙箱上下文(filesDir)。在 host 就绪前由页面注入一次。
+  setDownloadContext(context: Context): void {
+    this.downloadContext = context;
+    this.configureDownloadDelegate();
+  }
+
+  // 触发一次附件下载。成功交给 host webview 的下载委托,结果经 DownloadEventBus 上抛。
+  startDownload(url: string): boolean {
+    if (!this.controller) {
+      console.info('[ArkDO][Network] startDownload skipped: controller not ready');
+      return false;
+    }
+    try {
+      this.controller.startDownload(url);
+      return true;
+    } catch (error) {
+      const err: BusinessError = error as BusinessError;
+      console.info(`[ArkDO][Network] startDownload failed code=${err.code} msg=${err.message}`);
+      return false;
+    }
+  }
+
+  // 给 host 控制器挂下载委托:onBeforeDownload 选沙箱保存路径并启动;完成/失败经 DownloadEventBus 通知页面。
+  // 需控制器与保存上下文都就绪,且只挂一次。
+  private configureDownloadDelegate(): void {
+    if (this.downloadDelegateReady || !this.controller || !this.downloadContext) {
+      return;
+    }
+    const context: Context = this.downloadContext;
+    const dir: string = `${context.filesDir}/download`;
+    try {
+      const delegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
+      delegate.onBeforeDownload((item: webview.WebDownloadItem) => {
+        try {
+          if (!fs.accessSync(dir)) {
+            fs.mkdirSync(dir);
+          }
+        } catch (error) {
+          const err: BusinessError = error as BusinessError;
+          console.info(`[ArkDO][Network] download dir failed code=${err.code}`);
+        }
+        const suggested: string = item.getSuggestedFileName();
+        const fileName: string = suggested && suggested.length > 0 ? suggested : `download_${item.getGuid()}`;
+        item.start(`${dir}/${fileName}`);
+      });
+      delegate.onDownloadFinish((item: webview.WebDownloadItem) => {
+        const fullPath: string = item.getFullPath();
+        const fileName: string = fullPath.substring(fullPath.lastIndexOf('/') + 1);
+        DownloadEventBus.notify({ success: true, fileName, filePath: fullPath, message: `已下载：${fileName}` });
+      });
+      delegate.onDownloadFailed((item: webview.WebDownloadItem) => {
+        const suggested: string = item.getSuggestedFileName();
+        DownloadEventBus.notify({ success: false, fileName: suggested, filePath: '', message: '下载失败' });
+      });
+      this.controller.setDownloadDelegate(delegate);
+      this.downloadDelegateReady = true;
+      console.info('[ArkDO][Network] download delegate configured');
+    } catch (error) {
+      const err: BusinessError = error as BusinessError;
+      console.info(`[ArkDO][Network] configure download delegate failed code=${err.code}`);
+    }
   }
 
   // host webview 开始 loadUrl 重载：关闭门闩，随后的注入式 fetch 排队等待。

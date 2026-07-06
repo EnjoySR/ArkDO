@@ -1,8 +1,14 @@
-import { AppRouteName, buildProfileRouteParam, buildTopicDetailRouteParam, isTopicDetailRouteParam, TopicDetailRouteParam } from '../../navigation/AppRoutes';
+import { AppRouteName, buildNotificationsRouteParam, buildProfileRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
+import { DownloadService } from '../../services/content/DownloadService';
+import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
+import { common } from '@kit.AbilityKit';
 import { Topic } from '../../models/Topic';
 import { User } from '../../models/User';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
 import { AuthService } from '../../services/auth/AuthService';
+import { NotificationService } from '../../services/notification/NotificationService';
+import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
@@ -12,8 +18,10 @@ import { ensureTagIconsLoaded } from '../components/TagIconRegistry';
 import { CfChallengePage } from './CfChallengePage';
 import { HomePage } from './HomePage';
 import { LoginPage } from './LoginPage';
+import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
 import { TopicDetailPage } from './TopicDetailPage';
+import { WebViewPage } from './WebViewPage';
 
 const LOG_TAG: string = '[ArkDO][Root]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -34,12 +42,14 @@ export struct RootTabPage {
   @State private isCheckingSession: boolean = false;
   @State private hasCheckedSession: boolean = false;
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
+  private notificationService: NotificationService = new NotificationService(this.bridge);
   private navPathStack: NavPathStack = new NavPathStack();
   private sessionCheckSequence: number = 0;
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private handledChallengeVersion: number = ChallengeEventBus.getCurrentVersion();
   private unsubscribeChallengeRequired?: () => void = undefined;
   private unsubscribeSessionChanged?: () => void = undefined;
+  private unsubscribeDownload?: () => void = undefined;
 
   aboutToAppear(): void {
     this.ensureIconSymbolsLoaded();
@@ -53,9 +63,15 @@ export struct RootTabPage {
         this.handleSessionChanged(version);
       });
     }
+    if (!this.unsubscribeDownload) {
+      this.unsubscribeDownload = DownloadEventBus.subscribe((result: DownloadResult) => {
+        this.handleDownloadResult(result);
+      });
+    }
   }
 
   aboutToDisappear(): void {
+    this.notificationService.stop();
     if (this.unsubscribeChallengeRequired) {
       this.unsubscribeChallengeRequired();
       this.unsubscribeChallengeRequired = undefined;
@@ -63,6 +79,10 @@ export struct RootTabPage {
     if (this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged();
       this.unsubscribeSessionChanged = undefined;
+    }
+    if (this.unsubscribeDownload) {
+      this.unsubscribeDownload();
+      this.unsubscribeDownload = undefined;
     }
   }
 
@@ -115,6 +135,34 @@ export struct RootTabPage {
           isArkWebReady: this.isArkWebReady,
           onBack: () => {
             this.popNavigation();
+          },
+          onOpenLink: (url: string) => {
+            this.handleOpenLink(url);
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else if (name === AppRouteName.WEB && isWebRouteParam(param)) {
+      NavDestination() {
+        WebViewPage({
+          url: (param as WebRouteParam).url,
+          pageTitle: (param as WebRouteParam).title ?? '',
+          onBack: () => {
+            this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else if (name === AppRouteName.NOTIFICATIONS) {
+      NavDestination() {
+        NotificationPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenTopic: (topicId: number, slug: string | undefined, title: string) => {
+            this.openTopicDetailById(topicId, slug, title);
           }
         })
       }
@@ -187,6 +235,9 @@ export struct RootTabPage {
       onAccountClick: () => {
         this.handleAccountClick();
       },
+      onOpenNotifications: () => {
+        this.navPathStack.pushPath(new NavPathInfo(AppRouteName.NOTIFICATIONS, buildNotificationsRouteParam('homeBell')));
+      },
       onTopicClick: (topic: Topic) => {
         this.openTopicDetail(topic);
       },
@@ -227,12 +278,72 @@ export struct RootTabPage {
     ));
   }
 
+  // 统一的链接点击入口:经 LinkRouter 判断——站内帖子链接提取 topicId 跳原生详情页,
+  // 其余(外站、站内非帖子页)一律打开通用 WebView。
+  private handleOpenLink(url: string): void {
+    const target: LinkTarget = LinkRouter.resolve(url);
+    if (target.kind === LinkTargetKind.TOPIC && target.topicId !== undefined) {
+      console.info(`${LOG_TAG} link -> native topic detail topicId=${target.topicId}`);
+      this.openTopicDetailById(target.topicId);
+      return;
+    }
+    if (target.kind === LinkTargetKind.DOWNLOAD) {
+      this.startDownload(target.url);
+      return;
+    }
+    this.openWebPage(target.url);
+  }
+
+  // 附件下载:交给 host webview 的原生下载委托(带会话 Cookie、跟随重定向)。结果经 DownloadEventBus 回调。
+  private startDownload(url: string): void {
+    const started: boolean = this.bridge.startDownload(url);
+    if (started) {
+      this.showToast('开始下载…');
+    } else {
+      this.showToast('无法下载：宿主未就绪');
+    }
+  }
+
+  // 下载完成/失败:toast 反馈;成功则拉起系统「打开方式/分享」,弥补文件在沙箱内、系统「文件」App 不可见。
+  private handleDownloadResult(result: DownloadResult): void {
+    this.showToast(result.message);
+    if (!result.success) {
+      return;
+    }
+    const context: common.UIAbilityContext | undefined =
+      this.getUIContext().getHostContext() as common.UIAbilityContext | undefined;
+    if (context) {
+      DownloadService.openWithSystem(context, result.filePath);
+    }
+  }
+
+  private showToast(message: string): void {
+    try {
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
+    } catch (err) {
+      console.info(`${LOG_TAG} toast failed: ${message}`);
+    }
+  }
+
+  private openWebPage(url: string, title?: string): void {
+    if (!url || url.length === 0) {
+      return;
+    }
+    console.info(`${LOG_TAG} open web page host=${url.replace(/^https?:\/\/([^\/?#]+).*$/i, '$1')}`);
+    this.navPathStack.pushPath(new NavPathInfo(AppRouteName.WEB, buildWebRouteParam(url, title)));
+  }
+
   private popNavigation(): void {
     this.navPathStack.pop();
   }
 
   private handleArkWebReady(): void {
     this.isArkWebReady = true;
+    // 注入沙箱上下文,让 host webview 的下载委托知道文件保存目录(filesDir/download)。
+    const context: Context | undefined = this.getUIContext().getHostContext();
+    if (context) {
+      this.bridge.setDownloadContext(context);
+    }
     this.checkCurrentUser();
   }
 
@@ -294,10 +405,22 @@ export struct RootTabPage {
     if (result.success) {
       this.currentUser = result.data;
       console.info(`${LOG_TAG} current user checked loggedIn=${this.currentUser !== undefined} username=${this.currentUser?.username ?? ''} hasAvatar=${this.currentUser?.avatarTemplate !== undefined}`);
+      // 登录:本次响应已带未读数,立即广播一次(铃铛与头像同帧出现),再启动前台轮询;
+      // 登出:停表并清零。
+      if (this.currentUser !== undefined) {
+        NotificationEventBus.publish({
+          unread: this.currentUser.unreadNotifications !== undefined ? this.currentUser.unreadNotifications : 0,
+          highPriority: this.currentUser.unreadHighPriorityNotifications !== undefined ? this.currentUser.unreadHighPriorityNotifications : 0
+        });
+        this.notificationService.start();
+      } else {
+        this.notificationService.stop();
+      }
       return;
     }
 
     this.currentUser = undefined;
+    this.notificationService.stop();
     console.info(`${LOG_TAG} current user check failed status=${result.statusCode} challenge=${result.challengeState}`);
   }
 

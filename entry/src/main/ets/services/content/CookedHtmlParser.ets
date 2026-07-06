@@ -10,6 +10,7 @@ export enum RichBlockType {
   DISCLOSURE = 'disclosure',
   DIVIDER = 'divider',
   POLL = 'poll',
+  ONEBOX = 'onebox',
   UNSUPPORTED = 'unsupported'
 }
 
@@ -30,6 +31,8 @@ export interface RichInlineNode {
   bold?: boolean;
   italic?: boolean;
   code?: boolean;
+  // 附件下载链接(Discourse <a class="attachment"> 或指向 /uploads/ 的链接):渲染时前置下载图标,点击触发原生下载。
+  attachment?: boolean;
 }
 
 export interface RichListItem {
@@ -54,6 +57,11 @@ export interface RichBlock {
   level?: number;
   // POLL 块:data-poll-name,用于在正文正确位置占位、并按名字关联 TopicPost.polls 的动态数据。
   pollName?: string;
+  // ONEBOX(链接预览卡片)字段:域名/站点图标/描述/缩略图;title 复用上面的 title,跳转 URL 复用 href。
+  domain?: string;
+  faviconUrl?: string;
+  description?: string;
+  thumbnailUrl?: string;
 }
 
 class InlineState {
@@ -61,6 +69,8 @@ class InlineState {
   italic: number = 0;
   code: number = 0;
   hrefStack: string[] = [];
+  // 与 hrefStack 同步入栈:当前链接是否为附件下载链接。
+  attachmentStack: boolean[] = [];
 
   clone(): InlineState {
     const state: InlineState = new InlineState();
@@ -68,6 +78,7 @@ class InlineState {
     state.italic = this.italic;
     state.code = this.code;
     state.hrefStack = this.hrefStack.slice();
+    state.attachmentStack = this.attachmentStack.slice();
     return state;
   }
 
@@ -76,6 +87,13 @@ class InlineState {
       return '';
     }
     return this.hrefStack[this.hrefStack.length - 1];
+  }
+
+  currentAttachment(): boolean {
+    if (this.attachmentStack.length === 0) {
+      return false;
+    }
+    return this.attachmentStack[this.attachmentStack.length - 1];
   }
 }
 
@@ -232,6 +250,12 @@ export class CookedHtmlParser {
       }];
     }
 
+    // Discourse 链接预览：<aside class="onebox ...">，或个别站点用 <div class="onebox">。
+    // 抽出 header.source(favicon+域名) 与 article.onebox-body(标题/描述/缩略图)渲染成卡片。
+    if ((tagName === 'aside' || tagName === 'div') && CookedHtmlParser.hasClassContaining(openTag, 'onebox')) {
+      return [CookedHtmlParser.oneboxBlock(innerHtml)];
+    }
+
     if (tagName === 'details') {
       return [CookedHtmlParser.disclosureBlockFromDetails(innerHtml)];
     }
@@ -337,10 +361,12 @@ export class CookedHtmlParser {
 
       const href: string = state.currentHref();
       const type: RichInlineType = state.code > 0 ? RichInlineType.CODE : (href.length > 0 ? RichInlineType.LINK : RichInlineType.TEXT);
+      const attachment: boolean = type === RichInlineType.LINK && state.currentAttachment();
       const last: RichInlineNode | undefined = out.length > 0 ? out[out.length - 1] : undefined;
       if (last &&
         last.type === type &&
         (last.href ? last.href : '') === href &&
+        !!last.attachment === attachment &&
         !!last.bold === state.bold > 0 &&
         !!last.italic === state.italic > 0 &&
         !!last.code === state.code > 0) {
@@ -357,6 +383,9 @@ export class CookedHtmlParser {
       };
       if (href.length > 0) {
         token.href = href;
+      }
+      if (attachment) {
+        token.attachment = true;
       }
       out.push(token);
     };
@@ -407,8 +436,15 @@ export class CookedHtmlParser {
         flush();
         if (closing) {
           state.hrefStack.pop();
+          state.attachmentStack.pop();
         } else {
-          state.hrefStack.push(CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(tag, 'href')));
+          const resolvedHref: string = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(tag, 'href'));
+          state.hrefStack.push(resolvedHref);
+          // 附件下载链接:显式 class="attachment",或指向 /uploads/ 的站内链接。
+          const isAttachment: boolean = CookedHtmlParser.hasClass(tag, 'attachment') ||
+            /^https?:\/\/[^\/]*linux\.do\/uploads\//i.test(resolvedHref) ||
+            resolvedHref.indexOf('/uploads/') === 0;
+          state.attachmentStack.push(isAttachment);
         }
       } else if (tagName === 'img' && !closing) {
         flush();
@@ -564,6 +600,122 @@ export class CookedHtmlParser {
       title: summaryInfo.title.length > 0 ? summaryInfo.title : '详情',
       blocks: contentBlocks.length > 0 ? contentBlocks : CookedHtmlParser.paragraphBlocks(summaryInfo.contentHtml)
     };
+  }
+
+  private static oneboxBlock(innerHtml: string): RichBlock {
+    const block: RichBlock = { type: RichBlockType.ONEBOX };
+
+    // 头部 <header class="source">:站点图标 + 域名文字。缺失时退回整段查找。
+    const headerInner: string = CookedHtmlParser.extractElementInner(innerHtml, 'header');
+    const headerHtml: string = headerInner.length > 0 ? headerInner : innerHtml;
+    const faviconTag: string = CookedHtmlParser.firstTagMatch(headerHtml, /<img\b[^>]*>/i);
+    if (faviconTag.length > 0) {
+      const favSrc: string = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(faviconTag, 'src'));
+      if (favSrc.length > 0) {
+        block.faviconUrl = favSrc;
+      }
+    }
+    const domainText: string = CookedHtmlParser.firstAnchorText(headerHtml);
+    const sourceHref: string = CookedHtmlParser.firstAnchorHref(headerHtml);
+
+    // 正文 <article class="onebox-body">:标题(h3/h4)、描述(首个 p)、缩略图。
+    const bodyInner: string = CookedHtmlParser.extractElementInner(innerHtml, 'article');
+    const bodyHtml: string = bodyInner.length > 0 ? bodyInner : innerHtml;
+
+    let titleHtml: string = CookedHtmlParser.extractElementInner(bodyHtml, 'h3');
+    if (titleHtml.length === 0) {
+      titleHtml = CookedHtmlParser.extractElementInner(bodyHtml, 'h4');
+    }
+    const title: string = CookedHtmlParser.toPlainText(titleHtml);
+    const titleHref: string = CookedHtmlParser.firstAnchorHref(titleHtml);
+
+    const description: string = CookedHtmlParser.toPlainText(CookedHtmlParser.extractElementInner(bodyHtml, 'p'));
+
+    const thumbTag: string = CookedHtmlParser.firstTagMatch(bodyHtml, /<img\b[^>]*>/i);
+    if (thumbTag.length > 0) {
+      const thumbSrc: string = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(thumbTag, 'src'));
+      if (thumbSrc.length > 0) {
+        block.thumbnailUrl = thumbSrc;
+      }
+    }
+
+    const href: string = titleHref.length > 0 ? titleHref : sourceHref;
+    if (href.length > 0) {
+      block.href = href;
+    }
+    const domain: string = domainText.length > 0 ? domainText : CookedHtmlParser.hostFromUrl(href);
+    if (domain.length > 0) {
+      block.domain = domain;
+    }
+    if (title.length > 0) {
+      block.title = title;
+    }
+    if (description.length > 0) {
+      block.description = description;
+    }
+    return block;
+  }
+
+  // 取 html 中首个 <tagName ...>...</tagName> 的内层 HTML(标签名需按词边界匹配,避免 p 命中 picture)。
+  private static extractElementInner(html: string, tagName: string): string {
+    const openStart: number = CookedHtmlParser.findOpenTag(html, tagName, 0);
+    if (openStart < 0) {
+      return '';
+    }
+    const openEnd: number = CookedHtmlParser.findTagEnd(html, openStart);
+    if (openEnd < 0) {
+      return '';
+    }
+    const closeStart: number = CookedHtmlParser.findClosingTag(html, openEnd + 1, tagName);
+    if (closeStart < 0) {
+      return '';
+    }
+    return html.substring(openEnd + 1, closeStart);
+  }
+
+  private static findOpenTag(html: string, tagName: string, fromIndex: number): number {
+    const lower: string = html.toLowerCase();
+    const needle: string = `<${tagName.toLowerCase()}`;
+    let index: number = lower.indexOf(needle, fromIndex);
+    while (index >= 0) {
+      const after: string = lower.charAt(index + needle.length);
+      if (after === '' || after === '>' || after === '/' || after === ' ' || after === '\t' || after === '\n' || after === '\r') {
+        return index;
+      }
+      index = lower.indexOf(needle, index + needle.length);
+    }
+    return -1;
+  }
+
+  private static firstTagMatch(html: string, pattern: RegExp): string {
+    const match: RegExpMatchArray | null = html.match(pattern);
+    return match ? match[0] : '';
+  }
+
+  private static firstAnchorHref(html: string): string {
+    const openTag: string = CookedHtmlParser.firstTagMatch(html, /<a\b[^>]*>/i);
+    if (openTag.length === 0) {
+      return '';
+    }
+    return CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(openTag, 'href'));
+  }
+
+  private static firstAnchorText(html: string): string {
+    const openTag: string = CookedHtmlParser.firstTagMatch(html, /<a\b[^>]*>/i);
+    if (openTag.length === 0) {
+      return '';
+    }
+    const start: number = html.indexOf(openTag) + openTag.length;
+    const closeStart: number = html.toLowerCase().indexOf('</a>', start);
+    if (closeStart < 0) {
+      return '';
+    }
+    return CookedHtmlParser.toPlainText(html.substring(start, closeStart));
+  }
+
+  private static hostFromUrl(url: string): string {
+    const match: RegExpMatchArray | null = url.match(/^https?:\/\/([^\/]+)/i);
+    return match ? match[1] : '';
   }
 
   private static extractSummary(innerHtml: string): SummaryInfo {
@@ -989,6 +1141,11 @@ export class CookedHtmlParser {
     if (block.type === RichBlockType.POLL) {
       // POLL 块无 inlines/blocks,仅靠 pollName 占位,别被内容过滤器丢掉。
       return true;
+    }
+    if (block.type === RichBlockType.ONEBOX) {
+      return (!!block.href && block.href.length > 0) ||
+        (!!block.title && block.title.length > 0) ||
+        (!!block.domain && block.domain.length > 0);
     }
     return true;
   }

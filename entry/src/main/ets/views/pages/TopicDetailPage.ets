@@ -67,6 +67,8 @@ export struct TopicDetailPage {
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   onBack: () => void = () => {};
+  // 正文链接 / onebox 卡片点击上抛给根导航:站内帖子链接跳原生详情,其余打开通用 WebView。
+  onOpenLink: (url: string) => void = () => {};
   private isSiteMetadataLoading: boolean = false;
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
@@ -250,6 +252,9 @@ export struct TopicDetailPage {
               lastReadPostNumber: this.detail?.lastReadPostNumber ?? -1,
               onOpenImages: (images: ViewerImage[], startIndex: number) => {
                 this.openImageViewer(images, startIndex);
+              },
+              onOpenLink: (url: string) => {
+                this.onOpenLink(url);
               },
               onToggleReaction: (targetPost: TopicPost, reaction: string, snapshot: ReactionSnapshot) => {
                 this.handleToggleReaction(targetPost, reaction, snapshot);

@@ -31,6 +31,8 @@ export struct TopicPostItem {
   lastReadPostNumber: number = -1;
   // 图片浏览器在页面级渲染，这里把 PostRichContent 的「打开」请求继续上抛给页面
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
+  // 正文链接 / onebox 卡片点击继续上抛给页面(由页面经 LinkRouter 判断跳原生详情或通用 WebView)。
+  onOpenLink: (url: string) => void = () => {};
   // 表情回应切换:本组件就地乐观更新 this.post(@ObjectLink 自身变更→精准重渲染),
   // 页面只负责发 PUT + 失败时用 snapshot 回滚。
   onToggleReaction: (post: TopicPost, reaction: string, snapshot: ReactionSnapshot) => void = () => {};
@@ -63,6 +65,7 @@ export struct TopicPostItem {
           cookedHtml: this.post.cookedHtml,
           fallbackText: this.post.plainText,
           onOpenImages: this.onOpenImages,
+          onOpenLink: this.onOpenLink,
           polls: this.post.polls ? this.post.polls : [],
           onVote: (poll: Poll, optionIds: string[]) => {
             return this.onVote(this.post, poll, optionIds);
@@ -285,7 +288,8 @@ export struct TopicPostItem {
                   PostRichContent({
                     cookedHtml: reply.cookedHtml,
                     fallbackText: reply.plainText,
-                    onOpenImages: this.onOpenImages
+                    onOpenImages: this.onOpenImages,
+                    onOpenLink: this.onOpenLink
                   })
                     .width('100%')
                     .margin({ top: 6 })
