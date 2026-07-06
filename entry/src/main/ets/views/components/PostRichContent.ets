@@ -9,6 +9,7 @@ import {
 import { ViewerImage } from './ImageViewer';
 import { Poll, PollVoteResult } from '../../models/TopicDetail';
 import { PollView } from './PollView';
+import { pasteboard } from '@kit.BasicServicesKit';
 
 const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
@@ -189,14 +190,40 @@ export struct PostRichContent {
   @Builder
   private CodeBlock(block: RichBlock, marginTop: number) {
     Column() {
-      if (block.language && block.language.length > 0) {
-        Text(block.language)
-          .fontSize(12)
-          .fontColor('#6B7280')
-          .fontFamily('monospace')
-          .width('100%')
-          .margin({ bottom: 6 })
+      // 头部行：左侧语言标签(可选) + 右上角复制按钮(始终显示)
+      Row() {
+        if (block.language && block.language.length > 0) {
+          Text(block.language)
+            .fontSize(12)
+            .fontColor('#6B7280')
+            .fontFamily('monospace')
+            .layoutWeight(1)
+        } else {
+          Blank()
+        }
+
+        Row() {
+          Image($rawfile('fa_icons/copy.svg'))
+            .width(13)
+            .height(13)
+            .objectFit(ImageFit.Contain)
+            .renderMode(ImageRenderMode.Template)
+            .fillColor('#6B7280')
+            .draggable(false)
+          Text('复制')
+            .fontSize(12)
+            .fontColor('#6B7280')
+            .margin({ left: 4 })
+        }
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .borderRadius(6)
+        .onClick(() => {
+          this.copyCode(block.text ? block.text : '');
+        })
       }
+      .width('100%')
+      .margin({ bottom: 6 })
+      .alignItems(VerticalAlign.Center)
 
       Scroll() {
         Text(block.text ? block.text : '')
@@ -204,10 +231,13 @@ export struct PostRichContent {
           .lineHeight(19)
           .fontFamily('monospace')
           .fontColor('#111827')
+          .textAlign(TextAlign.Start)
+          .constraintSize({ minWidth: '100%' })
           .copyOption(CopyOptions.LocalDevice)
       }
       .scrollable(ScrollDirection.Horizontal)
       .scrollBar(BarState.Auto)
+      .align(Alignment.Start)
       .width('100%')
     }
     .width('100%')
@@ -216,6 +246,20 @@ export struct PostRichContent {
     .borderRadius(8)
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
+  }
+
+  private copyCode(text: string): void {
+    try {
+      const data: pasteboard.PasteData =
+        pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+      pasteboard.getSystemPasteboard().setData(data).then(() => {
+        this.getUIContext().getPromptAction().showToast({ message: '已复制', duration: 1500 });
+      }).catch((err: Object) => {
+        console.error(`${LOG_TAG} copy code failed: ${JSON.stringify(err)}`);
+      });
+    } catch (err) {
+      console.error(`${LOG_TAG} copy code failed: ${JSON.stringify(err)}`);
+    }
   }
 
   @Builder
