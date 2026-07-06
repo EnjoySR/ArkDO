@@ -56,6 +56,8 @@ export struct TopicDetailPage {
   // boost 输入目标楼 id:0 = 当前浮层是普通回复;>0 = 当前浮层是给该楼发 boost。
   @State private boostTargetPostId: number = 0;
   private mainWindow?: window.Window = undefined;
+  // 帖子列表滚动控制器:供「回复别人」指示器 / 被回复列表「跳到帖子」按 postNumber 定位楼层。
+  private scroller: Scroller = new Scroller();
   // 延迟退出全屏的计时器(关闭评论时用)。
   private fullScreenExitTimer: number = -1;
   param: TopicDetailRouteParam = {
@@ -237,7 +239,7 @@ export struct TopicDetailPage {
       })
 
       if (this.detail) {
-        List() {
+        List({ scroller: this.scroller }) {
           ListItem() {
             this.TopicSummary()
           }
@@ -257,6 +259,12 @@ export struct TopicDetailPage {
               },
               onAddBoost: (targetPost: TopicPost) => {
                 this.openComposerForBoost(targetPost);
+              },
+              onJumpToPost: (postNumber: number) => {
+                this.jumpToPostNumber(postNumber);
+              },
+              onLoadReplies: (targetPost: TopicPost) => {
+                return this.loadPostReplies(targetPost);
               },
               onVote: (targetPost: TopicPost, poll: Poll, optionIds: string[]) => {
                 return this.handleVote(targetPost, poll, optionIds);
@@ -478,6 +486,29 @@ export struct TopicDetailPage {
       }
     }
     return undefined;
+  }
+
+  // 按 postNumber 滚动定位到对应楼层。List index 0 是 TopicSummary,楼层从 index 1 起 → 目标 index = 楼序 + 1。
+  // 仅定位已加载楼:未加载(还没上拉到)时弹 toast 提示,不自动翻页。
+  private jumpToPostNumber(postNumber: number): void {
+    for (let index: number = 0; index < this.posts.length; index++) {
+      if (this.posts[index].postNumber === postNumber) {
+        this.scroller.scrollToIndex(index + 1, true);
+        return;
+      }
+    }
+    this.showComposerToast('该楼尚未加载', 1500);
+  }
+
+  // 加载某楼的「被回复」列表(供 TopicPostItem 展开时调用)。成功返回楼层数组;失败弹 toast 并返回 null。
+  private async loadPostReplies(post: TopicPost): Promise<TopicPost[] | null> {
+    const result: NetworkResult<TopicPost[]> = await new TopicService(this.bridge).getPostReplies(post.id);
+    if (result.success && result.data) {
+      return result.data;
+    }
+    const reason: string = result.error ? result.error.message : '加载回复失败，请稍后重试。';
+    this.showComposerToast(reason, 2000);
+    return null;
   }
 
   private showComposerToast(message: string, duration: number): void {

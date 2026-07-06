@@ -63,6 +63,10 @@ export class TopicPost {
   createdAt?: string;
   updatedAt?: string;
   replyCount?: number;
+  // 本楼是回复哪一楼(reply_to_post_number)+被回复者(reply_to_user)。二者齐备时头部右上角显示
+  // 「share 图标 + 被回复者头像」,点击滚动定位到 replyToPostNumber 对应楼层。
+  replyToPostNumber?: number;
+  replyToUser?: User;
   likeCount?: number;
   author?: User;
   read?: boolean;

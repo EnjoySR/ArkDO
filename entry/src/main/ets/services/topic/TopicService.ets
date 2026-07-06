@@ -129,6 +129,8 @@ interface DiscoursePost {
   like_count?: number;
   read?: boolean;
   user_title?: string;
+  reply_to_post_number?: number;
+  reply_to_user?: DiscourseBoostUser;
   reactions?: DiscourseReaction[];
   reaction_users_count?: number;
   current_user_reaction?: DiscourseCurrentReaction;
@@ -306,6 +308,33 @@ export class TopicService {
       };
     } catch (error) {
       return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, 'Linux.do 加载更多楼层响应不是有效 JSON。');
+    }
+  }
+
+  // 加载某楼的「被回复」列表:GET /posts/{postId}/replies?after=1。
+  // 返回的是裸 post 对象数组(顶层 [...],非 post_stream),元素结构与 DiscoursePost 一致,直接喂 mapPosts。
+  // GET 无需 CSRF/referer。
+  async getPostReplies(postId: number): Promise<NetworkResult<TopicPost[]>> {
+    const path: string = `/posts/${postId}/replies?after=1`;
+
+    const response: NetworkResult<string> = await this.bridge.getJson(path);
+    if (!response.success) {
+      return this.forwardFailure<TopicPost[]>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, 'Linux.do 被回复列表响应为空。');
+    }
+
+    try {
+      const payload: DiscoursePost[] = JSON.parse(response.data) as DiscoursePost[];
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: this.mapPosts(payload)
+      };
+    } catch (error) {
+      return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, 'Linux.do 被回复列表响应不是有效 JSON。');
     }
   }
 
@@ -675,6 +704,9 @@ export class TopicService {
       post.createdAt = sourcePost.created_at;
       post.updatedAt = sourcePost.updated_at;
       post.replyCount = sourcePost.reply_count;
+      post.replyToPostNumber =
+        typeof sourcePost.reply_to_post_number === 'number' ? sourcePost.reply_to_post_number : undefined;
+      post.replyToUser = this.mapBoostUser(sourcePost.reply_to_user);
       post.likeCount = sourcePost.like_count;
       post.author = this.mapPostAuthor(sourcePost);
       post.read = typeof sourcePost.read === 'boolean' ? sourcePost.read : undefined;

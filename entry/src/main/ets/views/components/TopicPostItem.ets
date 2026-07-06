@@ -41,7 +41,16 @@ export struct TopicPostItem {
   // 投票/撤销:把整条 post 与目标 poll 上抛给页面做乐观闭环。返回服务端校正结果;null=失败。
   onVote: (post: TopicPost, poll: Poll, optionIds: string[]) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
   onRemoveVote: (post: TopicPost, poll: Poll) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
+  // 点头部「回复别人」指示器 / 展开区「跳到帖子」:按 postNumber 上抛给页面滚动定位。
+  onJumpToPost: (postNumber: number) => void = () => {};
+  // 展开「被回复」时上抛给页面拉取列表(页面持有 bridge/TopicService);返回楼层数组,失败返回 null。
+  onLoadReplies: (post: TopicPost) => Promise<TopicPost[] | null> = () => Promise.resolve(null);
   @State private showReactionPicker: boolean = false;
+  // 被回复列表:展开态 / 加载态 / 已加载数据。按 memory objectlink-state-source,状态放本组件 @State
+  // (而非 @Observed TopicPost 深层字段),重渲染才稳。
+  @State private repliesExpanded: boolean = false;
+  @State private repliesLoading: boolean = false;
+  @State private replies: TopicPost[] = [];
   // 点赞按钮图标的弹簧缩放:每次切换回应时做一次 pop(先缩到 0.7,再用弹簧回弹到 1,带 overshoot)。
   @State private likeIconScale: number = 1;
 
@@ -113,6 +122,23 @@ export struct TopicPostItem {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
+      // 「回复别人」指示器:本楼回复了某楼时,在时间左侧显示 share 图标 + 被回复者头像。
+      // 点击整块 → 滚动定位到被回复的楼层。
+      if (this.hasReplyTo()) {
+        Row({ space: 4 }) {
+          FaIconView({ icon: this.faIcon('share'), color: '#9CA3AF', iconSize: 16 })
+          UserAvatar({ user: this.post.replyToUser, avatarSize: 20 })
+        }
+        .alignItems(VerticalAlign.Center)
+        .margin({ left: 8 })
+        .onClick(() => {
+          const target: number | undefined = this.post.replyToPostNumber;
+          if (target !== undefined) {
+            this.onJumpToPost(target);
+          }
+        })
+      }
+
       // 右上角:时间,时间右边是未读小蓝点。
       Row() {
         Text(this.getRelativeTime())
@@ -140,20 +166,55 @@ export struct TopicPostItem {
   private PostFooter() {
     Column() {
       Row() {
-        // 左:表情回应汇总(图标组 + 回应人数),仅有回应时渲染内容。
-        Row({ space: 2 }){
+        // 左组:表情回应汇总 + (被回复时)被回复数量入口。
+        Row({ space: 12 }) {
+          // 表情回应汇总(图标组 + 回应人数)。无回应时整块不渲染,否则空 Row 仍会占位 +
+          // 触发左组 space 间距,导致被回复数量区左侧多出一段空白。
           if (this.hasReactions()) {
-            ForEach(this.getReactionIcons(), (item: ReactionIcon) => {
-              Image(item.icon)
-                .width(16)
-                .height(16)
-                .objectFit(ImageFit.Contain)
-            }, (item: ReactionIcon) => item.id)
+            Row({ space: 2 }){
+              ForEach(this.getReactionIcons(), (item: ReactionIcon) => {
+                Image(item.icon)
+                  .width(16)
+                  .height(16)
+                  .objectFit(ImageFit.Contain)
+              }, (item: ReactionIcon) => item.id)
 
-            Text(`${this.post.reactionUsersCount}`)
-              .fontSize(16)
-              .fontColor('#BDBDBD')
-              .margin({ left: 8 })
+              Text(`${this.post.reactionUsersCount}`)
+                .fontSize(16)
+                .fontColor('#BDBDBD')
+                .margin({ left: 8 })
+            }
+            .alignItems(VerticalAlign.Center)
+          }
+
+          // 被回复数量 + chevron:点击展开/收起本楼的被回复列表。
+          if (this.hasReplies()) {
+            Row({ space: 4 }) {
+              Text(`${this.post.replyCount}`)
+                .fontSize(16)
+                .fontColor('#BDBDBD')
+              // 加载中在按钮上就地转圈(替换 chevron);加载成功后才展开列表。
+              // chevron 用结构化 if/else 分别渲染:ArkUI 对子组件对象类型属性的 diff 更新不可靠,
+              // 若复用同一 FaIconView 只换 icon 属性,收起时箭头不会翻回向下(见 objectlink-state-source)。
+              if (this.repliesLoading) {
+                LoadingProgress()
+                  .width(14)
+                  .height(14)
+                  .color('#BDBDBD')
+              } else if (this.repliesExpanded) {
+                FaIconView({ icon: this.faIcon('chevron-up'), color: '#BDBDBD', iconSize: 14 })
+              } else {
+                FaIconView({ icon: this.faIcon('chevron-down'), color: '#BDBDBD', iconSize: 14 })
+              }
+            }
+            .alignItems(VerticalAlign.Center)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            // 展开时用更深的 #E9E9E9 作为"已激活"态,收起时用较浅的 #F3F4F6。
+            .backgroundColor(this.repliesExpanded ? '#E9E9E9' : '#F3F4F6')
+            .borderRadius(4)
+            .onClick(() => {
+              this.toggleReplies();
+            })
           }
         }
         .alignItems(VerticalAlign.Center)
@@ -178,10 +239,130 @@ export struct TopicPostItem {
       if (this.hasBoosts()) {
         this.BoostRow()
       }
+
+      // 被回复列表展开区。
+      if (this.repliesExpanded) {
+        this.RepliesSection()
+      }
     }
     .width('100%')
     .padding({ top: 10, bottom: 10 })
     .alignItems(HorizontalAlign.Start)
+  }
+
+  // 被回复列表:竖线 + 逐条精简项(头像40 + 昵称/用户名 + 正文 + 跳到帖子),底部收起按钮。
+  // 竖线用 background 绘制在内容列背后(见 ReplyThreadLine),随内容高度自适应;头像/收起按钮
+  // 不透明,会盖在线上面,只在竖直空隙露出连接线段(经典 Discourse 楼层连接线观感)。
+  @Builder
+  private RepliesSection() {
+    Column() {
+        ForEach(this.replies, (reply: TopicPost, index: number) => {
+            Column() {
+              // 上部:头像 + 昵称/用户名 + 正文。
+              Row() {
+                UserAvatar({ user: reply.author, avatarSize: 40 })
+                  .margin({ right: 12 })
+
+                Column() {
+                  // 昵称 + 用户名一行。
+                  Row({ space: 6 }) {
+                    Text(this.replyAuthorName(reply))
+                      .fontSize(15)
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor('#111827')
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+                    if (this.replyUsername(reply).length > 0) {
+                      Text(this.replyUsername(reply))
+                        .fontSize(13)
+                        .fontColor('#9CA3AF')
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    }
+                  }
+
+                  PostRichContent({
+                    cookedHtml: reply.cookedHtml,
+                    fallbackText: reply.plainText,
+                    onOpenImages: this.onOpenImages
+                  })
+                    .width('100%')
+                    .margin({ top: 6 })
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Top)
+
+              // 底部条:跳到帖子(缩进对齐正文起点 x=52);仅最后一条回复在其左侧、贴竖线处放收起按钮。
+              Row() {
+                if (index === this.replies.length - 1) {
+                  this.CollapseButton()
+                }
+                this.JumpToPost(reply)
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Center)
+              .margin({ top: 14 })
+              .padding({ left: index === this.replies.length - 1 ? 0 : 52 })
+            }
+            .width('100%')
+            .padding({ top: 12, bottom: 0})
+          }, (reply: TopicPost) => reply.id.toString())
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      // 竖线用 background 绘制:builder 以本组件自身尺寸为约束,height('100%') = 内容高度并自适应,
+      // 不像 Stack 里的百分比高度会撑到父级视口高度导致底部大片空白。
+      .background(this.ReplyThreadLine(), { align: Alignment.TopStart })
+  }
+
+  // 收起按钮:白底描边圆角方块 + 向上箭头。放在最后一条回复「跳到帖子」左侧、贴竖线处。
+  // 32 宽:左移 4 使其中心落在竖线(x=20),右间距 16 使右侧跳到帖子仍落在正文缩进起点(4+32+16=52)。
+  @Builder
+  private CollapseButton() {
+    Button({ type: ButtonType.Normal, stateEffect: true }) {
+      FaIconView({ icon: this.faIcon('chevron-up'), color: '#646464', iconSize: 14 })
+    }
+    .width(32)
+    .height(32)
+    .padding(0)
+    .margin({ left: 4, right: 16 })
+    .backgroundColor('#FFFFFF')
+    .border({ width: 1, color: '#E5E7EB' })
+    .borderRadius(4)
+    .onClick(() => {
+      this.repliesExpanded = false;
+    })
+  }
+
+  // 跳到帖子:点击滚动定位到该回复对应的楼层。
+  @Builder
+  private JumpToPost(reply: TopicPost) {
+    Row({ space: 4 }) {
+      FaIconView({ icon: this.faIcon('arrow-down'), color: '#9CA3AF', iconSize: 12 })
+      Text('跳到帖子')
+        .fontSize(13)
+        .fontColor('#9CA3AF')
+    }
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      this.onJumpToPost(reply.postNumber);
+    })
+  }
+
+  // 楼层连接竖线:1px、颜色 #E9E9E9,x 落在头像水平中心(头像40 → 中心20,线宽1 → 左移 19.5)。
+  // 竖线随内容高度自适应到底;最后一条回复 padding.bottom=0 使内容底=收起按钮底,
+  // 白色按钮正好盖住线尾,不会穿出按钮下沿。
+  @Builder
+  private ReplyThreadLine() {
+    Column()
+      .width(1)
+      .height('100%')
+      .backgroundColor('#E9E9E9')
+      .margin({ left: 19.5 })
   }
 
   // 点赞/回应按钮:38x38。短按=切换 heart;长按=弹出 10 表情面板。
@@ -485,6 +666,67 @@ export struct TopicPostItem {
 
   private getRelativeTime(): string {
     return RelativeTime.fromNow(this.post.createdAt);
+  }
+
+  // 本楼是「回复某楼」:被回复楼号 + 被回复者齐备时,头部显示 share 图标 + 头像。
+  private hasReplyTo(): boolean {
+    return this.post.replyToPostNumber !== undefined && this.post.replyToUser !== undefined;
+  }
+
+  // 本楼「被回复」:reply_count > 0 时,底部显示被回复数量 + chevron。
+  private hasReplies(): boolean {
+    return this.post.replyCount !== undefined && this.post.replyCount > 0;
+  }
+
+  // 展开/收起被回复列表。首次点击:按钮上转圈加载,加载成功后才展开(不先展开再加载,
+  // 避免展开区在数据到来前先露出竖线/空白)。已加载过则直接展开,不重复请求。
+  private async toggleReplies(): Promise<void> {
+    if (this.repliesExpanded) {
+      this.repliesExpanded = false;
+      return;
+    }
+    // 已加载过:直接展开。
+    if (this.replies.length > 0) {
+      this.repliesExpanded = true;
+      return;
+    }
+    // 加载中:忽略重复点击。
+    if (this.repliesLoading) {
+      return;
+    }
+    // 未加载:先在按钮上转圈拉取,成功后再展开;失败(页面已弹 toast)保持收起,允许重试。
+    this.repliesLoading = true;
+    const loaded: TopicPost[] | null = await this.onLoadReplies(this.post);
+    this.repliesLoading = false;
+    if (loaded !== null) {
+      this.replies = loaded;
+      this.repliesExpanded = true;
+    }
+  }
+
+  private replyAuthorName(reply: TopicPost): string {
+    const displayName: string | undefined = reply.author?.displayName;
+    if (displayName && displayName.length > 0) {
+      return displayName;
+    }
+    const username: string | undefined = reply.author?.username;
+    if (username && username.length > 0) {
+      return username;
+    }
+    return '未知用户';
+  }
+
+  // 第二行用户名:仅当已用 displayName 作昵称时才显示,避免与昵称重复。
+  private replyUsername(reply: TopicPost): string {
+    const displayName: string | undefined = reply.author?.displayName;
+    const username: string | undefined = reply.author?.username;
+    if (!username || username.length === 0) {
+      return '';
+    }
+    if (displayName && displayName.length > 0) {
+      return username;
+    }
+    return '';
   }
 
 }
