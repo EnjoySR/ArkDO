@@ -175,12 +175,16 @@ export struct NotificationPage {
       if (!this.api) {
         this.message = '正在准备请求环境';
       }
+      // 若因重复触发提前返回,也要收起可能已被下拉手势拉起的刷新态。
+      this.isRefreshing = false;
       return;
     }
+    // Refresh 单向绑定:必须自己把 isRefreshing 置 true(刷新已有列表时)、结束再置 false,
+    // 靠这个跳变收起下拉 spinner。首次空列表用 isInitialLoading 走中心 loading。
+    const isFirstLoad: boolean = this.items.length === 0;
     this.loading = true;
-    if (this.items.length === 0) {
-      this.isInitialLoading = true;
-    }
+    this.isInitialLoading = isFirstLoad;
+    this.isRefreshing = !isFirstLoad;
     this.loadFailed = false;
 
     const result: NetworkResult<NotificationItem[]> = await this.api.load(PAGE_SIZE, 0, true);
