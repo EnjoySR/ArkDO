@@ -259,6 +259,46 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
+  async postJson(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    const requestPath: string = this.normalizePath(path);
+    logNetwork(`POST(json) ${requestPath} start bodyLength=${body.length}`);
+
+    if (!this.executor) {
+      logNetwork(`POST(json) ${requestPath} skipped: ArkWeb host is not ready`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 宿主尚未就绪。',
+          requiresChallenge: false
+        }
+      };
+    }
+
+    await this.whenHostReady();
+
+    try {
+      const referrer: string = options?.referrer ? options.referrer : '';
+      const rawResult: string = await this.executor.run(this.createPostJsonScript(requestPath, body, referrer));
+      logNetwork(`POST(json) ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
+    } catch (error) {
+      logNetwork(`POST(json) ${requestPath} failed before response envelope`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 请求失败。',
+          requiresChallenge: false
+        }
+      };
+    }
+  }
+
   async putJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
     logNetwork(`PUT ${requestPath} start`);
@@ -399,6 +439,83 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
           body: ${encodedBody}
         };
         // 把 Referer 设成同源帖子页(对齐官方请求),让 CF 不再把这条后台 POST 当异常。
+        const _ref = ${encodedReferrer};
+        if (_ref) {
+          fetchOptions.referrer = _ref;
+          fetchOptions.referrerPolicy = 'strict-origin-when-cross-origin';
+        }
+        return fetch(requestUrl.toString(), fetchOptions);
+      }).then((response) => {
+        response.text().then((body) => {
+          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+            statusCode: response.status,
+            contentType: response.headers.get('content-type') || '',
+            body: body,
+            csrfSource: csrfSource,
+            csrfLength: csrfLength
+          }));
+        }).catch(fail);
+      }).catch(fail);
+      return requestId;
+    })();`;
+  }
+
+  // 发表评论/回复:POST /posts,Content-Type application/json,body 为 JSON 字符串。
+  // 头部对齐抓包的关键字段:x-csrf-token、x-requested-with、discourse-present、discourse-logged-in、accept:*/*。
+  // cookie 靠 credentials:'include' 自动携带;CSRF 同源优先 /session/csrf.json,兜底页面 meta。
+  private createPostJsonScript(path: string, body: string, referrer: string): string {
+    const encodedPath: string = JSON.stringify(path);
+    const encodedBody: string = JSON.stringify(body);
+    const encodedReferrer: string = JSON.stringify(referrer);
+
+    return `(() => {
+      const requestId = '${REQUEST_ID_TOKEN}';
+      const requestUrl = new URL(${encodedPath}, window.location.origin);
+      let csrfSource = 'none';
+      let csrfLength = 0;
+      const fail = (error) => {
+        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+          statusCode: 0,
+          contentType: '',
+          body: '',
+          errorMessage: String(error),
+          csrfSource: csrfSource,
+          csrfLength: csrfLength
+        }));
+      };
+      const metaCsrf = () => {
+        const el = document.querySelector('meta[name="csrf-token"]');
+        return el ? (el.getAttribute('content') || '') : '';
+      };
+      const readCsrf = () => {
+        return fetch(new URL('/session/csrf.json', window.location.origin).toString(), {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+        }).then((r) => r.json()).then((j) => (j && j.csrf) ? j.csrf : '').catch(() => '');
+      };
+      Promise.resolve(readCsrf()).then((token) => {
+        let csrf = token;
+        csrfSource = token ? 'session' : 'none';
+        if (!csrf) {
+          csrf = metaCsrf();
+          csrfSource = csrf ? 'meta' : 'none';
+        }
+        csrfLength = csrf ? csrf.length : 0;
+        const fetchOptions = {
+          method: 'POST',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': '*/*',
+            'X-CSRF-Token': csrf,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Discourse-Present': 'true',
+            'Discourse-Logged-In': 'true'
+          },
+          body: ${encodedBody}
+        };
         const _ref = ${encodedReferrer};
         if (_ref) {
           fetchOptions.referrer = _ref;

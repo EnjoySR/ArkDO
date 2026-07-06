@@ -189,6 +189,9 @@ export struct RootTabPage {
       },
       onTopicClick: (topic: Topic) => {
         this.openTopicDetail(topic);
+      },
+      onOpenTopicById: (topicId: number) => {
+        this.openTopicDetailById(topicId);
       }
     })
     .width('100%')
@@ -212,10 +215,15 @@ export struct RootTabPage {
   }
 
   private openTopicDetail(topic: Topic): void {
-    console.info(`${LOG_TAG} open topic detail topicId=${topic.id} title=${topic.title}`);
+    this.openTopicDetailById(topic.id, topic.slug, topic.title);
+  }
+
+  // 按帖子 ID 跳转详情的通用入口(slug/title 可选,缺省时详情页按 id 加载)。
+  private openTopicDetailById(topicId: number, slug?: string, title?: string): void {
+    console.info(`${LOG_TAG} open topic detail topicId=${topicId} title=${title ? title : ''}`);
     this.navPathStack.pushPath(new NavPathInfo(
       AppRouteName.TOPIC_DETAIL,
-      buildTopicDetailRouteParam(topic.id, topic.slug, topic.title)
+      buildTopicDetailRouteParam(topicId, slug, title ? title : '')
     ));
   }
 

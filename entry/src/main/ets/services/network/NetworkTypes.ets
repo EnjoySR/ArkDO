@@ -34,6 +34,8 @@ export interface JsonRequestOptions {
 export interface JsonNetworkClient {
   getJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
   postForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
+  // POST + application/json body(发表评论/回复用),CSRF/cookie 与 postForm 同源自动处理。
+  postJson(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
   // PUT + 空 body(表情回应 toggle 用),CSRF/cookie 与 postForm 同源自动处理。
   putJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
 }

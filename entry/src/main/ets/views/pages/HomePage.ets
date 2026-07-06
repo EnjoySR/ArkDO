@@ -34,9 +34,22 @@ export struct HomePage {
   @Prop hasCheckedSession: boolean = false;
   onAccountClick: () => void = () => {};
   onTopicClick: (topic: Topic) => void = () => {};
+  // 按帖子 ID 直接跳转详情(通用入口,不依赖完整 Topic 对象)。
+  onOpenTopicById: (topicId: number) => void = () => {};
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeTopicReadState?: () => void = undefined;
+  // 调试用:输入帖子 ID 直接跳转详情(有些帖子已从最新列表里翻走,无法在列表中找到)。
+  private jumpDialogController: CustomDialogController = new CustomDialogController({
+    builder: TopicJumpDialog({
+      onConfirm: (topicId: number) => {
+        this.jumpToTopic(topicId);
+      }
+    }),
+    autoCancel: true,
+    alignment: DialogAlignment.Center,
+    customStyle: true
+  });
 
   aboutToAppear(): void {
     if (!this.unsubscribeSessionChanged) {
@@ -77,6 +90,8 @@ export struct HomePage {
           .fontColor($r('app.color.text_primary'))
 
         Blank()
+
+        this.JumpButton()
 
         this.AccountEntry()
       }
@@ -195,6 +210,31 @@ export struct HomePage {
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .alignItems(HorizontalAlign.Start)
+  }
+
+  // 调试按钮:点击弹出输入框,填帖子 ID 直接跳转详情。
+  @Builder
+  private JumpButton() {
+    Button() {
+      SymbolGlyph($r('sys.symbol.arrow_right_to_line'))
+        .fontSize(22)
+        .fontColor([$r('app.color.brand')])
+        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+    }
+    .width(42)
+    .height(42)
+    .borderRadius(21)
+    .backgroundColor($r('app.color.surface_muted'))
+    .padding(0)
+    .margin({ right: 10 })
+    .onClick(() => {
+      this.jumpDialogController.open();
+    })
+  }
+
+  private jumpToTopic(topicId: number): void {
+    console.info(`${LOG_TAG} debug jump to topic topicId=${topicId}`);
+    this.onOpenTopicById(topicId);
   }
 
   @Builder
@@ -410,5 +450,74 @@ export struct HomePage {
     }
 
     return mergedTopics;
+  }
+}
+
+// 调试用输入框:填帖子 ID 直接跳转详情。
+@CustomDialog
+struct TopicJumpDialog {
+  controller: CustomDialogController;
+  onConfirm: (topicId: number) => void = () => {};
+  @State private idText: string = '';
+
+  build() {
+    Column() {
+      Text('跳转到帖子')
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .margin({ bottom: 16 })
+
+      TextInput({ placeholder: '输入帖子 ID' })
+        .type(InputType.Number)
+        .defaultFocus(true)
+        .fontSize(16)
+        .height(46)
+        .backgroundColor($r('app.color.surface_muted'))
+        .borderRadius(10)
+        .onChange((value: string) => {
+          this.idText = value;
+        })
+        .onSubmit(() => {
+          this.confirm();
+        })
+
+      Row({ space: 12 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(44)
+          .fontSize(16)
+          .fontColor($r('app.color.text_secondary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .onClick(() => {
+            this.controller.close();
+          })
+
+        Button('跳转')
+          .layoutWeight(1)
+          .height(44)
+          .fontSize(16)
+          .fontColor(Color.White)
+          .backgroundColor($r('app.color.brand'))
+          .onClick(() => {
+            this.confirm();
+          })
+      }
+      .width('100%')
+      .margin({ top: 20 })
+    }
+    .width('80%')
+    .padding(20)
+    .backgroundColor($r('app.color.page_bg'))
+    .borderRadius(16)
+  }
+
+  private confirm(): void {
+    const topicId: number = parseInt(this.idText.trim(), 10);
+    if (isNaN(topicId) || topicId <= 0) {
+      return;
+    }
+    this.controller.close();
+    this.onConfirm(topicId);
   }
 }

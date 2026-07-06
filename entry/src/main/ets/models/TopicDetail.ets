@@ -7,6 +7,15 @@ export interface PostReaction {
   count: number;
 }
 
+// discourse-boosts 插件:一条楼层下别人发的 boost(头像 + 一句短内容)。
+// 保留 cooked HTML(而非纯文本):boost 可能是纯 emoji 或文字+emoji 混排,
+// 渲染时按行内节点解析,避免纯 emoji 被当作空文本丢失。
+export interface PostBoost {
+  id: number;
+  cookedHtml: string;
+  user: User;
+}
+
 // @Observed:楼层的 read 变化要能驱动 TopicPostItem(@ObjectLink)重渲染,
 // 从而让蓝点淡出动画生效。
 @Observed
@@ -28,6 +37,10 @@ export class TopicPost {
   reactionUsersCount?: number;
   // 当前登录用户对该楼的回应短名(current_user_reaction.id),无则 undefined。驱动点赞按钮图标。
   currentUserReaction?: string;
+  // discourse-boosts:该楼下别人发的 boost 列表(随 posts.json 返回)。
+  boosts?: PostBoost[];
+  // 当前登录用户是否可对该楼发 boost(can_boost);为真时显示火箭入口。
+  canBoost?: boolean;
 }
 
 export interface TopicDetail {

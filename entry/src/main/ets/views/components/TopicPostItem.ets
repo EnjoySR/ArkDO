@@ -1,4 +1,6 @@
-import { PostReaction, TopicPost } from '../../models/TopicDetail';
+import { curves } from '@kit.ArkUI';
+import { PostBoost, PostReaction, TopicPost } from '../../models/TopicDetail';
+import { CookedHtmlParser, RichInlineNode, RichInlineType } from '../../services/content/CookedHtmlParser';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { ReactionMutation, ReactionSnapshot } from '../../services/topic/ReactionMutation';
 import { getReactionEmoji, REACTION_ORDER } from './EmojiRegistry';
@@ -32,7 +34,13 @@ export struct TopicPostItem {
   // 表情回应切换:本组件就地乐观更新 this.post(@ObjectLink 自身变更→精准重渲染),
   // 页面只负责发 PUT + 失败时用 snapshot 回滚。
   onToggleReaction: (post: TopicPost, reaction: string, snapshot: ReactionSnapshot) => void = () => {};
+  // 点该楼回复按钮:把整条 post 上抛给页面,由页面按 postNumber+作者昵称打开定向回复输入框。
+  onReply: (post: TopicPost) => void = () => {};
+  // 点火箭:把整条 post 上抛给页面,由页面打开 boost 输入浮层。
+  onAddBoost: (post: TopicPost) => void = () => {};
   @State private showReactionPicker: boolean = false;
+  // 点赞按钮图标的弹簧缩放:每次切换回应时做一次 pop(先缩到 0.7,再用弹簧回弹到 1,带 overshoot)。
+  @State private likeIconScale: number = 1;
 
   build() {
     ListItem() {
@@ -123,7 +131,7 @@ export struct TopicPostItem {
     Column() {
       Row() {
         // 左:表情回应汇总(图标组 + 回应人数),仅有回应时渲染内容。
-        Row() {
+        Row({ space: 2 }){
           if (this.hasReactions()) {
             ForEach(this.getReactionIcons(), (item: ReactionIcon) => {
               Image(item.icon)
@@ -140,9 +148,15 @@ export struct TopicPostItem {
         }
         .alignItems(VerticalAlign.Center)
 
-        // 右:操作入口 —— 点赞/回应按钮(短按 heart、长按选表情),回复入口 TODO
+        // 右:操作入口 —— 点赞/回应按钮 + (无 boost 时)火箭 + 回复按钮
+        // 火箭放置规则:本楼还没有别人的 boost 时,火箭入口跟随在这里、位于回复按钮左边;
+        // 一旦本楼已有 boost,火箭改到 boost 列表末尾(见 BoostRow),此处不再显示。
         Row() {
           this.LikeButton()
+          if (this.canAddBoost() && !this.hasBoosts()) {
+            this.RocketButton(38, 0)
+          }
+          this.ReplyButton()
         }
         .alignItems(VerticalAlign.Center)
       }
@@ -150,7 +164,10 @@ export struct TopicPostItem {
       .justifyContent(FlexAlign.SpaceBetween)
       .alignItems(VerticalAlign.Center)
 
-      // TODO: boost 相关界面
+      // 本楼已有 boost 时:头像+短文本气泡排,末尾接火箭入口。
+      if (this.hasBoosts()) {
+        this.BoostRow()
+      }
     }
     .width('100%')
     .padding({ top: 10, bottom: 10 })
@@ -161,7 +178,10 @@ export struct TopicPostItem {
   @Builder
   private LikeButton() {
     Button({ type: ButtonType.Normal, stateEffect: true }) {
-      this.LikeButtonIcon()
+      Stack() {
+        this.LikeButtonIcon()
+      }
+      .scale({ x: this.likeIconScale, y: this.likeIconScale })
     }
     .width(38)
     .height(38)
@@ -193,6 +213,102 @@ export struct TopicPostItem {
     })
   }
 
+  // 回复按钮:38x38,点击打开定向回复输入框(占位「回复<本楼作者>」),图标 reply。
+  @Builder
+  private ReplyButton() {
+    Button({ type: ButtonType.Normal, stateEffect: true }) {
+      FaIconView({ icon: this.faIcon('reply'), color: '#646464', iconSize: 16 })
+    }
+    .width(38)
+    .height(38)
+    .padding(0)
+    .backgroundColor(Color.Transparent)
+    .borderRadius(10)
+    .onClick(() => {
+      this.onReply(this.post);
+    })
+  }
+
+  // boost 列表:头像+短文本气泡逐个平铺(可换行),末尾接火箭入口(canBoost 时)。
+  @Builder
+  private BoostRow() {
+    Flex({ wrap: FlexWrap.Wrap, alignItems: ItemAlign.Center }) {
+      ForEach(this.boostList(), (boost: PostBoost) => {
+        Row() {
+          UserAvatar({ user: boost.user, avatarSize: 20 })
+          Text() {
+            // boost 内容按行内节点渲染:文字用 Span、emoji 用 ImageSpan,
+            // 避免纯 emoji 的 boost 被当成空文本丢失。
+            ForEach(this.boostInlines(boost), (token: RichInlineNode, tokenIndex: number) => {
+              if (token.type === RichInlineType.IMAGE && token.src && token.src.length > 0) {
+                ImageSpan(token.src)
+                  .width(16)
+                  .height(16)
+                  .margin({ left: 1, right: 1 })
+                  .verticalAlign(ImageSpanAlignment.CENTER)
+              } else if (token.type === RichInlineType.LINE_BREAK) {
+                Span(' ')
+              } else {
+                Span(token.text)
+              }
+            }, (token: RichInlineNode, tokenIndex: number) => `${tokenIndex}-${token.type}-${token.text}`)
+          }
+          .fontSize(13)
+          .fontColor('#646464')
+          .margin({ left: 6 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .padding({ left: 4, right: 10, top: 4, bottom: 4 })
+        .backgroundColor('#F3F4F6')
+        .borderRadius(16)
+        .constraintSize({ maxWidth: '72%' })
+        .margin({ right: 8, top: 6 })
+      }, (boost: PostBoost) => boost.id.toString())
+
+      if (this.canAddBoost()) {
+        // 火箭跟在 boost 气泡后面:与气泡等高(28)、同样的上边距(6),外边距盒一致才能垂直居中对齐。
+        this.RocketButton(28, 6)
+      }
+    }
+    .width('100%')
+    .margin({ top: 2 })
+  }
+
+  // 火箭入口:点击上抛给页面打开 boost 输入浮层。两处复用(操作行内 38/0 / boost 列表末尾 28/6)。
+  @Builder
+  private RocketButton(size: number, topMargin: number) {
+    Button({ type: ButtonType.Normal, stateEffect: true }) {
+      FaIconView({ icon: this.faIcon('rocket'), color: '#BDBDBD', iconSize: 16 })
+    }
+    .width(size)
+    .height(size)
+    .padding(0)
+    .backgroundColor(Color.Transparent)
+    .borderRadius(10)
+    .margin({ top: topMargin })
+    .onClick(() => {
+      this.onAddBoost(this.post);
+    })
+  }
+
+  private boostList(): PostBoost[] {
+    return this.post.boosts ? this.post.boosts : [];
+  }
+
+  // 把 boost 的 cooked HTML 解析成行内节点(文字 + emoji 图片),供气泡内 Text 混排渲染。
+  private boostInlines(boost: PostBoost): RichInlineNode[] {
+    return CookedHtmlParser.toInlineNodes(boost.cookedHtml);
+  }
+
+  private hasBoosts(): boolean {
+    return this.boostList().length > 0;
+  }
+
+  private canAddBoost(): boolean {
+    return this.post.canBoost === true;
+  }
+
   // 按钮图标:未回应=空心灰心;heart=实心红心;其它表情=该表情 PNG。
   @Builder
   private LikeButtonIcon() {
@@ -213,7 +329,16 @@ export struct TopicPostItem {
   private toggleReaction(reaction: string): void {
     const snapshot: ReactionSnapshot = ReactionMutation.snapshot(this.post);
     ReactionMutation.applyToggle(this.post, reaction);
+    this.playLikePop();
     this.onToggleReaction(this.post, reaction, snapshot);
+  }
+
+  // 图标 pop:先瞬间缩到 0.7(不带动画),再用弹簧回弹到 1(低阻尼→overshoot 回弹)。
+  private playLikePop(): void {
+    this.likeIconScale = 0.7;
+    this.getUIContext().animateTo({ curve: curves.springMotion(0.55, 0.45) }, () => {
+      this.likeIconScale = 1;
+    });
   }
 
   // 长按弹出的 10 表情面板(2 行 x 5),点某个即以该表情回应。

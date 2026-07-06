@@ -1,5 +1,5 @@
 import { Topic, TopicTag } from '../../models/Topic';
-import { PostReaction, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { PostBoost, PostReaction, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
@@ -78,6 +78,22 @@ interface DiscourseCurrentReaction {
   can_undo?: boolean;
 }
 
+// discourse-boosts:发 boost 的用户。
+interface DiscourseBoostUser {
+  id?: number;
+  username?: string;
+  name?: string;
+  avatar_template?: string;
+  animated_avatar?: string;
+}
+
+// discourse-boosts:一条 boost(id + cooked 短文本 + 用户)。
+interface DiscourseBoost {
+  id?: number;
+  cooked?: string;
+  user?: DiscourseBoostUser;
+}
+
 interface DiscoursePost {
   id?: number;
   topic_id?: number;
@@ -97,6 +113,48 @@ interface DiscoursePost {
   reactions?: DiscourseReaction[];
   reaction_users_count?: number;
   current_user_reaction?: DiscourseCurrentReaction;
+  boosts?: DiscourseBoost[];
+  can_boost?: boolean;
+}
+
+// POST /posts 的响应外壳:真正的楼层在 post 字段里,不在顶层。
+interface CreatePostResponse {
+  action?: string;
+  success?: boolean;
+  post?: DiscoursePost;
+  // 进入审核队列时返回 pending_post(而非 post),action 为 'enqueued'。
+  pending_post?: DiscoursePost;
+}
+
+// 发表评论/回复的结果:要么直接发布得到新楼层 post,要么进了审核队列(pending)。
+export interface CreateReplyOutcome {
+  post?: TopicPost;
+  pending: boolean;
+}
+
+// 发表评论/回复 POST /posts 的请求体(对齐官方 composer 提交字段)。
+interface CreateReplyPayload {
+  raw: string;
+  unlist_topic: boolean;
+  topic_id: number;
+  category?: number;
+  // 定向回复某楼时携带该楼号(对齐 Discourse composer);缺省=回复整个话题的顶层回复。
+  reply_to_post_number?: number;
+  is_warning: boolean;
+  // 悄悄话(仅管理组可见)回复,普通回复为 false(对齐官方 composer)。
+  whisper: boolean;
+  archetype: string;
+  typing_duration_msecs: number;
+  composer_open_duration_msecs: number;
+  composer_version: number;
+  tags: string[];
+  featured_link: string | null;
+  shared_draft: boolean;
+  draft_key: string;
+  locale: string;
+  // 图片尺寸表,无图时为空对象(对齐官方 composer)。
+  image_sizes: Record<string, number>;
+  nested_post: boolean;
 }
 
 export interface TopicPage {
@@ -244,6 +302,119 @@ export class TopicService {
       `/discourse-reactions/posts/${postId}/custom-reactions/${encodeURIComponent(reaction)}/toggle.json`;
     const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
     return this.bridge.putJson(path, { notifyChallenge: false, referrer: referrer });
+  }
+
+  // 发表评论/回复:POST /posts,body 为 JSON(对齐官方 composer 提交)。
+  // 关键字段:raw(正文)、topic_id、category、archetype;其余为 composer 的默认/遥测字段。
+  // typingDurationMs / composerOpenDurationMs 由调用方按真实交互时长传入(缺省给合理值)。
+  async createReply(
+    topicId: number,
+    categoryId: number | undefined,
+    raw: string,
+    typingDurationMs: number = 0,
+    composerOpenDurationMs: number = 0,
+    replyToPostNumber?: number
+  ): Promise<NetworkResult<CreateReplyOutcome>> {
+    const payload: CreateReplyPayload = {
+      raw: raw,
+      unlist_topic: false,
+      topic_id: topicId,
+      is_warning: false,
+      whisper: false,
+      archetype: 'regular',
+      typing_duration_msecs: Math.max(0, Math.round(typingDurationMs)),
+      composer_open_duration_msecs: Math.max(0, Math.round(composerOpenDurationMs)),
+      composer_version: 1,
+      tags: [],
+      featured_link: null,
+      shared_draft: false,
+      draft_key: `topic_${topicId}`,
+      locale: '',
+      image_sizes: {},
+      nested_post: true
+    };
+    if (typeof categoryId === 'number') {
+      payload.category = categoryId;
+    }
+    if (typeof replyToPostNumber === 'number') {
+      payload.reply_to_post_number = replyToPostNumber;
+    }
+    const body: string = JSON.stringify(payload);
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+
+    const response: NetworkResult<string> = await this.bridge.postJson('/posts', body, {
+      notifyChallenge: true,
+      referrer: referrer
+    });
+    if (!response.success) {
+      return this.forwardFailure<CreateReplyOutcome>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, 'Linux.do 发表评论响应为空。');
+    }
+
+    try {
+      // 直接发布:{ action:'create_post', success, post:{…} };楼层在 post 字段。
+      // 进审核队列:{ action:'enqueued', success, pending_post:{…} },此时无即时楼层。
+      const wrapper: CreatePostResponse = JSON.parse(response.data) as CreatePostResponse;
+      const created: DiscoursePost | undefined = wrapper.post;
+      const posts: TopicPost[] = created ? this.mapPosts([created]) : [];
+      if (posts.length > 0) {
+        return {
+          success: true,
+          statusCode: response.statusCode,
+          challengeState: response.challengeState,
+          data: { post: posts[0], pending: false }
+        };
+      }
+      // 进入审核队列(等待管理员/系统批准),视为提交成功但没有可追加的楼层。
+      if (wrapper.action === 'enqueued' || wrapper.pending_post !== undefined) {
+        return {
+          success: true,
+          statusCode: response.statusCode,
+          challengeState: response.challengeState,
+          data: { pending: true }
+        };
+      }
+      return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, 'Linux.do 发表评论响应缺少楼层数据。');
+    } catch (error) {
+      return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, 'Linux.do 发表评论响应不是有效 JSON。');
+    }
+  }
+
+  // discourse-boosts:对某楼发一条 boost(短文本)。表单 POST,body 为 raw=<文本>。
+  // 抓包确认:POST /discourse-boosts/posts/{postId}/boosts,application/x-www-form-urlencoded,
+  // 响应 200 返回新建的 boost 对象(id/cooked/user{…})。CSRF/Referer 由 postForm 脚本自动带。
+  async createBoost(postId: number, topicId: number, raw: string): Promise<NetworkResult<PostBoost>> {
+    const path: string = `/discourse-boosts/posts/${postId}/boosts`;
+    const body: string = `raw=${encodeURIComponent(raw)}`;
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    const response: NetworkResult<string> = await this.bridge.postForm(path, body, {
+      notifyChallenge: true,
+      referrer: referrer
+    });
+    if (!response.success) {
+      return this.forwardFailure<PostBoost>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<PostBoost>(response.statusCode, response.challengeState, 'Linux.do 发送 boost 响应为空。');
+    }
+
+    try {
+      const created: DiscourseBoost = JSON.parse(response.data) as DiscourseBoost;
+      const boosts: PostBoost[] = this.mapBoosts([created]);
+      if (boosts.length > 0) {
+        return {
+          success: true,
+          statusCode: response.statusCode,
+          challengeState: response.challengeState,
+          data: boosts[0]
+        };
+      }
+      return this.unexpectedResponse<PostBoost>(response.statusCode, response.challengeState, 'Linux.do 发送 boost 响应缺少 boost 数据。');
+    } catch (error) {
+      return this.unexpectedResponse<PostBoost>(response.statusCode, response.challengeState, 'Linux.do 发送 boost 响应不是有效 JSON。');
+    }
   }
 
   private getLatestPath(page: number): string {
@@ -434,6 +605,8 @@ export class TopicService {
       const currentReactionId: string | undefined = sourcePost.current_user_reaction?.id;
       post.currentUserReaction =
         typeof currentReactionId === 'string' && currentReactionId.length > 0 ? currentReactionId : undefined;
+      post.boosts = this.mapBoosts(sourcePost.boosts);
+      post.canBoost = sourcePost.can_boost === true;
       posts.push(post);
     }
 
@@ -456,6 +629,42 @@ export class TopicService {
       });
     }
     return reactions;
+  }
+
+  private mapBoosts(source?: DiscourseBoost[]): PostBoost[] {
+    const boosts: PostBoost[] = [];
+    if (!source) {
+      return boosts;
+    }
+    for (let index: number = 0; index < source.length; index++) {
+      const item: DiscourseBoost = source[index];
+      if (typeof item.id !== 'number') {
+        continue;
+      }
+      const user: User | undefined = this.mapBoostUser(item.user);
+      if (!user) {
+        continue;
+      }
+      boosts.push({
+        id: item.id,
+        cookedHtml: item.cooked ? item.cooked : '',
+        user: user
+      });
+    }
+    return boosts;
+  }
+
+  private mapBoostUser(source?: DiscourseBoostUser): User | undefined {
+    if (!source || !source.username) {
+      return undefined;
+    }
+    return {
+      id: typeof source.id === 'number' ? source.id : 0,
+      username: source.username,
+      displayName: source.name,
+      avatarTemplate: source.avatar_template,
+      animatedAvatar: source.animated_avatar ? source.animated_avatar : undefined
+    };
   }
 
   private mapPostAuthor(sourcePost: DiscoursePost): User | undefined {

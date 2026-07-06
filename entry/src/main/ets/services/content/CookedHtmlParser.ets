@@ -98,6 +98,12 @@ export class CookedHtmlParser {
     return CookedHtmlParser.normalizeText(CookedHtmlParser.stripTagsKeepingLines(html));
   }
 
+  // 把一段(通常是单段落的)HTML 解析为行内节点(文字 + 行内 emoji 图片等),
+  // 供 boost 气泡这类需要「文字与 emoji 混排」的短内容行内渲染。外层 <p>/<div> 会被忽略。
+  static toInlineNodes(html: string): RichInlineNode[] {
+    return CookedHtmlParser.parseInlines(html ? html : '');
+  }
+
   private static parseBlocks(html: string): RichBlock[] {
     const blocks: RichBlock[] = [];
     let index: number = 0;
