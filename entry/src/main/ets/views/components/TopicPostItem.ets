@@ -855,10 +855,11 @@ export struct TopicPostItem {
 
   // 把楼层的 reactions 解析成 {短名, 已解析资源} 配对,过滤掉未知表情。
   // 分离出来是为了让 icon 类型收窄为非空 Resource(Image 不接受 undefined)。
+  // 汇总胶囊最多展示前 3 种表情,总人数仍用 reactionUsersCount。
   private getReactionIcons(): ReactionIcon[] {
     const icons: ReactionIcon[] = [];
     const reactions: PostReaction[] = this.post.reactions ? this.post.reactions : [];
-    for (let index: number = 0; index < reactions.length; index++) {
+    for (let index: number = 0; index < reactions.length && icons.length < 3; index++) {
       const icon: Resource | undefined = getReactionEmoji(reactions[index].id);
       if (icon !== undefined) {
         icons.push({ id: reactions[index].id, icon: icon });
