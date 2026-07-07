@@ -10,6 +10,7 @@ import { TopicReadController } from '../../services/reading/TopicReadController'
 import { ReactionMutation, ReactionSnapshot } from '../../services/topic/ReactionMutation';
 import { PollMutation, PollSnapshot } from '../../services/topic/PollMutation';
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
+import { PostDataSource } from '../../services/topic/PostDataSource';
 import { PostStreamPager } from '../../services/topic/PostStreamPager';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { TopicMetadataBadges } from '../components/TopicBadges';
@@ -29,7 +30,10 @@ const SUCCESS_TOAST_DELAY_MS: number = 350;
 @Component
 export struct TopicDetailPage {
   @State private detail: TopicDetail | undefined = undefined;
-  @State private posts: TopicPost[] = [];
+  // 楼层真源:LazyForEach 数据源,增删经精准通知(maintainVisibleContentPosition 依赖)。
+  // postCount 镜像总数驱动条件 UI(@State 观测不到 dataSource 内部变化),变更后须手动同步。
+  private dataSource: PostDataSource = new PostDataSource();
+  @State private postCount: number = 0;
   @State private isLoading: boolean = false;
   @State private message: string = '正在准备 ArkWeb 请求环境';
   @State private requiresChallenge: boolean = false;
@@ -74,10 +78,10 @@ export struct TopicDetailPage {
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
   // 已读追踪控制器:计时上报、已读水位、错峰翻已读、离开时回传列表页,全部由它托管。
-  // 用闭包读取 @State 的 detail/posts(posts 分页后会换新数组,不能捕获快照)。
+  // 用闭包读取 detail 与数据源当前楼层数组(分页后数组会变,不能捕获快照)。
   private readController: TopicReadController = new TopicReadController(
     (): TopicDetail | undefined => this.detail,
-    (): TopicPost[] => this.posts
+    (): TopicPost[] => this.dataSource.getAll()
   );
 
   aboutToAppear(): void {
@@ -136,7 +140,7 @@ export struct TopicDetailPage {
             this.TopicSummary()
           }
 
-          ForEach(this.posts, (post: TopicPost) => {
+          LazyForEach(this.dataSource, (post: TopicPost) => {
             TopicPostItem({
               post: post,
               lastReadPostNumber: this.detail?.lastReadPostNumber ?? -1,
@@ -176,7 +180,7 @@ export struct TopicDetailPage {
             })
           }, (post: TopicPost) => post.id.toString())
 
-          if (this.posts.length > 0) {
+          if (this.postCount > 0) {
             ListItem() {
               Row() {
                 if (this.isLoadingMore) {
@@ -200,6 +204,10 @@ export struct TopicDetailPage {
         .width('100%')
         .layoutWeight(1)
         .padding({ left: 10, right: 10 })
+        // 头部插入更早楼层时保持可视内容不动(仅对 LazyForEach 的精准通知生效)。
+        .maintainVisibleContentPosition(true)
+        // 楼层含富文本/图片偏重,预创建 4 条平衡快滑白块与内存。
+        .cachedCount(4)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .onScrollIndex((start: number, end: number) => {
           // List 的 index 0 是 TopicSummary,楼层从 index 1 起 → 换算成 posts 下标再交给已读控制器。
@@ -343,10 +351,9 @@ export struct TopicDetailPage {
         // 进入审核队列:提交成功但不会立刻出现在列表里。
         this.showToastAfterComposerClose('评论已提交，等待审核', 2000);
       } else if (result.data.post) {
-        // 直接发布:追加到楼层末尾;用新数组触发 List 刷新。
-        const appended: TopicPost[] = this.posts.slice();
-        appended.push(result.data.post);
-        this.posts = appended;
+        // 直接发布:追加到楼层末尾(数据源精准通知,列表只新建这一条)。
+        this.dataSource.appendPosts([result.data.post]);
+        this.postCount = this.dataSource.totalCount();
         this.showToastAfterComposerClose('评论已发表', 1500);
       }
       return true;
@@ -368,7 +375,7 @@ export struct TopicDetailPage {
     const result: NetworkResult<PostBoost> = await new TopicService(this.bridge).createBoost(postId, topicId, text);
 
     if (result.success && result.data) {
-      const target: TopicPost | undefined = PostStreamPager.findById(this.posts, postId);
+      const target: TopicPost | undefined = PostStreamPager.findById(this.dataSource.getAll(), postId);
       if (target) {
         // 用新数组赋值触发 @ObjectLink 精准重渲染(直接 push 现有数组不会被观测)。
         const next: PostBoost[] = target.boosts ? target.boosts.slice() : [];
@@ -391,11 +398,10 @@ export struct TopicDetailPage {
   // 按 postNumber 滚动定位到对应楼层。List index 0 是 TopicSummary,楼层从 index 1 起 → 目标 index = 楼序 + 1。
   // 仅定位已加载楼:未加载(还没上拉到)时弹 toast 提示,不自动翻页。
   private jumpToPostNumber(postNumber: number): void {
-    for (let index: number = 0; index < this.posts.length; index++) {
-      if (this.posts[index].postNumber === postNumber) {
-        this.scroller.scrollToIndex(index + 1, true);
-        return;
-      }
+    const index: number = this.dataSource.findIndexByPostNumber(postNumber);
+    if (index >= 0) {
+      this.scroller.scrollToIndex(index + 1, true);
+      return;
     }
     this.showComposerToast('该楼尚未加载', 1500);
   }
@@ -534,9 +540,10 @@ export struct TopicDetailPage {
     this.isLoading = false;
     if (result.success && result.data) {
       this.detail = result.data;
-      this.posts = result.data.posts;
-      this.message = result.data.posts.length > 0 ? '' : '暂无帖子内容';
-      this.hasMorePosts = PostStreamPager.countUnloaded(result.data.stream ?? [], this.posts) > 0;
+      this.dataSource.reset(result.data.posts);
+      this.postCount = this.dataSource.totalCount();
+      this.message = this.postCount > 0 ? '' : '暂无帖子内容';
+      this.hasMorePosts = PostStreamPager.countLater(result.data.stream ?? [], this.dataSource.getAll()) > 0;
       this.loadMoreMessage = this.hasMorePosts ? '上拉加载更多' : '没有更多了';
       console.info(`${LOG_TAG} load detail success topicId=${result.data.id} posts=${result.data.posts.length} stream=${result.data.stream ? result.data.stream.length : 0}`);
       this.startReadingTrackerIfNeeded();
@@ -553,7 +560,7 @@ export struct TopicDetailPage {
       return;
     }
     const stream: number[] = this.detail.stream ? this.detail.stream : [];
-    const nextIds: number[] = PostStreamPager.collectNextIds(stream, this.posts, POSTS_PAGE_SIZE);
+    const nextIds: number[] = PostStreamPager.collectNextIds(stream, this.dataSource.getAll(), POSTS_PAGE_SIZE);
     if (nextIds.length === 0) {
       this.hasMorePosts = false;
       this.loadMoreMessage = '没有更多了';
@@ -567,10 +574,11 @@ export struct TopicDetailPage {
     this.isLoadingMore = false;
 
     if (result.success && result.data) {
-      this.posts = PostStreamPager.append(this.posts, result.data);
-      this.hasMorePosts = PostStreamPager.countUnloaded(stream, this.posts) > 0;
+      const added: number = this.dataSource.appendPosts(result.data);
+      this.postCount = this.dataSource.totalCount();
+      this.hasMorePosts = PostStreamPager.countLater(stream, this.dataSource.getAll()) > 0;
       this.loadMoreMessage = this.hasMorePosts ? '上拉加载更多' : '没有更多了';
-      console.info(`${LOG_TAG} load more topicId=${topicId} added=${result.data.length} total=${this.posts.length}`);
+      console.info(`${LOG_TAG} load more topicId=${topicId} added=${added} total=${this.postCount}`);
       return;
     }
 
@@ -718,7 +726,7 @@ export struct TopicDetailPage {
       return `Topic ID：${this.param.topicId}`;
     }
 
-    const postsCount: number = this.detail.postsCount ? this.detail.postsCount : this.posts.length;
+    const postsCount: number = this.detail.postsCount ? this.detail.postsCount : this.postCount;
     const replyCount: number = this.detail.replyCount ? this.detail.replyCount : 0;
     const likeCount: number = this.detail.likeCount ? this.detail.likeCount : 0;
     const viewCount: number = this.detail.viewCount ? this.detail.viewCount : 0;

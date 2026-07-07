@@ -28,6 +28,8 @@ interface DiscourseTopic {
   last_posted_at?: string;
   unseen?: boolean;
   unread_posts?: number;
+  last_read_post_number?: number;
+  highest_post_number?: number;
   posters?: DiscoursePoster[];
 }
 
@@ -259,8 +261,9 @@ export class TopicService {
     }
   }
 
-  async getTopicDetail(topicId: number, slug?: string): Promise<NetworkResult<TopicDetail>> {
-    const response: NetworkResult<string> = await this.bridge.getJson(this.getTopicDetailPath(topicId, slug));
+  // postNumber>1 时请求带楼号的详情:服务端以该楼为锚返回一窗楼层(前 1/4 后 3/4),用于跳转未读/指定楼。
+  async getTopicDetail(topicId: number, slug?: string, postNumber?: number): Promise<NetworkResult<TopicDetail>> {
+    const response: NetworkResult<string> = await this.bridge.getJson(this.getTopicDetailPath(topicId, slug, postNumber));
     if (!response.success) {
       return this.forwardFailure<TopicDetail>(response);
     }
@@ -582,11 +585,13 @@ export class TopicService {
     return `/latest.json?page=${page}`;
   }
 
-  private getTopicDetailPath(topicId: number, slug?: string): string {
+  private getTopicDetailPath(topicId: number, slug?: string, postNumber?: number): string {
+    // 楼号作为路径段(对齐官网 /t/<slug>/<id>/<楼号>);1 楼等同默认首屏,不拼。
+    const anchor: string = postNumber !== undefined && postNumber > 1 ? `/${postNumber}` : '';
     if (slug && slug.length > 0) {
-      return `/t/${encodeURIComponent(slug)}/${topicId}.json`;
+      return `/t/${encodeURIComponent(slug)}/${topicId}${anchor}.json`;
     }
-    return `/t/${topicId}.json`;
+    return `/t/${topicId}${anchor}.json`;
   }
 
   private mapTopics(sourceTopics: DiscourseTopic[], sourceUsers?: DiscourseUser[]): Topic[] {
@@ -611,6 +616,8 @@ export class TopicService {
       topic.lastPostedAt = sourceTopic.last_posted_at;
       topic.unseen = typeof sourceTopic.unseen === 'boolean' ? sourceTopic.unseen : undefined;
       topic.unreadPosts = typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined;
+      topic.lastReadPostNumber = typeof sourceTopic.last_read_post_number === 'number' ? sourceTopic.last_read_post_number : undefined;
+      topic.highestPostNumber = typeof sourceTopic.highest_post_number === 'number' ? sourceTopic.highest_post_number : undefined;
       topic.author = this.findOriginalPoster(sourceTopic, sourceUsers);
       topics.push(topic);
     }

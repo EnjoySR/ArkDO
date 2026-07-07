@@ -35,5 +35,8 @@ export class Topic {
   // unseen:全新未读主题(标题后蓝点);unreadPosts:已读过但又有新回复的未读数(数字徽标)。
   unseen?: boolean;
   unreadPosts?: number;
+  // 未读徽标跳转定位:目标楼号 = lastReadPostNumber + 1,以 highestPostNumber 封顶。匿名时无值。
+  lastReadPostNumber?: number;
+  highestPostNumber?: number;
   author?: User;
 }
