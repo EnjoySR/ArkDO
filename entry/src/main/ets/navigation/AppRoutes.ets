@@ -9,6 +9,10 @@ export interface TopicDetailRouteParam {
   topicId: number;
   slug?: string;
   title: string;
+  // 目标楼号:未读徽标/通知/引用跳转的定位锚,详情页以该楼为窗口中心加载。缺省从头加载。
+  targetPostNumber?: number;
+  // 落地后是否短暂高亮目标楼:通知跳转 true(对齐官网 anchor 高亮);未读徽标跳转 false(只有红线)。
+  highlightTarget?: boolean;
 }
 
 export interface ProfileRouteParam {
@@ -31,11 +35,13 @@ export interface WebRouteParam {
   title?: string;
 }
 
-export function buildTopicDetailRouteParam(topicId: number, slug: string | undefined, title: string): TopicDetailRouteParam {
+export function buildTopicDetailRouteParam(topicId: number, slug: string | undefined, title: string, targetPostNumber?: number, highlightTarget?: boolean): TopicDetailRouteParam {
   return {
     topicId: topicId,
     slug: slug,
-    title: title
+    title: title,
+    targetPostNumber: targetPostNumber,
+    highlightTarget: highlightTarget
   };
 }
 
@@ -70,5 +76,6 @@ export function isTopicDetailRouteParam(param: Object | undefined): boolean {
   const candidate: TopicDetailRouteParam = param as TopicDetailRouteParam;
   return typeof candidate.topicId === 'number' &&
     typeof candidate.title === 'string' &&
-    (candidate.slug === undefined || typeof candidate.slug === 'string');
+    (candidate.slug === undefined || typeof candidate.slug === 'string') &&
+    (candidate.targetPostNumber === undefined || typeof candidate.targetPostNumber === 'number');
 }

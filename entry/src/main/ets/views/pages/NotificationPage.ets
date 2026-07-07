@@ -12,7 +12,8 @@ export struct NotificationPage {
   bridge: JsonNetworkClient | undefined = undefined;
   isArkWebReady: boolean = false;
   onBack: () => void = () => {};
-  onOpenTopic: (topicId: number, slug: string | undefined, title: string) => void = () => {};
+  // postNumber:通知指向的具体楼层,详情页据此定位并高亮;无楼层的通知(徽章等)为 undefined。
+  onOpenTopic: (topicId: number, slug: string | undefined, title: string, postNumber?: number) => void = () => {};
 
   @State private items: NotificationItem[] = [];
   @State private isInitialLoading: boolean = false;
@@ -239,7 +240,7 @@ export struct NotificationPage {
       }
     }
     if (item.topicId !== undefined) {
-      this.onOpenTopic(item.topicId, item.slug, item.title);
+      this.onOpenTopic(item.topicId, item.slug, item.title, item.postNumber);
     }
   }
 

@@ -161,8 +161,8 @@ export struct RootTabPage {
           onBack: () => {
             this.popNavigation();
           },
-          onOpenTopic: (topicId: number, slug: string | undefined, title: string) => {
-            this.openTopicDetailById(topicId, slug, title);
+          onOpenTopic: (topicId: number, slug: string | undefined, title: string, postNumber?: number) => {
+            this.openTopicDetailById(topicId, slug, title, postNumber, postNumber !== undefined);
           }
         })
       }
@@ -243,6 +243,9 @@ export struct RootTabPage {
       },
       onOpenTopicById: (topicId: number) => {
         this.openTopicDetailById(topicId);
+      },
+      onOpenTopicAtPost: (topic: Topic, postNumber: number) => {
+        this.openTopicDetailById(topic.id, topic.slug, topic.title, postNumber);
       }
     })
     .width('100%')
@@ -270,11 +273,12 @@ export struct RootTabPage {
   }
 
   // 按帖子 ID 跳转详情的通用入口(slug/title 可选,缺省时详情页按 id 加载)。
-  private openTopicDetailById(topicId: number, slug?: string, title?: string): void {
-    console.info(`${LOG_TAG} open topic detail topicId=${topicId} title=${title ? title : ''}`);
+  // targetPostNumber:定位楼号(未读徽标/通知);highlightTarget:落地后短暂高亮目标楼(通知)。
+  private openTopicDetailById(topicId: number, slug?: string, title?: string, targetPostNumber?: number, highlightTarget?: boolean): void {
+    console.info(`${LOG_TAG} open topic detail topicId=${topicId} title=${title ? title : ''} target=${targetPostNumber ?? 0}`);
     this.navPathStack.pushPath(new NavPathInfo(
       AppRouteName.TOPIC_DETAIL,
-      buildTopicDetailRouteParam(topicId, slug, title ? title : '')
+      buildTopicDetailRouteParam(topicId, slug, title ? title : '', targetPostNumber, highlightTarget)
     ));
   }
 

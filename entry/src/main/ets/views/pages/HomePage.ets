@@ -43,6 +43,8 @@ export struct HomePage {
   onTopicClick: (topic: Topic) => void = () => {};
   // 按帖子 ID 直接跳转详情(通用入口,不依赖完整 Topic 对象)。
   onOpenTopicById: (topicId: number) => void = () => {};
+  // 点未读徽标:带目标楼号打开详情,直接定位到第一条未读楼。
+  onOpenTopicAtPost: (topic: Topic, postNumber: number) => void = () => {};
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeTopicReadState?: () => void = undefined;
@@ -141,6 +143,9 @@ export struct HomePage {
                   // 点击即清除蓝点(乐观已读);未读徽标待返回时由详情页结算的真实未读数同步。
                   selectedTopic.unseen = false;
                   this.onTopicClick(selectedTopic);
+                },
+                onUnreadBadgeClick: (selectedTopic: Topic) => {
+                  this.handleUnreadBadgeClick(selectedTopic);
                 }
               })
             }, (topic: Topic) => topic.id.toString())
@@ -410,10 +415,30 @@ export struct HomePage {
         // @Observed 实例赋值 → 对应 TopicListItem(@ObjectLink)精准重渲染。
         topic.unseen = state.unseen;
         topic.unreadPosts = state.unreadPosts;
+        // 同步已读水位(最高楼 − 剩余未读):再点未读徽标时跳转目标才是最新的第一条未读楼。
+        if (topic.highestPostNumber !== undefined && topic.highestPostNumber > 0) {
+          topic.lastReadPostNumber = Math.max(0, topic.highestPostNumber - state.unreadPosts);
+        }
         console.info(`${LOG_TAG} topic read state synced topicId=${state.topicId} unreadPosts=${state.unreadPosts}`);
         return;
       }
     }
+  }
+
+  // 点未读徽标:目标楼 = 已读水位 + 1(封顶最高楼)。字段缺失(匿名/异常数据)退化为普通打开。
+  private handleUnreadBadgeClick(topic: Topic): void {
+    topic.unseen = false;
+    const lastRead: number = topic.lastReadPostNumber ?? 0;
+    if (lastRead <= 0) {
+      this.onTopicClick(topic);
+      return;
+    }
+    let target: number = lastRead + 1;
+    const highest: number = topic.highestPostNumber ?? 0;
+    if (highest > 0 && target > highest) {
+      target = highest;
+    }
+    this.onOpenTopicAtPost(topic, target);
   }
 
   private handleArkWebReadyChanged(): void {

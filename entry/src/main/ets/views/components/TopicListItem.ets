@@ -12,6 +12,8 @@ export struct TopicListItem {
   category?: TopicCategory;
   parentCategory?: TopicCategory;
   onTopicClick: (topic: Topic) => void = () => {};
+  // 点未读数字徽标:直跳详情页第一条未读楼(与整行点击从头打开区分)。
+  onUnreadBadgeClick: (topic: Topic) => void = () => {};
 
   build() {
     ListItem() {
@@ -56,6 +58,12 @@ export struct TopicListItem {
                   .backgroundColor('#66CCFF')
                   .borderRadius(9)
                   .padding({ left: 7, right: 7, top: 1, bottom: 1 })
+                  // 徽标点击直跳未读楼:热区四向外扩(徽标本体太小),Block 阻止事件穿透到整行。
+                  .responseRegion({ x: '-50%', y: '-80%', width: '200%', height: '260%' })
+                  .hitTestBehavior(HitTestMode.Block)
+                  .onClick(() => {
+                    this.onUnreadBadgeClick(this.topic);
+                  })
               } else {
                 Text(`${this.getReplyCount()} 回复`)
                   .fontSize(13)

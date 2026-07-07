@@ -44,6 +44,11 @@ export struct TopicPostItem {
   // @Watch:reporting/read 变化时开/停"呼吸"定时器(见 syncBreathing)。
   @ObjectLink @Watch('onPostStateChanged') post: TopicPost;
   lastReadPostNumber: number = -1;
+  // 本楼是进入时快照的"第一条未读楼":顶部渲染"上次访问"红色分隔线(对齐官网 last visit 线)。
+  // 普通 prop:锚楼由页面在楼层创建前确定且不再变化,无需响应式。
+  showLastVisitedLine: boolean = false;
+  // 通知/引用跳转的目标楼:挂载后背景短暂高亮再渐隐(对齐官网 anchor 高亮),一次性。
+  flashOnAppear: boolean = false;
   // 图片浏览器在页面级渲染，这里把 PostRichContent 的「打开」请求继续上抛给页面
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击继续上抛给页面(由页面经 LinkRouter 判断跳原生详情或通用 WebView)。
@@ -59,7 +64,8 @@ export struct TopicPostItem {
   onVote: (post: TopicPost, poll: Poll, optionIds: string[]) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
   onRemoveVote: (post: TopicPost, poll: Poll) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
   // 点头部「回复别人」指示器 / 展开区「跳到帖子」:按 postNumber 上抛给页面滚动定位。
-  onJumpToPost: (postNumber: number) => void = () => {};
+  // 返回 Promise:目标楼未加载时页面会重开窗口(网络请求),期间入口图标显示加载中。
+  onJumpToPost: (postNumber: number) => Promise<void> = () => Promise.resolve();
   // 展开「被回复」时上抛给页面拉取列表(页面持有 bridge/TopicService);返回楼层数组,失败返回 null。
   onLoadReplies: (post: TopicPost) => Promise<TopicPost[] | null> = () => Promise.resolve(null);
   // 点「更多」展开区:拷贝该楼永久链接、书签 toggle。均上抛给页面(页面持有 bridge/slug/剪贴板)。
@@ -93,10 +99,19 @@ export struct TopicPostItem {
   @State private breathing: boolean = false;
   @State private breatheDim: boolean = false;
   private breatheTimerId: number = -1;
+  // 目标楼高亮进行中:背景淡蓝,定时后渐隐回透明(backgroundColor 绑定隐式动画)。
+  @State private flashActive: boolean = false;
+  private flashTimerId: number = -1;
+  // 「跳到帖子」跳转进行中的目标楼号(>0 时该行箭头换加载图标;重开窗口是网络请求,需要反馈)。
+  @State private jumpLoadingPostNumber: number = 0;
 
   build() {
     ListItem() {
       Column() {
+        if (this.showLastVisitedLine) {
+          this.LastVisitedDivider()
+        }
+
         this.PostAuthorHeader()
 
         PostRichContent({
@@ -118,13 +133,39 @@ export struct TopicPostItem {
         this.PostFooter()
       }
       .width('100%')
-      .padding({ top: 12, bottom: 12 })
+      // 左右留白由本组件持有(而非 List 的 padding):高亮背景才能通栏铺满屏幕宽。
+      .padding({ left: 10, right: 10, top: 12, bottom: 12 })
       .border({
         width: { bottom: 1 },
         color: '#E5E7EB'
       })
       .alignItems(HorizontalAlign.Start)
+      // 渐隐终点必须是同色系零透明度(#00+淡蓝):Color.Transparent 是透明黑,
+      // RGBA 逐通道插值时中间帧会过路半透明灰(蓝→灰→消失的成因)。
+      .backgroundColor(this.flashActive ? '#E8F1FE' : '#00E8F1FE')
+      .animation({ duration: 600, curve: Curve.EaseOut })
     }
+  }
+
+  // "上次访问"红色分隔线:两侧细线夹居中文字,色值对齐官网 last visit(#e45735 系)。
+  @Builder
+  private LastVisitedDivider() {
+    Row() {
+      Divider()
+        .strokeWidth(1)
+        .color('#E45735')
+        .layoutWeight(1)
+      Text('上次访问')
+        .fontSize(12)
+        .fontColor('#E45735')
+        .margin({ left: 10, right: 10 })
+      Divider()
+        .strokeWidth(1)
+        .color('#E45735')
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .margin({ bottom: 10 })
   }
 
   @Builder
@@ -383,18 +424,33 @@ export struct TopicPostItem {
     })
   }
 
-  // 跳到帖子:点击滚动定位到该回复对应的楼层。
+  // 跳到帖子:点击滚动定位到该回复对应的楼层;目标楼未加载时页面重开窗口,期间箭头换加载图标。
   @Builder
   private JumpToPost(reply: TopicPost) {
     Row({ space: 4 }) {
-      FaIconView({ icon: this.faIcon('arrow-down'), color: '#9CA3AF', iconSize: 12 })
+      if (this.jumpLoadingPostNumber === reply.postNumber) {
+        LoadingProgress()
+          .width(12)
+          .height(12)
+          .color('#9CA3AF')
+      } else {
+        FaIconView({ icon: this.faIcon('arrow-down'), color: '#9CA3AF', iconSize: 12 })
+      }
       Text('跳到帖子')
         .fontSize(13)
         .fontColor('#9CA3AF')
     }
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
-      this.onJumpToPost(reply.postNumber);
+      if (this.jumpLoadingPostNumber > 0) {
+        return;
+      }
+      this.jumpLoadingPostNumber = reply.postNumber;
+      this.onJumpToPost(reply.postNumber).then(() => {
+        this.jumpLoadingPostNumber = 0;
+      }).catch(() => {
+        this.jumpLoadingPostNumber = 0;
+      });
     })
   }
 
@@ -820,11 +876,22 @@ export struct TopicPostItem {
   aboutToAppear(): void {
     this.syncBreathing();
     this.bookmarkedLocal = this.post.bookmarked === true;
+    if (this.flashOnAppear) {
+      // 先无动画置为高亮底色,停留片刻后翻回触发渐隐(backgroundColor 上的隐式动画)。
+      this.flashActive = true;
+      this.flashTimerId = setTimeout(() => {
+        this.flashActive = false;
+      }, 900);
+    }
   }
 
   aboutToDisappear(): void {
     this.stopBreathing();
     this.clearCopyFeedbackTimers();
+    if (this.flashTimerId >= 0) {
+      clearTimeout(this.flashTimerId);
+      this.flashTimerId = -1;
+    }
   }
 
   // post 任一 @Observed 字段变化(含 reporting/read)都会触发:据此开/停"呼吸"定时器。

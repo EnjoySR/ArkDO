@@ -23,6 +23,14 @@ import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
+// 楼层预创建数(视口外上下各 N 条)。注意:maintainVisibleContentPosition 只补偿"布局范围外"的
+// 头插,插入点落进预创建范围内则不补偿——向上预取阈值必须显著大于本值。
+const POSTS_CACHED_COUNT: number = 4;
+// 向上预取阈值(posts 下标):离已加载区间顶部还剩这么多楼就开始补。取远大于 cachedCount 的值,
+// 让网络响应回来时插入点仍在布局范围外,走框架补偿(零跳动);太小会复现"视口瞬移"BUG。
+const EARLIER_PREFETCH_INDEX: number = 10;
+// 顶部"正在加载/定位"悬浮胶囊开关:暂时隐藏(产品观感待定),置 true 即恢复。
+const SHOW_LOADING_CAPSULE: boolean = false;
 // 提交成功的 toast 延后到浮层完全收场(遮罩淡出 220ms、退全屏 240ms、键盘收起约 270ms)之后再弹,
 // 否则 toast 存活期横跨键盘收起与退全屏两次布局变化,会被重新锚定而在屏幕上跳一下。
 const SUCCESS_TOAST_DELAY_MS: number = 350;
@@ -41,6 +49,26 @@ export struct TopicDetailPage {
   @State private isLoadingMore: boolean = false;
   @State private hasMorePosts: boolean = false;
   @State private loadMoreMessage: string = '上拉加载更多';
+  // 窗口式加载(从任意楼号进入)的向上分页:已加载区间之前是否还有更早楼层/是否正在补。
+  @State private hasEarlier: boolean = false;
+  @State private isLoadingEarlier: boolean = false;
+  // 首帧定位的 List 下标(目标楼 + summary 占位偏移)。List 创建时读取一次,无需 @State。
+  private initialListIndex: number = 0;
+  // "上次访问"红线:进入时快照的已读水位(只取一次,页内重开窗口/本次阅读推高水位都不重取,
+  // 否则线会消失);锚楼 = 快照后第一条已加载未读楼的 post.id,楼层创建前确定,不再变化。
+  private lastVisitedSnapshot: number = 0;
+  private lastVisitedAnchorPostId: number = 0;
+  // 落地高亮的目标楼 post.id(通知/引用跳转):楼层创建时读取;短暂生效后清零,
+  // 避免 LazyForEach 销毁重建该楼时重播高亮。
+  private flashTargetPostId: number = 0;
+  private flashClearTimerId: number = -1;
+  // 当前视口首项的 List 下标(onScrollIndex 持续更新):头插落在布局范围内时据此手动重锚。
+  private currentStartListIndex: number = 0;
+  // 跳未加载楼的重开窗口请求进行中(防重入 + 顶部悬浮胶囊提示)。请求期间旧列表原样保留,不白屏。
+  @State private isRewindowing: boolean = false;
+  // List 重建开关:翻转值使 build 里的 if/else 换分支,同一帧销毁旧 List、全新重建
+  // (新 List 挂新 PostDataSource 实例 + initialIndex 生效)。这是原地换窗不经过加载页的关键。
+  @State private listEpochEven: boolean = true;
   // 图片浏览器在页面级渲染（放在页面根 Stack 顶层，避免被 List 裁剪、且响应式正常）
   @State private showImageViewer: boolean = false;
   @State private viewerImages: ViewerImage[] = [];
@@ -117,6 +145,113 @@ export struct TopicDetailPage {
 
     // 清掉待触发的退出全屏计时器;若仍处于全屏(评论浮层未正常关闭),兜底还原布局。
     this.composerWindowGuard.dispose();
+
+    if (this.flashClearTimerId >= 0) {
+      clearTimeout(this.flashClearTimerId);
+      this.flashClearTimerId = -1;
+    }
+  }
+
+  // 楼层列表区。抽成 Builder 是为了原地换窗:build 里用 listEpochEven 翻转 if/else 分支,
+  // 同一帧销毁旧 List、按当前 dataSource/initialListIndex 全新重建。
+  @Builder
+  private PostListSection() {
+    List({ scroller: this.scroller, initialIndex: this.initialListIndex }) {
+      ListItem() {
+        this.TopicSummary()
+      }
+
+      LazyForEach(this.dataSource, (post: TopicPost) => {
+        TopicPostItem({
+          post: post,
+          lastReadPostNumber: this.detail?.lastReadPostNumber ?? -1,
+          showLastVisitedLine: post.id === this.lastVisitedAnchorPostId && this.lastVisitedAnchorPostId > 0,
+          flashOnAppear: post.id === this.flashTargetPostId && this.flashTargetPostId > 0,
+          onOpenImages: (images: ViewerImage[], startIndex: number) => {
+            this.openImageViewer(images, startIndex);
+          },
+          onOpenLink: (url: string) => {
+            this.onOpenLink(url);
+          },
+          onToggleReaction: (targetPost: TopicPost, reaction: string, snapshot: ReactionSnapshot) => {
+            this.handleToggleReaction(targetPost, reaction, snapshot);
+          },
+          onReply: (targetPost: TopicPost) => {
+            this.openComposerForPost(targetPost);
+          },
+          onAddBoost: (targetPost: TopicPost) => {
+            this.openComposerForBoost(targetPost);
+          },
+          onJumpToPost: (postNumber: number): Promise<void> => {
+            return this.jumpToPostNumber(postNumber);
+          },
+          onLoadReplies: (targetPost: TopicPost) => {
+            return this.loadPostReplies(targetPost);
+          },
+          onVote: (targetPost: TopicPost, poll: Poll, optionIds: string[]) => {
+            return this.handleVote(targetPost, poll, optionIds);
+          },
+          onRemoveVote: (targetPost: TopicPost, poll: Poll) => {
+            return this.handleRemoveVote(targetPost, poll);
+          },
+          onCopyPostLink: (targetPost: TopicPost) => {
+            this.handleCopyPostLink(targetPost);
+          },
+          onToggleBookmark: (targetPost: TopicPost) => {
+            return this.handleToggleBookmark(targetPost);
+          }
+        })
+      }, (post: TopicPost) => post.id.toString())
+
+      if (this.postCount > 0) {
+        ListItem() {
+          Row() {
+            if (this.isLoadingMore) {
+              LoadingProgress()
+                .width(18)
+                .height(18)
+                .color('#2563EB')
+                .margin({ right: 8 })
+            }
+
+            Text(this.loadMoreMessage)
+              .fontSize(13)
+              .fontColor('#9CA3AF')
+          }
+          .width('100%')
+          .height(54)
+          .justifyContent(FlexAlign.Center)
+        }
+      }
+    }
+    .width('100%')
+    .layoutWeight(1)
+    // 左右留白下放到各 item 内部(楼层高亮背景要通栏),List 不再统一内缩。
+    // 头部插入更早楼层时保持可视内容不动。重要:只在"List 创建后从未吃过 onDataReloaded"时可靠
+    // ——对活 List 做 reset 会让后续补偿全部失效(实测),原地换窗必须走 epoch 翻转重建。
+    .maintainVisibleContentPosition(true)
+    // 楼层含富文本/图片偏重,预创建数平衡快滑白块与内存(与向上预取阈值联动,见常量注释)。
+    .cachedCount(POSTS_CACHED_COUNT)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .onScrollIndex((start: number, end: number) => {
+      this.currentStartListIndex = start;
+      // List 的 index 0 是 TopicSummary,楼层从 index 1 起 → 换算成 posts 下标再交给已读控制器。
+      this.readController.onVisibleRange(start - 1, end - 1);
+      // 摘要 ListItem 固定为 index 0:仍在视口内(start===0)显示"帖子详情",滑出后显示帖子标题与分类标签。
+      this.summaryVisible = start === 0;
+      // 快到已加载区间顶部时预取更早楼层:响应回来时插入点须仍在布局范围外才有框架补偿,
+      // 阈值要给"网络期间用户继续上滑"留够余量(实测 3 太小,必现视口瞬移)。
+      if (this.hasEarlier && start - 1 <= EARLIER_PREFETCH_INDEX) {
+        this.loadEarlierPosts();
+      }
+    })
+    .onReachStart(() => {
+      // 兜底:飞速甩到顶、预取没来得及触发时。
+      this.loadEarlierPosts();
+    })
+    .onReachEnd(() => {
+      this.loadMorePosts();
+    })
   }
 
   build() {
@@ -135,89 +270,12 @@ export struct TopicDetailPage {
       })
 
       if (this.detail) {
-        List({ scroller: this.scroller }) {
-          ListItem() {
-            this.TopicSummary()
-          }
-
-          LazyForEach(this.dataSource, (post: TopicPost) => {
-            TopicPostItem({
-              post: post,
-              lastReadPostNumber: this.detail?.lastReadPostNumber ?? -1,
-              onOpenImages: (images: ViewerImage[], startIndex: number) => {
-                this.openImageViewer(images, startIndex);
-              },
-              onOpenLink: (url: string) => {
-                this.onOpenLink(url);
-              },
-              onToggleReaction: (targetPost: TopicPost, reaction: string, snapshot: ReactionSnapshot) => {
-                this.handleToggleReaction(targetPost, reaction, snapshot);
-              },
-              onReply: (targetPost: TopicPost) => {
-                this.openComposerForPost(targetPost);
-              },
-              onAddBoost: (targetPost: TopicPost) => {
-                this.openComposerForBoost(targetPost);
-              },
-              onJumpToPost: (postNumber: number) => {
-                this.jumpToPostNumber(postNumber);
-              },
-              onLoadReplies: (targetPost: TopicPost) => {
-                return this.loadPostReplies(targetPost);
-              },
-              onVote: (targetPost: TopicPost, poll: Poll, optionIds: string[]) => {
-                return this.handleVote(targetPost, poll, optionIds);
-              },
-              onRemoveVote: (targetPost: TopicPost, poll: Poll) => {
-                return this.handleRemoveVote(targetPost, poll);
-              },
-              onCopyPostLink: (targetPost: TopicPost) => {
-                this.handleCopyPostLink(targetPost);
-              },
-              onToggleBookmark: (targetPost: TopicPost) => {
-                return this.handleToggleBookmark(targetPost);
-              }
-            })
-          }, (post: TopicPost) => post.id.toString())
-
-          if (this.postCount > 0) {
-            ListItem() {
-              Row() {
-                if (this.isLoadingMore) {
-                  LoadingProgress()
-                    .width(18)
-                    .height(18)
-                    .color('#2563EB')
-                    .margin({ right: 8 })
-                }
-
-                Text(this.loadMoreMessage)
-                  .fontSize(13)
-                  .fontColor('#9CA3AF')
-              }
-              .width('100%')
-              .height(54)
-              .justifyContent(FlexAlign.Center)
-            }
-          }
+        // 相同的两个分支:翻转 listEpochEven 强制销毁重建 List(原地换窗用),平时恒走其一。
+        if (this.listEpochEven) {
+          this.PostListSection()
+        } else {
+          this.PostListSection()
         }
-        .width('100%')
-        .layoutWeight(1)
-        .padding({ left: 10, right: 10 })
-        // 头部插入更早楼层时保持可视内容不动(仅对 LazyForEach 的精准通知生效)。
-        .maintainVisibleContentPosition(true)
-        // 楼层含富文本/图片偏重,预创建 4 条平衡快滑白块与内存。
-        .cachedCount(4)
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-        .onScrollIndex((start: number, end: number) => {
-          // List 的 index 0 是 TopicSummary,楼层从 index 1 起 → 换算成 posts 下标再交给已读控制器。
-          this.readController.onVisibleRange(start - 1, end - 1);
-          // 摘要 ListItem 固定为 index 0:仍在视口内(start===0)显示"帖子详情",滑出后显示帖子标题与分类标签。
-          this.summaryVisible = start === 0;
-        })
-        .onReachEnd(() => {
-          this.loadMorePosts();
-        })
       } else {
         this.StateContent()
       }
@@ -256,6 +314,27 @@ export struct TopicDetailPage {
       .onClick(() => {
         this.openComposerForTopic();
       })
+    }
+
+    // 向上补楼 / 跳楼定位的加载指示:悬浮小胶囊,不参与 List 布局(头插时列表零跳动的前提)。
+    if (SHOW_LOADING_CAPSULE && (this.isLoadingEarlier || this.isRewindowing)) {
+      Row() {
+        LoadingProgress()
+          .width(14)
+          .height(14)
+          .color('#2563EB')
+          .margin({ right: 6 })
+        Text(this.isRewindowing ? '正在定位楼层' : '正在加载更早的回复')
+          .fontSize(12)
+          .fontColor('#6B7280')
+      }
+      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+      .backgroundColor('#F3F4F6')
+      .borderRadius(15)
+      .shadow({ radius: 6, color: '#22000000', offsetX: 0, offsetY: 1 })
+      .position({ x: '50%', y: 72 })
+      .markAnchor({ x: '50%', y: 0 })
+      .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
     }
 
     if (this.showImageViewer) {
@@ -396,14 +475,72 @@ export struct TopicDetailPage {
   }
 
   // 按 postNumber 滚动定位到对应楼层。List index 0 是 TopicSummary,楼层从 index 1 起 → 目标 index = 楼序 + 1。
-  // 仅定位已加载楼:未加载(还没上拉到)时弹 toast 提示,不自动翻页。
-  private jumpToPostNumber(postNumber: number): void {
+  // 已加载直接平滑滚动;未加载原地重开窗口(先卸载 List 再以新窗口重建,见 rewindowToPost)。
+  private async jumpToPostNumber(postNumber: number): Promise<void> {
     const index: number = this.dataSource.findIndexByPostNumber(postNumber);
+    console.info(`${LOG_TAG} jump request post=${postNumber} loadedIndex=${index}`);
     if (index >= 0) {
       this.scroller.scrollToIndex(index + 1, true);
       return;
     }
-    this.showComposerToast('该楼尚未加载', 1500);
+    await this.rewindowToPost(postNumber);
+  }
+
+  // 目标楼未加载:以该楼为锚重新拉一窗详情,原地换窗。
+  // 网络期间旧列表原样保留(不白屏,顶部胶囊提示"正在定位");数据就位后换一个全新的
+  // PostDataSource 实例并翻转 listEpochEven,同一帧销毁旧 List、按 initialIndex 全新重建。
+  // 绝不对活 List 发 onDataReloaded——那会让 maintainVisibleContentPosition 的头插补偿
+  // 永久失效(实测),这正是"新建 List 没问题、原地 reset 有问题"的根因;旧 List 至死只持有
+  // 旧数据源实例,新数据源的任何通知都到不了它。
+  private async rewindowToPost(postNumber: number): Promise<void> {
+    if (!this.detail || this.isRewindowing) {
+      return;
+    }
+    this.isRewindowing = true;
+    const topicId: number = this.detail.id;
+    const slug: string | undefined = this.detail.slug ?? this.param.slug;
+
+    const result: NetworkResult<TopicDetail> =
+      await new TopicService(this.bridge).getTopicDetail(topicId, slug, postNumber);
+    this.isRewindowing = false;
+
+    if (!result.success || !result.data || result.data.posts.length === 0) {
+      // 失败:旧列表还在原位,只提示。
+      console.info(`${LOG_TAG} rewindow failed post=${postNumber} status=${result.statusCode}`);
+      this.showComposerToast('楼层定位失败，请稍后重试', 1500);
+      return;
+    }
+
+    const stream: number[] = result.data.stream ?? [];
+    const nextSource: PostDataSource = new PostDataSource();
+    nextSource.reset(result.data.posts);
+    this.dataSource = nextSource;
+    this.postCount = nextSource.totalCount();
+    this.hasEarlier = PostStreamPager.countEarlier(stream, nextSource.getAll()) > 0;
+    this.hasMorePosts = PostStreamPager.countLater(stream, nextSource.getAll()) > 0;
+    this.loadMoreMessage = this.hasMorePosts ? '上拉加载更多' : '没有更多了';
+    this.updateLastVisitedAnchor();
+
+    const targetIndex: number = Math.max(0, nextSource.findIndexAtOrAfterPostNumber(postNumber));
+    this.initialListIndex = targetIndex + 1;
+    this.armTargetFlash(nextSource.getData(targetIndex).id);
+    this.detail = result.data;
+    // 翻转分支 → 旧 List 销毁、新 List 以新数据源 + initialIndex 重建,同帧完成,无加载页。
+    this.listEpochEven = !this.listEpochEven;
+    const posts: TopicPost[] = nextSource.getAll();
+    console.info(`${LOG_TAG} rewindow ok post=${postNumber} targetIndex=${targetIndex} stream=${stream.length} window=[${posts[0]?.postNumber}..${posts[posts.length - 1]?.postNumber}] hasEarlier=${this.hasEarlier} hasMore=${this.hasMorePosts}`);
+  }
+
+  // 武装目标楼落地高亮:短暂生效后清零,免得该楼被 LazyForEach 销毁重建时重播。
+  private armTargetFlash(postId: number): void {
+    this.flashTargetPostId = postId;
+    if (this.flashClearTimerId >= 0) {
+      clearTimeout(this.flashClearTimerId);
+    }
+    this.flashClearTimerId = setTimeout(() => {
+      this.flashTargetPostId = 0;
+      this.flashClearTimerId = -1;
+    }, 3000);
   }
 
   // 加载某楼的「被回复」列表(供 TopicPostItem 展开时调用)。成功返回楼层数组;失败弹 toast 并返回 null。
@@ -469,7 +606,7 @@ export struct TopicDetailPage {
         .margin({ top: 8 })
     }
     .width('100%')
-    .padding({ top: 20, bottom: 16 })
+    .padding({ left: 10, right: 10, top: 20, bottom: 16 })
     .border({
       width: { bottom: 1 },
       color: '#E5E7EB'
@@ -535,16 +672,40 @@ export struct TopicDetailPage {
     console.info(`${LOG_TAG} load detail start topicId=${this.param.topicId} slug=${this.getSlugLabel()}`);
 
     const result: NetworkResult<TopicDetail> =
-      await new TopicService(this.bridge).getTopicDetail(this.param.topicId, this.param.slug);
+      await new TopicService(this.bridge).getTopicDetail(this.param.topicId, this.param.slug, this.param.targetPostNumber);
 
     this.isLoading = false;
     if (result.success && result.data) {
+      const stream: number[] = result.data.stream ?? [];
       this.detail = result.data;
       this.dataSource.reset(result.data.posts);
       this.postCount = this.dataSource.totalCount();
       this.message = this.postCount > 0 ? '' : '暂无帖子内容';
-      this.hasMorePosts = PostStreamPager.countLater(result.data.stream ?? [], this.dataSource.getAll()) > 0;
+      this.hasEarlier = PostStreamPager.countEarlier(stream, this.dataSource.getAll()) > 0;
+      this.hasMorePosts = PostStreamPager.countLater(stream, this.dataSource.getAll()) > 0;
       this.loadMoreMessage = this.hasMorePosts ? '上拉加载更多' : '没有更多了';
+      // 带目标楼进入:List 尚未创建(detail 刚就位),首帧直接定位到目标楼(+1 为 summary 占位)。
+      const target: number | undefined = this.param.targetPostNumber;
+      if (target !== undefined && target > 1 && this.postCount > 0) {
+        const targetIndex: number = Math.max(0, this.dataSource.findIndexAtOrAfterPostNumber(target));
+        this.initialListIndex = targetIndex + 1;
+        if (this.param.highlightTarget === true) {
+          this.armTargetFlash(this.dataSource.getData(targetIndex).id);
+        }
+      }
+      // "上次访问"红线只属于"未读徽标跳转"入口:带目标楼号且不高亮(通知=带楼号+高亮、
+      // 普通打开=无楼号,都不画线;官网是所有入口都画,这里按产品偏好收窄)。
+      const isUnreadBadgeEntry: boolean =
+        this.param.targetPostNumber !== undefined && this.param.highlightTarget !== true;
+      // 水位只在首次加载快照;已读完(水位>=最高楼)或匿名(无水位)不设线。
+      if (isUnreadBadgeEntry && this.lastVisitedSnapshot === 0) {
+        const watermark: number = result.data.lastReadPostNumber ?? 0;
+        const highest: number = result.data.highestPostNumber ?? 0;
+        if (watermark > 0 && watermark < highest) {
+          this.lastVisitedSnapshot = watermark;
+        }
+      }
+      this.updateLastVisitedAnchor();
       console.info(`${LOG_TAG} load detail success topicId=${result.data.id} posts=${result.data.posts.length} stream=${result.data.stream ? result.data.stream.length : 0}`);
       this.startReadingTrackerIfNeeded();
       return;
@@ -578,11 +739,71 @@ export struct TopicDetailPage {
       this.postCount = this.dataSource.totalCount();
       this.hasMorePosts = PostStreamPager.countLater(stream, this.dataSource.getAll()) > 0;
       this.loadMoreMessage = this.hasMorePosts ? '上拉加载更多' : '没有更多了';
+      this.updateLastVisitedAnchor();
       console.info(`${LOG_TAG} load more topicId=${topicId} added=${added} total=${this.postCount}`);
       return;
     }
 
     this.loadMoreMessage = result.error?.message ? `${result.error.message}，上拉重试` : '加载更多失败，上拉重试';
+  }
+
+  // 确定"上次访问"红线锚楼:快照水位后第一条已加载未读楼。
+  // 锚必须与前一楼形成"已读|未读"边界:首条已加载楼就大于水位时,真实边界可能还在未加载区
+  // (仅当再无更早楼层时才能锚定首条),留待 prepend 补楼后重试。锚一旦确定不再变化。
+  private updateLastVisitedAnchor(): void {
+    if (this.lastVisitedSnapshot <= 0 || this.lastVisitedAnchorPostId > 0 || !this.detail) {
+      return;
+    }
+    const posts: TopicPost[] = this.dataSource.getAll();
+    for (let index: number = 0; index < posts.length; index++) {
+      if (posts[index].postNumber <= this.lastVisitedSnapshot) {
+        continue;
+      }
+      if (index > 0 || !this.hasEarlier) {
+        this.lastVisitedAnchorPostId = posts[index].id;
+      }
+      return;
+    }
+  }
+
+  // 向上补更早楼层(窗口式进入后往回看):取已加载区间之前的一页 id,头插进数据源。
+  // 插入若发生在视口上方,由 maintainVisibleContentPosition 保持可视内容不动。
+  private async loadEarlierPosts(): Promise<void> {
+    if (!this.detail || this.isLoadingEarlier || !this.hasEarlier) {
+      return;
+    }
+    const stream: number[] = this.detail.stream ? this.detail.stream : [];
+    const loaded: TopicPost[] = this.dataSource.getAll();
+    const prevIds: number[] = PostStreamPager.collectPrevIds(stream, loaded, POSTS_PAGE_SIZE);
+    console.info(`${LOG_TAG} loadEarlier begin stream=${stream.length} loaded=${loaded.length} window=[${loaded[0]?.postNumber}..${loaded[loaded.length - 1]?.postNumber}] prevIds=${prevIds.length}`);
+    if (prevIds.length === 0) {
+      this.hasEarlier = false;
+      return;
+    }
+
+    this.isLoadingEarlier = true;
+    const topicId: number = this.detail.id;
+    const result: NetworkResult<TopicPost[]> = await new TopicService(this.bridge).loadMorePosts(topicId, prevIds);
+    this.isLoadingEarlier = false;
+
+    if (result.success && result.data) {
+      const startBefore: number = this.currentStartListIndex;
+      const added: number = this.dataSource.prependPosts(result.data);
+      this.postCount = this.dataSource.totalCount();
+      this.hasEarlier = PostStreamPager.countEarlier(stream, this.dataSource.getAll()) > 0;
+      this.updateLastVisitedAnchor();
+      // 兜底重锚:插入点落在 List 已布局范围内(视口上方剩余楼层 ≤ cachedCount)时框架不补偿,
+      // 视口内容会瞬移到新插入的楼——手动按"原下标 + 插入数"无动画锚回。范围外则框架已补偿,勿重复。
+      if (added > 0 && startBefore - 1 <= POSTS_CACHED_COUNT) {
+        this.scroller.scrollToIndex(startBefore + added, false);
+        console.info(`${LOG_TAG} manual re-anchor startBefore=${startBefore} added=${added} -> ${startBefore + added}`);
+      }
+      console.info(`${LOG_TAG} loadEarlier ok added=${added} total=${this.postCount} hasEarlier=${this.hasEarlier} startBefore=${startBefore}`);
+      return;
+    }
+
+    console.info(`${LOG_TAG} loadEarlier failed topicId=${topicId} status=${result.statusCode} err=${result.error?.message ?? ''}`);
+    this.showComposerToast(result.error?.message ? result.error.message : '加载更早楼层失败', 1500);
   }
 
   private startReadingTrackerIfNeeded(): void {
