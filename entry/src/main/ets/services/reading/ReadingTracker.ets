@@ -12,10 +12,14 @@ const PAUSE_UNLESS_SCROLLED_MS: number = 1000 * 60 * 3;
 const MAX_TRACKING_TIME_MS: number = 1000 * 60 * 6;
 const AJAX_FAILURE_DELAYS: number[] = [5000, 10000, 20000, 40000];
 const ALLOWED_AJAX_FAILURES: number[] = [405, 429, 500, 501, 502, 503, 504];
+// 单次上报常在 1s 内返回,"呼吸"窗口太短会看不清;保证至少完整来回一次(变浅再变回,700ms×2)再收尾。
+const MIN_REPORTING_VISIBLE_MS: number = 1400;
 
 export type ReportTimingsFn =
   (topicId: number, timings: Map<number, number>, topicTime: number) => Promise<NetworkResult<string>>;
 export type MarkReadFn = (postNumbers: number[]) => void;
+// 上报态回调:上报开始 reporting=true(蓝点呼吸),结束(成功/失败)reporting=false。
+export type ReportingStateFn = (postNumbers: number[], reporting: boolean) => void;
 
 interface ConsolidatedTiming {
   topicId: number;
@@ -27,6 +31,7 @@ export class ReadingTracker {
   private topicId: number = 0;
   private reportFn?: ReportTimingsFn;
   private onRead?: MarkReadFn;
+  private onReporting?: ReportingStateFn;
 
   private timings: Map<number, number> = new Map();
   private totalTimings: Map<number, number> = new Map();
@@ -47,7 +52,7 @@ export class ReadingTracker {
   private running: boolean = false;
   private paused: boolean = false;
 
-  start(topicId: number, reportFn: ReportTimingsFn, onRead: MarkReadFn): void {
+  start(topicId: number, reportFn: ReportTimingsFn, onRead: MarkReadFn, onReporting?: ReportingStateFn): void {
     if (this.running) {
       this.stop();
     }
@@ -55,6 +60,7 @@ export class ReadingTracker {
     this.topicId = topicId;
     this.reportFn = reportFn;
     this.onRead = onRead;
+    this.onReporting = onReporting;
     const now: number = Date.now();
     this.lastTick = now;
     this.lastScrolled = now;
@@ -256,24 +262,37 @@ export class ReadingTracker {
       return;
     }
 
+    // 本批涉及的楼号:上报期间让这些楼的蓝点"呼吸",结束时清除。
+    const postNumbers: number[] = [];
+    item.timings.forEach((_ms: number, postNumber: number) => {
+      postNumbers.push(postNumber);
+    });
+
     this.inProgress = true;
+    this.setReporting(postNumbers, true);
+    const startedAt: number = Date.now();
+
     reportFn(item.topicId, item.timings, item.topicTime).then((result: NetworkResult<string>) => {
       this.inProgress = false;
       this.lastFlush = 0;
       if (result.success) {
         this.ajaxFailures = 0;
-        const postNumbers: number[] = [];
-        item.timings.forEach((_ms: number, postNumber: number) => {
-          postNumbers.push(postNumber);
-          this.readPosts.add(postNumber);
-        });
-        console.info(`${LOG_TAG} report success topicId=${item.topicId} posts=[${postNumbers.join(',')}]`);
-        const onRead: MarkReadFn | undefined = this.onRead;
-        if (onRead && postNumbers.length > 0) {
-          onRead(postNumbers);
+        for (let index: number = 0; index < postNumbers.length; index++) {
+          this.readPosts.add(postNumbers[index]);
         }
+        console.info(`${LOG_TAG} report success topicId=${item.topicId} posts=[${postNumbers.join(',')}]`);
+        // 呼吸至少完整跑一下再收尾:清呼吸 → 触发淡出(现有 onRead 逻辑不变)。
+        this.afterMinReporting(startedAt, () => {
+          this.setReporting(postNumbers, false);
+          const onRead: MarkReadFn | undefined = this.onRead;
+          if (onRead && postNumbers.length > 0) {
+            onRead(postNumbers);
+          }
+        });
       } else {
         console.info(`${LOG_TAG} report failed topicId=${item.topicId} status=${result.statusCode} challenge=${result.challengeState} posts=${item.timings.size}`);
+        // 失败/challenge:清呼吸,蓝点停回静态。
+        this.afterMinReporting(startedAt, () => this.setReporting(postNumbers, false));
         if (result.challengeState !== ChallengeState.NONE) {
           // 命中 CF 质询:请求隐藏 host 静默刷新 clearance,成功后重试一次(Method B 验证路径)。
           this.handleChallenge(item);
@@ -285,8 +304,27 @@ export class ReadingTracker {
       this.inProgress = false;
       this.lastFlush = 0;
       console.info(`${LOG_TAG} report error topicId=${item.topicId} posts=${item.timings.size} error=${JSON.stringify(error)}`);
+      this.afterMinReporting(startedAt, () => this.setReporting(postNumbers, false));
       this.handleFailure(item, 0);
     });
+  }
+
+  private setReporting(postNumbers: number[], reporting: boolean): void {
+    const fn: ReportingStateFn | undefined = this.onReporting;
+    if (fn && postNumbers.length > 0) {
+      fn(postNumbers, reporting);
+    }
+  }
+
+  // 保证"呼吸"至少可见 MIN_REPORTING_VISIBLE_MS:上报秒回时也让脉动完整跑一下再收尾。
+  // 只延迟视觉收尾,网络状态机(inProgress/退避/重试)已在调用前同步推进。
+  private afterMinReporting(startedAt: number, action: () => void): void {
+    const wait: number = MIN_REPORTING_VISIBLE_MS - (Date.now() - startedAt);
+    if (wait <= 0) {
+      action();
+    } else {
+      setTimeout(action, wait);
+    }
   }
 
   // stop 时把队列里剩余的批次全部发出去(忽略 inProgress/退避门闩),确保离开页面前的已读不丢。

@@ -70,6 +70,9 @@ export class TopicPost {
   likeCount?: number;
   author?: User;
   read?: boolean;
+  // 上报 /topics/timings 进行中:该楼蓝点进入"呼吸"(opacity 明暗来回)态,提示正在同步;
+  // 上报成功→read=true 淡出,失败→回落静态。直接改字段由 @ObjectLink 精准重渲染。
+  reporting?: boolean;
   userTitle?: string;
   // 表情回应:各表情汇总 + 回应总人数(reaction_users_count)。
   reactions?: PostReaction[];

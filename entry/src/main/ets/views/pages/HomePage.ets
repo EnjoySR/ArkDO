@@ -11,7 +11,7 @@ import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { TopicReadState, TopicReadStateEventBus } from '../../services/session/TopicReadStateEventBus';
 import { NotificationEventBus, NotificationSnapshot } from '../../services/notification/NotificationEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
-import { SiteMetadata, SiteService } from '../../services/site/SiteService';
+import { CategoryIndex } from '../../services/site/CategoryIndex';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 
@@ -31,7 +31,7 @@ export struct HomePage {
   // 头像铃铛未读数:由 NotificationEventBus 广播驱动(NotificationService 前台轮询产出)。
   @State private unreadNotifications: number = 0;
   private unsubscribeNotifications?: () => void = undefined;
-  private isSiteMetadataLoading: boolean = false;
+  private categoryIndex: CategoryIndex = new CategoryIndex();
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   @Prop accountUser: User = { id: 0, username: '' };
@@ -135,8 +135,8 @@ export struct HomePage {
             ForEach(this.topics, (topic: Topic) => {
               TopicListItem({
                 topic: topic,
-                category: this.findCategory(topic.categoryId),
-                parentCategory: this.findParentCategory(topic.categoryId),
+                category: CategoryIndex.find(this.categories, topic.categoryId),
+                parentCategory: CategoryIndex.findParent(this.categories, topic.categoryId),
                 onTopicClick: (selectedTopic: Topic) => {
                   // 点击即清除蓝点(乐观已读);未读徽标待返回时由详情页结算的真实未读数同步。
                   selectedTopic.unseen = false;
@@ -428,43 +428,11 @@ export struct HomePage {
   }
 
   private async loadSiteMetadataIfNeeded(): Promise<void> {
-    if (!this.isArkWebReady || this.isSiteMetadataLoading || this.categories.length > 0) {
-      return;
+    const loaded: TopicCategory[] | null = await this.categoryIndex.loadIfNeeded(
+      this.bridge, this.isArkWebReady, this.categories.length > 0, LOG_TAG);
+    if (loaded) {
+      this.categories = loaded;
     }
-
-    this.isSiteMetadataLoading = true;
-    const result: NetworkResult<SiteMetadata> = await new SiteService(this.bridge).getSiteMetadata();
-    this.isSiteMetadataLoading = false;
-
-    if (result.success && result.data) {
-      this.categories = result.data.categories;
-      console.info(`${LOG_TAG} site metadata loaded categories=${result.data.categories.length}`);
-      return;
-    }
-
-    console.info(`${LOG_TAG} site metadata skipped status=${result.statusCode}`);
-  }
-
-  private findCategory(categoryId?: number): TopicCategory | undefined {
-    if (!categoryId || this.categories.length === 0) {
-      return undefined;
-    }
-
-    for (let index: number = 0; index < this.categories.length; index++) {
-      const category: TopicCategory = this.categories[index];
-      if (category.id === categoryId) {
-        return category;
-      }
-    }
-    return undefined;
-  }
-
-  private findParentCategory(categoryId?: number): TopicCategory | undefined {
-    const category: TopicCategory | undefined = this.findCategory(categoryId);
-    if (!category || !category.parentCategoryId) {
-      return undefined;
-    }
-    return this.findCategory(category.parentCategoryId);
   }
 
   private mergeTopics(existingTopics: Topic[], nextTopics: Topic[]): Topic[] {

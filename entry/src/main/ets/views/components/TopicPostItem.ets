@@ -25,9 +25,10 @@ interface PopupStateEvent {
 
 @Component
 export struct TopicPostItem {
-  // @ObjectLink 绑定 @Observed 的 TopicPost:楼层 read 翻真时精准触发本组件重渲染,
+  // @ObjectLink 绑定 @Observed 的 TopicPost:楼层 read/reporting 变化精准触发本组件重渲染,
   // 蓝点 opacity 过渡才会播放。由父组件 ForEach 传入,不能有默认值。
-  @ObjectLink post: TopicPost;
+  // @Watch:reporting/read 变化时开/停"呼吸"定时器(见 syncBreathing)。
+  @ObjectLink @Watch('onPostStateChanged') post: TopicPost;
   lastReadPostNumber: number = -1;
   // 图片浏览器在页面级渲染，这里把 PostRichContent 的「打开」请求继续上抛给页面
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
@@ -55,6 +56,11 @@ export struct TopicPostItem {
   @State private replies: TopicPost[] = [];
   // 点赞按钮图标的弹簧缩放:每次切换回应时做一次 pop(先缩到 0.7,再用弹簧回弹到 1,带 overshoot)。
   @State private likeIconScale: number = 1;
+  // 上报进行中蓝点"呼吸"(颜色变浅再变回):定时器每 700ms 翻 breatheDim + 有限动画驱动。
+  // 用自身 @State + clearInterval 可靠停止;不用 ArkUI 隐式 iterations:-1(无限动画停不干净)。
+  @State private breathing: boolean = false;
+  @State private breatheDim: boolean = false;
+  private breatheTimerId: number = -1;
 
   build() {
     ListItem() {
@@ -149,13 +155,14 @@ export struct TopicPostItem {
           .fontColor('#9CA3AF')
 
         // 蓝点常驻占位:读后 opacity 1→0 渐隐(~1.2s),槽位保留,左侧时间不位移。
+        // 上报进行中:尺寸不变,opacity 在 1↔0.35 间来回("呼吸"=颜色变浅再变回),由 breatheDim 定时器驱动。
         Circle()
           .width(8)
           .height(8)
           .fill('#66CCFF')
           .margin({ left: 2 })
-          .opacity(this.isPostRead() ? 0 : 1)
-          .animation({ duration: 1200, curve: Curve.EaseInOut })
+          .opacity(this.isPostRead() ? 0 : (this.breatheDim ? 0.35 : 1))
+          .animation({ duration: this.breathing ? 700 : 1200, curve: Curve.EaseInOut })
       }
       .alignItems(VerticalAlign.Center)
       .margin({ left: 8 })
@@ -619,6 +626,42 @@ export struct TopicPostItem {
     return this.post.reactionUsersCount !== undefined &&
       this.post.reactionUsersCount > 0 &&
       this.getReactionIcons().length > 0;
+  }
+
+  aboutToAppear(): void {
+    this.syncBreathing();
+  }
+
+  aboutToDisappear(): void {
+    this.stopBreathing();
+  }
+
+  // post 任一 @Observed 字段变化(含 reporting/read)都会触发:据此开/停"呼吸"定时器。
+  private onPostStateChanged(): void {
+    this.syncBreathing();
+  }
+
+  // 上报进行中且尚未读→启动定时器每 700ms 翻明暗;否则停止并复位。幂等,可反复调用。
+  private syncBreathing(): void {
+    const shouldBreathe: boolean = this.post.reporting === true && this.post.read !== true;
+    if (shouldBreathe && this.breatheTimerId < 0) {
+      this.breathing = true;
+      this.breatheDim = true; // 先变浅,之后每 700ms 翻转一次
+      this.breatheTimerId = setInterval(() => {
+        this.breatheDim = !this.breatheDim;
+      }, 700);
+    } else if (!shouldBreathe && this.breatheTimerId >= 0) {
+      this.stopBreathing();
+    }
+  }
+
+  private stopBreathing(): void {
+    if (this.breatheTimerId >= 0) {
+      clearInterval(this.breatheTimerId);
+      this.breatheTimerId = -1;
+    }
+    this.breathing = false;
+    this.breatheDim = false;
   }
 
   private isPostRead(): boolean {
