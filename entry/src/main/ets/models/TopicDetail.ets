@@ -85,6 +85,10 @@ export class TopicPost {
   canBoost?: boolean;
   // discourse-poll:该楼包含的投票(随 posts.json 返回);cooked HTML 里的 poll 块按 name 关联。
   polls?: Poll[];
+  // 书签:该楼是否已被当前用户加书签 + 书签 id(取消时用)。posts.json 的 bookmarked/bookmark_id;
+  // 加/删成功后就地更新,由 @ObjectLink 驱动书签图标切换。
+  bookmarked?: boolean;
+  bookmarkId?: number;
 }
 
 export interface TopicDetail {

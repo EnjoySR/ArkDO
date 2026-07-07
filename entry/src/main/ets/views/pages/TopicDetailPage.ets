@@ -1,3 +1,5 @@
+import { pasteboard } from '@kit.BasicServicesKit';
+import { AppConstants } from '../../common/constants/AppConstants';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
 import { Poll, PollVoteResult, PostBoost, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { TopicCategory, TopicTag } from '../../models/Topic';
@@ -20,6 +22,9 @@ import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
+// 提交成功的 toast 延后到浮层完全收场(遮罩淡出 220ms、退全屏 240ms、键盘收起约 270ms)之后再弹,
+// 否则 toast 存活期横跨键盘收起与退全屏两次布局变化,会被重新锚定而在屏幕上跳一下。
+const SUCCESS_TOAST_DELAY_MS: number = 350;
 
 @Component
 export struct TopicDetailPage {
@@ -161,6 +166,12 @@ export struct TopicDetailPage {
               },
               onRemoveVote: (targetPost: TopicPost, poll: Poll) => {
                 return this.handleRemoveVote(targetPost, poll);
+              },
+              onCopyPostLink: (targetPost: TopicPost) => {
+                this.handleCopyPostLink(targetPost);
+              },
+              onToggleBookmark: (targetPost: TopicPost) => {
+                return this.handleToggleBookmark(targetPost);
               }
             })
           }, (post: TopicPost) => post.id.toString())
@@ -211,8 +222,10 @@ export struct TopicDetailPage {
     .padding({ top: this.composerFullScreen ? this.composerWindowGuard.statusBarHeight : 0 })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
-    // 右下角悬浮回复按钮:仅在帖子已加载且输入浮层未展开时显示。
-    if (this.detail && !this.showComposer) {
+    // 右下角悬浮回复按钮:仅在帖子已加载、浮层未展开且全屏布局已还原时显示。
+    // 必须一并绑定 composerFullScreen:关闭浮层时退全屏延迟 240ms,期间根 Stack 底边仍延伸到
+    // 导航条区域,锚在底边的按钮会先出现在偏下位置、退全屏后再跳回(用户反馈的"闪回" BUG)。
+    if (this.detail && !this.showComposer && !this.composerFullScreen) {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         FaIconView({
           icon: this.replyFabIcon(),
@@ -225,6 +238,13 @@ export struct TopicDetailPage {
       .backgroundColor(REPLY_BLUE)
       .shadow({ radius: 8, color: '#33000000', offsetX: 0, offsetY: 2 })
       .margin({ right: 16, bottom: 24 })
+      // 不对称过渡:出现(关闭浮层后)淡入;消失(打开浮层时)立即移除。
+      // 消失不能加动画——退场中的节点不参与布局、也没有全屏补偿,会被同帧的全屏切换
+      // 拖着上移一个状态栏高度再淡掉;瞬间移除则被同时淡入的遮罩盖住,毫无痕迹。
+      .transition(TransitionEffect.asymmetric(
+        TransitionEffect.OPACITY.animation({ duration: 150, curve: Curve.EaseOut }),
+        TransitionEffect.IDENTITY
+      ))
       .onClick(() => {
         this.openComposerForTopic();
       })
@@ -321,13 +341,13 @@ export struct TopicDetailPage {
       this.replyTargetPostNumber = 0;
       if (result.data.pending) {
         // 进入审核队列:提交成功但不会立刻出现在列表里。
-        this.showComposerToast('评论已提交，等待审核', 2000);
+        this.showToastAfterComposerClose('评论已提交，等待审核', 2000);
       } else if (result.data.post) {
         // 直接发布:追加到楼层末尾;用新数组触发 List 刷新。
         const appended: TopicPost[] = this.posts.slice();
         appended.push(result.data.post);
         this.posts = appended;
-        this.showComposerToast('评论已发表', 1500);
+        this.showToastAfterComposerClose('评论已发表', 1500);
       }
       return true;
     }
@@ -359,7 +379,7 @@ export struct TopicDetailPage {
         target.canBoost = false;
       }
       this.boostTargetPostId = 0;
-      this.showComposerToast('Boost 已发送', 1500);
+      this.showToastAfterComposerClose('Boost 已发送', 1500);
       return true;
     }
 
@@ -397,6 +417,14 @@ export struct TopicDetailPage {
     } catch (error) {
       // Toast 失败不影响主流程。
     }
+  }
+
+  // 提交成功后浮层随即关闭(键盘收起+退全屏),提示延后到收场结束再弹,避免 toast 被重新锚定而跳动。
+  // 失败提示不延迟:浮层保持展开、键盘不收,不存在布局变化。
+  private showToastAfterComposerClose(message: string, duration: number): void {
+    setTimeout(() => {
+      this.showComposerToast(message, duration);
+    }, SUCCESS_TOAST_DELAY_MS);
   }
 
   private replyFabIcon(): FaIconDefinition {
@@ -603,6 +631,59 @@ export struct TopicDetailPage {
     console.info(`${LOG_TAG} remove vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
     PollMutation.restore(poll, snapshot);
     return null;
+  }
+
+  // 拷贝该楼永久链接到剪贴板:优先带 slug 的规范链接,缺 slug 时用 /t/topic/<id>/<楼号>(可正常跳转)。
+  private handleCopyPostLink(post: TopicPost): void {
+    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
+    const slug: string | undefined = this.detail?.slug;
+    const path: string = slug !== undefined && slug.length > 0
+      ? `/t/${slug}/${topicId}/${post.postNumber}`
+      : `/t/topic/${topicId}/${post.postNumber}`;
+    const url: string = `${AppConstants.BASE_URL}${path}`;
+    const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, url);
+    pasteboard.getSystemPasteboard().setData(data).then(() => {
+      this.getUIContext().getPromptAction().showToast({ message: '已复制链接', duration: 1500 });
+    }).catch(() => {
+    });
+  }
+
+  // 书签 toggle:post.bookmarked/bookmarkId 为网络侧真源,发网络+失败回滚;返回操作后的最终收藏态,
+  // 交给子组件校正本地显示 @State(子组件负责乐观翻转与重渲染)。带 [ARKDO][Bookmark] 日志便于排查。
+  private async handleToggleBookmark(post: TopicPost): Promise<boolean> {
+    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
+    const service: TopicService = new TopicService(this.bridge);
+    const wasBookmarked: boolean = post.bookmarked === true;
+    const prevId: number | undefined = post.bookmarkId;
+    console.info(`[ARKDO][Bookmark] toggle start postId=${post.id} topicId=${topicId} wasBookmarked=${wasBookmarked} prevId=${prevId}`);
+
+    if (wasBookmarked && prevId !== undefined) {
+      post.bookmarked = false;
+      post.bookmarkId = undefined;
+      const result: NetworkResult<string> = await service.removeBookmark(prevId, topicId);
+      console.info(`[ARKDO][Bookmark] remove result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState}`);
+      if (result.success) {
+        this.getUIContext().getPromptAction().showToast({ message: '已取消收藏', duration: 1500 });
+      } else {
+        post.bookmarked = true;
+        post.bookmarkId = prevId;
+        this.getUIContext().getPromptAction().showToast({ message: '取消收藏失败', duration: 1500 });
+      }
+    } else {
+      post.bookmarked = true;
+      const result: NetworkResult<number> = await service.addBookmark(post.id, topicId);
+      console.info(`[ARKDO][Bookmark] add result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState} id=${result.data}`);
+      if (result.success && result.data !== undefined) {
+        post.bookmarkId = result.data;
+        this.getUIContext().getPromptAction().showToast({ message: '已收藏', duration: 1500 });
+      } else {
+        post.bookmarked = false;
+        post.bookmarkId = undefined;
+        this.getUIContext().getPromptAction().showToast({ message: '收藏失败', duration: 1500 });
+      }
+    }
+    console.info(`[ARKDO][Bookmark] toggle end postId=${post.id} finalBookmarked=${post.bookmarked} bookmarkId=${post.bookmarkId}`);
+    return post.bookmarked === true;
   }
 
   private handleArkWebReadyChanged(): void {

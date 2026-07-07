@@ -1,4 +1,4 @@
-import { KeyboardAvoidMode } from '@kit.ArkUI';
+import { curves, KeyboardAvoidMode } from '@kit.ArkUI';
 import window from '@ohos.window';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 
@@ -45,7 +45,9 @@ export struct CommentInputBar {
       // 键盘避让矩形高度 = 键盘顶到屏幕底的遮挡高度；收起时为 0。
       const height: number = px2vp(data.area.bottomRect.height);
       // 用显式 animateTo 驱动上移动画（不在输入条/图标的父容器上挂 .animation，避免图标不渲染）。
-      this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+      // 曲线取系统输入法面板同款弹簧曲线(输入法框架统一驱动面板动画,与具体输入法 App 无关),
+      // 让输入条与键盘几乎逐帧同步;弹簧曲线时长由物理参数决定,不需要 duration。
+      this.getUIContext().animateTo({ curve: curves.interpolatingSpring(0, 1, 342, 38) }, () => {
         this.keyboardHeight = height;
       });
     }

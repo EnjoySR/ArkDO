@@ -12,6 +12,20 @@ import { UserAvatar } from './UserAvatar';
 const LIKE_RED: string = '#EF4444';
 const LIKE_GRAY: string = '#BDBDBD';
 
+// 拷贝链接成功后按钮右下角"画勾"动画,对齐 Discourse post-action-feedback:
+// 复制成功后按钮右下角"画勾"反馈。strokeDashOffset 在本环境不吃 animateTo,改用「左→右揭示」实现描边过程:
+// 勾路径 x 单调递增(2→8.36→20),放在固定尺寸盒里;外层容器 clip(true)+宽度 0→W 动画,从左到右逐段显现=画勾。
+const COPY_CHECK_W: number = 22;
+const COPY_CHECK_H: number = 16;
+const COPY_CHECK_PATH: string = 'M2 8.8 L8.36 14 L20 2';
+const COPY_CHECK_STROKE: number = 2;
+const COPY_CHECK_X: number = 22;   // 揭示容器在 38 按钮内的左上角坐标 → 落到右下角
+const COPY_CHECK_Y: number = 24;
+const COPY_CHECK_DRAW_MS: number = 1700;
+const COPY_CHECK_COLOR: string = '#22C55E';
+const COPY_FEEDBACK_TIMEOUT_MS: number = 3000;
+const COPY_FEEDBACK_TRANSITION_MS: number = 250;
+
 // 表情短名 + 已解析的本地资源(过滤未知表情后类型非空,供 Image 使用)。
 interface ReactionIcon {
   id: string;
@@ -48,7 +62,25 @@ export struct TopicPostItem {
   onJumpToPost: (postNumber: number) => void = () => {};
   // 展开「被回复」时上抛给页面拉取列表(页面持有 bridge/TopicService);返回楼层数组,失败返回 null。
   onLoadReplies: (post: TopicPost) => Promise<TopicPost[] | null> = () => Promise.resolve(null);
+  // 点「更多」展开区:拷贝该楼永久链接、书签 toggle。均上抛给页面(页面持有 bridge/slug/剪贴板)。
+  onCopyPostLink: (post: TopicPost) => void = () => {};
+  // 书签 toggle 上抛页面发网络,返回操作后的最终收藏态(失败=回滚后的原态),用于校正本地显示。
+  onToggleBookmark: (post: TopicPost) => Promise<boolean> = () => Promise.resolve(false);
   @State private showReactionPicker: boolean = false;
+  // 「更多」展开态:点 ellipsis 后换出「拷贝链接 + 书签」两个按钮。对齐官方:展开后不再收起。
+  @State private moreExpanded: boolean = false;
+  // 拷贝链接成功反馈:按钮右下角描边画绿勾。visible=挂载、opacity=淡入淡出、drawn=strokeDashOffset 目标(0=画满)。
+  @State private copyCheckVisible: boolean = false;
+  @State private copyCheckOpacity: number = 0;
+  // 揭示宽度:0=隐藏,动画到 COPY_CHECK_W=画满(左→右揭示,替代 strokeDashOffset 的描边动画)。
+  @State private copyCheckReveal: number = 0;
+  private copyFadeTimerId: number = -1;
+  private copyHideTimerId: number = -1;
+  // 书签显示态:必须用自身 @State 驱动(纯 @ObjectLink 的 post.bookmarked 变更在本大组件里不触发重渲染,
+  // 见 memory objectlink-state-source)。aboutToAppear 从 post 初始化,点击乐观翻转,再用页面回传态校正。
+  @State private bookmarkedLocal: boolean = false;
+  // 书签请求进行中:按钮显示 loading(不做乐观更新,等网络结果再切换图标)。
+  @State private bookmarkLoading: boolean = false;
   // 被回复列表:展开态 / 加载态 / 已加载数据。按 memory objectlink-state-source,状态放本组件 @State
   // (而非 @Observed TopicPost 深层字段),重渲染才稳。
   @State private repliesExpanded: boolean = false;
@@ -237,6 +269,8 @@ export struct TopicPostItem {
           if (this.canAddBoost() && !this.hasBoosts()) {
             this.RocketButton(38, 0)
           }
+          // 更多入口:位于火箭与回复之间。展开后换出拷贝链接 + 书签两个按钮。
+          this.MoreActions()
           this.ReplyButton()
         }
         .alignItems(VerticalAlign.Center)
@@ -462,7 +496,7 @@ export struct TopicPostItem {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .padding({ left: 4, right: 10, top: 4, bottom: 4 })
-        .backgroundColor('#F3F4F6')
+        .backgroundColor('#F2F2F2')
         .borderRadius(16)
         .constraintSize({ maxWidth: '72%' })
         .margin({ right: 8, top: 6 })
@@ -491,6 +525,161 @@ export struct TopicPostItem {
     .margin({ top: topMargin })
     .onClick(() => {
       this.onAddBoost(this.post);
+    })
+  }
+
+  // 更多操作:收起态显示 ellipsis;展开态换出「拷贝链接 + 书签」两个按钮(与火箭同款 38 透明按钮)。
+  // 对齐官方:展开后不收起,故只需本组件 @State moreExpanded 单向翻真。
+  @Builder
+  private MoreActions() {
+    if (this.moreExpanded) {
+      this.CopyLinkButton()
+      this.BookmarkButton()
+    } else {
+      this.MoreButton()
+    }
+  }
+
+  @Builder
+  private MoreButton() {
+    Button({ type: ButtonType.Normal, stateEffect: true }) {
+      FaIconView({ icon: this.faIcon('ellipsis'), color: '#BDBDBD', iconSize: 16 })
+    }
+    .width(38)
+    .height(38)
+    .padding(0)
+    .backgroundColor(Color.Transparent)
+    .borderRadius(10)
+    .onClick(() => {
+      // 展开带一次淡入位移过渡:换出的两个按钮从右侧滑入。
+      this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+        this.moreExpanded = true;
+      });
+    })
+  }
+
+  @Builder
+  private CopyLinkButton() {
+    Button({ type: ButtonType.Normal, stateEffect: true }) {
+      // link 图标居中(Stack 默认 Center);复制成功后右下角叠加"画勾"反馈(勾用 position 独立定位,
+      // 不能用 Stack alignContent,否则会把 link 图标也一起推到角上)。对齐 Discourse post-action-feedback。
+      Stack() {
+        // link 图标居中:用满尺寸 Column 承载并居中。
+        Column() {
+          FaIconView({ icon: this.faIcon('link'), color: '#BDBDBD', iconSize: 16 })
+        }
+        .width(38)
+        .height(38)
+        .justifyContent(FlexAlign.Center)
+
+        // 勾:固定尺寸盒放完整勾,外层揭示容器 clip(true)+宽度 0→W 动画,从左到右逐段显现=画勾过程。
+        // 常驻(idle 时宽 0 / opacity 0 隐藏);.position 明确定位到按钮右下角(不靠对齐,避免算错)。
+        Stack({ alignContent: Alignment.TopStart }) {
+          Path()
+            .width(COPY_CHECK_W)
+            .height(COPY_CHECK_H)
+            .commands(COPY_CHECK_PATH)
+            .fill(Color.Transparent)
+            .stroke(COPY_CHECK_COLOR)
+            .strokeWidth(COPY_CHECK_STROKE)
+            .strokeLineCap(LineCapStyle.Round)
+            .strokeLineJoin(LineJoinStyle.Round)
+        }
+        .width(this.copyCheckReveal)
+        .height(COPY_CHECK_H)
+        .clip(true)
+        .opacity(this.copyCheckOpacity)
+        .position({ x: COPY_CHECK_X, y: COPY_CHECK_Y })
+        .hitTestBehavior(HitTestMode.None)
+      }
+      .width(38)
+      .height(38)
+    }
+    .width(38)
+    .height(38)
+    .padding(0)
+    .backgroundColor(Color.Transparent)
+    .borderRadius(10)
+    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ x: 12 })))
+    .onClick(() => {
+      // 保留原有 toast(页面弹「已复制链接」),同时叠加官方同款按钮内画勾动画。
+      this.onCopyPostLink(this.post);
+      this.playCopyFeedback();
+    })
+  }
+
+  // 复制成功反馈:淡入(250ms)+ 从左到右揭示画勾(COPY_CHECK_DRAW_MS);淡出后卸载。
+  // 勾在显示期间重复点击忽略(对齐官方 recentlyCopied 守卫)。
+  private playCopyFeedback(): void {
+    if (this.copyCheckVisible) {
+      return;
+    }
+    this.copyCheckVisible = true;
+    this.copyCheckOpacity = 0;
+    this.copyCheckReveal = 0;
+    const ctx: UIContext = this.getUIContext();
+    ctx.animateTo({ duration: COPY_FEEDBACK_TRANSITION_MS, curve: Curve.EaseOut }, () => {
+      this.copyCheckOpacity = 1;
+    });
+    ctx.animateTo({ duration: COPY_CHECK_DRAW_MS, curve: Curve.Linear }, () => {
+      this.copyCheckReveal = COPY_CHECK_W;
+    });
+    this.copyFadeTimerId = setTimeout(() => {
+      this.getUIContext().animateTo({ duration: COPY_FEEDBACK_TRANSITION_MS, curve: Curve.EaseOut }, () => {
+        this.copyCheckOpacity = 0;
+      });
+    }, COPY_FEEDBACK_TIMEOUT_MS - COPY_FEEDBACK_TRANSITION_MS);
+    this.copyHideTimerId = setTimeout(() => {
+      this.copyCheckVisible = false;
+      this.copyCheckReveal = 0;
+    }, COPY_FEEDBACK_TIMEOUT_MS);
+  }
+
+  private clearCopyFeedbackTimers(): void {
+    if (this.copyFadeTimerId >= 0) {
+      clearTimeout(this.copyFadeTimerId);
+      this.copyFadeTimerId = -1;
+    }
+    if (this.copyHideTimerId >= 0) {
+      clearTimeout(this.copyHideTimerId);
+      this.copyHideTimerId = -1;
+    }
+  }
+
+  @Builder
+  private BookmarkButton() {
+    Button({ type: ButtonType.Normal, stateEffect: true }) {
+      // 请求进行中显示 loading;否则按本地 @State bookmarkedLocal 显示 已收藏(实心蓝)/未收藏(空心灰)。
+      // if/else 两个独立 FaIconView 实例(复用同一实例只换 icon 属性不可靠,同 chevron)。
+      if (this.bookmarkLoading) {
+        LoadingProgress()
+          .width(18)
+          .height(18)
+          .color('#9CA3AF')
+      } else if (this.bookmarkedLocal) {
+        FaIconView({ icon: this.faIcon('bookmark'), color: '#0088CC', iconSize: 16 })
+      } else {
+        FaIconView({ icon: this.faIcon('far-bookmark'), color: '#BDBDBD', iconSize: 16 })
+      }
+    }
+    .width(38)
+    .height(38)
+    .padding(0)
+    .backgroundColor(Color.Transparent)
+    .borderRadius(10)
+    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ x: 12 })))
+    .onClick(() => {
+      // 不做乐观更新:点击进入 loading,等网络返回后用页面回传的最终态更新显示。请求中重复点忽略。
+      if (this.bookmarkLoading) {
+        return;
+      }
+      this.bookmarkLoading = true;
+      console.info(`[ARKDO][Bookmark] tap postId=${this.post.id} bookmarkedLocal=${this.bookmarkedLocal} postBookmarked=${this.post.bookmarked} bookmarkId=${this.post.bookmarkId}`);
+      this.onToggleBookmark(this.post).then((finalState: boolean) => {
+        this.bookmarkedLocal = finalState;
+        this.bookmarkLoading = false;
+        console.info(`[ARKDO][Bookmark] reconcile postId=${this.post.id} finalState=${finalState}`);
+      });
     })
   }
 
@@ -630,10 +819,12 @@ export struct TopicPostItem {
 
   aboutToAppear(): void {
     this.syncBreathing();
+    this.bookmarkedLocal = this.post.bookmarked === true;
   }
 
   aboutToDisappear(): void {
     this.stopBreathing();
+    this.clearCopyFeedbackTimers();
   }
 
   // post 任一 @Observed 字段变化(含 reporting/read)都会触发:据此开/停"呼吸"定时器。

@@ -136,6 +136,8 @@ interface DiscoursePost {
   current_user_reaction?: DiscourseCurrentReaction;
   boosts?: DiscourseBoost[];
   can_boost?: boolean;
+  bookmarked?: boolean;
+  bookmark_id?: number;
   // discourse-poll:该楼的投票列表、当前用户各投票的已投项、能否投票。
   polls?: DiscoursePoll[];
   polls_votes?: Record<string, string[]>;
@@ -146,6 +148,12 @@ interface DiscoursePost {
 interface DiscoursePollVoteResponse {
   poll?: DiscoursePoll;
   vote?: string[];
+}
+
+// POST /bookmarks.json 的响应:{ success:"OK", id:<bookmarkId> }。
+interface DiscourseBookmarkResponse {
+  success?: string;
+  id?: number;
 }
 
 // POST /posts 的响应外壳:真正的楼层在 post 字段里,不在顶层。
@@ -526,6 +534,47 @@ export class TopicService {
     }
   }
 
+  // 书签:给某楼加书签。POST /bookmarks.json,form body(对齐抓包):
+  // reminder_at=&auto_delete_preference=3&bookmarkable_id=<postId>&bookmarkable_type=Post。
+  // 响应 { success:"OK", id:<bookmarkId> };返回 bookmarkId 供后续取消。
+  async addBookmark(postId: number, topicId: number): Promise<NetworkResult<number>> {
+    const body: string = `reminder_at=&auto_delete_preference=3&bookmarkable_id=${postId}&bookmarkable_type=Post`;
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    const response: NetworkResult<string> = await this.bridge.postForm('/bookmarks.json', body, {
+      notifyChallenge: true,
+      referrer: referrer
+    });
+    if (!response.success) {
+      return this.forwardFailure<number>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<number>(response.statusCode, response.challengeState, 'Linux.do 添加书签响应为空。');
+    }
+    try {
+      const wrapper: DiscourseBookmarkResponse = JSON.parse(response.data) as DiscourseBookmarkResponse;
+      if (typeof wrapper.id !== 'number') {
+        return this.unexpectedResponse<number>(response.statusCode, response.challengeState, 'Linux.do 添加书签响应缺少 id。');
+      }
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: wrapper.id
+      };
+    } catch (error) {
+      return this.unexpectedResponse<number>(response.statusCode, response.challengeState, 'Linux.do 添加书签响应不是有效 JSON。');
+    }
+  }
+
+  // 书签:取消某个书签。DELETE /bookmarks/<bookmarkId>.json,无 body。响应 { success:"OK", topic_bookmarked:bool }。
+  async removeBookmark(bookmarkId: number, topicId: number): Promise<NetworkResult<string>> {
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    return this.bridge.deleteForm(`/bookmarks/${bookmarkId}.json`, '', {
+      notifyChallenge: true,
+      referrer: referrer
+    });
+  }
+
   private getLatestPath(page: number): string {
     if (page <= 0) {
       return '/latest.json';
@@ -719,6 +768,8 @@ export class TopicService {
         typeof currentReactionId === 'string' && currentReactionId.length > 0 ? currentReactionId : undefined;
       post.boosts = this.mapBoosts(sourcePost.boosts);
       post.canBoost = sourcePost.can_boost === true;
+      post.bookmarked = sourcePost.bookmarked === true;
+      post.bookmarkId = typeof sourcePost.bookmark_id === 'number' ? sourcePost.bookmark_id : undefined;
       post.polls = this.mapPolls(sourcePost);
       posts.push(post);
     }
