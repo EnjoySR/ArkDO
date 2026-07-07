@@ -1,5 +1,3 @@
-import { pasteboard } from '@kit.BasicServicesKit';
-import { AppConstants } from '../../common/constants/AppConstants';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
 import { Poll, PollVoteResult, PostBoost, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { TopicCategory, TopicTag } from '../../models/Topic';
@@ -7,14 +5,14 @@ import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge'
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { TopicReadController } from '../../services/reading/TopicReadController';
-import { ReactionMutation, ReactionSnapshot } from '../../services/topic/ReactionMutation';
-import { PollMutation, PollSnapshot } from '../../services/topic/PollMutation';
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
+import { PostActions } from '../../services/topic/PostActions';
 import { PostDataSource } from '../../services/topic/PostDataSource';
 import { PostStreamPager } from '../../services/topic/PostStreamPager';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
-import { TopicMetadataBadges } from '../components/TopicBadges';
+import { LoadStateView } from '../components/LoadStateView';
 import { TopicDetailHeader } from '../components/TopicDetailHeader';
+import { TopicSummaryCard } from '../components/TopicSummaryCard';
 import { TopicPostItem } from '../components/TopicPostItem';
 import { ImageViewer, ViewerImage } from '../components/ImageViewer';
 import { CommentInputBar, REPLY_BLUE } from '../components/CommentInputBar';
@@ -98,6 +96,15 @@ export struct TopicDetailPage {
     title: ''
   };
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
+  // 楼层动作胶水(表情/投票/拷链/书签):乐观回滚与 toast 闭环全在服务类里,页面只接线。
+  // bridge 必须经闭包惰性读取:字段初始化此刻父组件注入的 bridge prop 还没覆盖默认值,
+  // 按值传会捕获未连接宿主的空壳实例(所有请求被拒,表情/书签全挂,实测翻车)。
+  private postActions: PostActions = new PostActions(
+    (): ArkWebNetworkBridge => this.bridge,
+    (message: string, duration: number): void => this.showComposerToast(message, duration),
+    (): number => this.detail?.id ?? 0,
+    (): string | undefined => this.detail?.slug
+  );
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   onBack: () => void = () => {};
   // 正文链接 / onebox 卡片点击上抛给根导航:站内帖子链接跳原生详情,其余打开通用 WebView。
@@ -158,7 +165,13 @@ export struct TopicDetailPage {
   private PostListSection() {
     List({ scroller: this.scroller, initialIndex: this.initialListIndex }) {
       ListItem() {
-        this.TopicSummary()
+        TopicSummaryCard({
+          title: this.getTitle(),
+          category: CategoryIndex.find(this.categories, this.detail?.categoryId),
+          parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
+          tags: this.getTags(),
+          metaText: this.getTopicMetaText()
+        })
       }
 
       LazyForEach(this.dataSource, (post: TopicPost) => {
@@ -173,8 +186,8 @@ export struct TopicDetailPage {
           onOpenLink: (url: string) => {
             this.onOpenLink(url);
           },
-          onToggleReaction: (targetPost: TopicPost, reaction: string, snapshot: ReactionSnapshot) => {
-            this.handleToggleReaction(targetPost, reaction, snapshot);
+          onToggleReaction: (targetPost: TopicPost, reaction: string): Promise<boolean> => {
+            return this.postActions.toggleReaction(targetPost, reaction);
           },
           onReply: (targetPost: TopicPost) => {
             this.openComposerForPost(targetPost);
@@ -189,16 +202,16 @@ export struct TopicDetailPage {
             return this.loadPostReplies(targetPost);
           },
           onVote: (targetPost: TopicPost, poll: Poll, optionIds: string[]) => {
-            return this.handleVote(targetPost, poll, optionIds);
+            return this.postActions.vote(targetPost, poll, optionIds);
           },
           onRemoveVote: (targetPost: TopicPost, poll: Poll) => {
-            return this.handleRemoveVote(targetPost, poll);
+            return this.postActions.removeVote(targetPost, poll);
           },
           onCopyPostLink: (targetPost: TopicPost) => {
-            this.handleCopyPostLink(targetPost);
+            this.postActions.copyPostLink(targetPost);
           },
           onToggleBookmark: (targetPost: TopicPost) => {
-            return this.handleToggleBookmark(targetPost);
+            return this.postActions.toggleBookmark(targetPost);
           }
         })
       }, (post: TopicPost) => post.id.toString())
@@ -277,7 +290,15 @@ export struct TopicDetailPage {
           this.PostListSection()
         }
       } else {
-        this.StateContent()
+        LoadStateView({
+          isLoading: this.isLoading,
+          message: this.message,
+          requiresChallenge: this.requiresChallenge,
+          showRetry: !this.isLoading && this.isArkWebReady,
+          onRetry: () => {
+            this.loadTopicDetail();
+          }
+        })
       }
     }
     .width('100%')
@@ -581,75 +602,6 @@ export struct TopicDetailPage {
     this.showImageViewer = true;
   }
 
-  @Builder
-  private TopicSummary() {
-    Column() {
-      Text(this.getTitle())
-        .fontSize(22)
-        .fontWeight(FontWeight.Bold)
-        .fontColor('#111827')
-        .width('100%')
-
-      if (this.hasBadges()) {
-        TopicMetadataBadges({
-          category: CategoryIndex.find(this.categories, this.detail?.categoryId),
-          parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
-          tags: this.getTags()
-        })
-        .width('100%')
-        .margin({ top: 8 })
-      }
-
-      Text(this.getTopicMetaText())
-        .fontSize(12)
-        .fontColor('#6B7280')
-        .margin({ top: 8 })
-    }
-    .width('100%')
-    .padding({ left: 10, right: 10, top: 20, bottom: 16 })
-    .border({
-      width: { bottom: 1 },
-      color: '#E5E7EB'
-    })
-    .alignItems(HorizontalAlign.Start)
-  }
-
-  @Builder
-  private StateContent() {
-    Column() {
-      if (this.isLoading) {
-        LoadingProgress()
-          .width(30)
-          .height(30)
-          .color('#2563EB')
-          .margin({ bottom: 12 })
-      }
-
-      Text(this.message)
-        .fontSize(15)
-        .fontColor(this.requiresChallenge ? '#B45309' : '#6B7280')
-        .textAlign(TextAlign.Center)
-
-      if (!this.isLoading && this.isArkWebReady) {
-        Button('重试')
-          .fontSize(15)
-          .fontColor('#2563EB')
-          .backgroundColor('#F3F4F6')
-          .height(38)
-          .padding({ left: 18, right: 18 })
-          .borderRadius(19)
-          .margin({ top: 16 })
-          .onClick(() => {
-            this.loadTopicDetail();
-          })
-      }
-    }
-    .width('100%')
-    .layoutWeight(1)
-    .justifyContent(FlexAlign.Center)
-    .padding({ left: 24, right: 24 })
-  }
-
   private async loadTopicDetail(): Promise<void> {
     if (!this.isArkWebReady) {
       this.message = '正在准备 ArkWeb 请求环境';
@@ -812,107 +764,6 @@ export struct TopicDetailPage {
       (id: number, timings: Map<number, number>, topicTime: number) => service.reportTimings(id, timings, topicTime),
       LOG_TAG
     );
-  }
-
-  // 切换某楼表情回应:先乐观更新(@Observed 即时重渲染),再发 PUT;失败回滚到快照。
-  private async handleToggleReaction(post: TopicPost, reaction: string, snapshot: ReactionSnapshot): Promise<void> {
-    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
-    const result: NetworkResult<string> =
-      await new TopicService(this.bridge).toggleReaction(post.id, topicId, reaction);
-
-    if (!result.success) {
-      console.info(`${LOG_TAG} toggle reaction failed postId=${post.id} reaction=${reaction} status=${result.statusCode}, rollback`);
-      ReactionMutation.restore(post, snapshot);
-    }
-  }
-
-  // 投票:先乐观更新模型,再发 PUT;成功用服务端真实值校正模型并回传给 PollView,失败回滚并回传 null。
-  private async handleVote(post: TopicPost, poll: Poll, optionIds: string[]): Promise<PollVoteResult | null> {
-    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
-    const snapshot: PollSnapshot = PollMutation.snapshot(poll);
-    PollMutation.applyVote(poll, optionIds);
-
-    const result: NetworkResult<PollVoteResult> =
-      await new TopicService(this.bridge).votePoll(post.id, topicId, poll.name, optionIds);
-
-    if (result.success && result.data) {
-      PollMutation.applyServerResult(poll, result.data);
-      return result.data;
-    }
-    console.info(`${LOG_TAG} vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
-    PollMutation.restore(poll, snapshot);
-    return null;
-  }
-
-  // 撤销投票:先乐观更新模型,再发 DELETE;成功用服务端真实值校正模型并回传,失败回滚并回传 null。
-  private async handleRemoveVote(post: TopicPost, poll: Poll): Promise<PollVoteResult | null> {
-    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
-    const snapshot: PollSnapshot = PollMutation.snapshot(poll);
-    PollMutation.applyRemove(poll);
-
-    const result: NetworkResult<PollVoteResult> =
-      await new TopicService(this.bridge).removePollVote(post.id, topicId, poll.name);
-
-    if (result.success && result.data) {
-      PollMutation.applyServerResult(poll, result.data);
-      return result.data;
-    }
-    console.info(`${LOG_TAG} remove vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
-    PollMutation.restore(poll, snapshot);
-    return null;
-  }
-
-  // 拷贝该楼永久链接到剪贴板:优先带 slug 的规范链接,缺 slug 时用 /t/topic/<id>/<楼号>(可正常跳转)。
-  private handleCopyPostLink(post: TopicPost): void {
-    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
-    const slug: string | undefined = this.detail?.slug;
-    const path: string = slug !== undefined && slug.length > 0
-      ? `/t/${slug}/${topicId}/${post.postNumber}`
-      : `/t/topic/${topicId}/${post.postNumber}`;
-    const url: string = `${AppConstants.BASE_URL}${path}`;
-    const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, url);
-    pasteboard.getSystemPasteboard().setData(data).then(() => {
-      this.getUIContext().getPromptAction().showToast({ message: '已复制链接', duration: 1500 });
-    }).catch(() => {
-    });
-  }
-
-  // 书签 toggle:post.bookmarked/bookmarkId 为网络侧真源,发网络+失败回滚;返回操作后的最终收藏态,
-  // 交给子组件校正本地显示 @State(子组件负责乐观翻转与重渲染)。带 [ARKDO][Bookmark] 日志便于排查。
-  private async handleToggleBookmark(post: TopicPost): Promise<boolean> {
-    const topicId: number = post.topicId !== undefined ? post.topicId : (this.detail?.id ?? 0);
-    const service: TopicService = new TopicService(this.bridge);
-    const wasBookmarked: boolean = post.bookmarked === true;
-    const prevId: number | undefined = post.bookmarkId;
-    console.info(`[ARKDO][Bookmark] toggle start postId=${post.id} topicId=${topicId} wasBookmarked=${wasBookmarked} prevId=${prevId}`);
-
-    if (wasBookmarked && prevId !== undefined) {
-      post.bookmarked = false;
-      post.bookmarkId = undefined;
-      const result: NetworkResult<string> = await service.removeBookmark(prevId, topicId);
-      console.info(`[ARKDO][Bookmark] remove result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState}`);
-      if (result.success) {
-        this.getUIContext().getPromptAction().showToast({ message: '已取消收藏', duration: 1500 });
-      } else {
-        post.bookmarked = true;
-        post.bookmarkId = prevId;
-        this.getUIContext().getPromptAction().showToast({ message: '取消收藏失败', duration: 1500 });
-      }
-    } else {
-      post.bookmarked = true;
-      const result: NetworkResult<number> = await service.addBookmark(post.id, topicId);
-      console.info(`[ARKDO][Bookmark] add result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState} id=${result.data}`);
-      if (result.success && result.data !== undefined) {
-        post.bookmarkId = result.data;
-        this.getUIContext().getPromptAction().showToast({ message: '已收藏', duration: 1500 });
-      } else {
-        post.bookmarked = false;
-        post.bookmarkId = undefined;
-        this.getUIContext().getPromptAction().showToast({ message: '收藏失败', duration: 1500 });
-      }
-    }
-    console.info(`[ARKDO][Bookmark] toggle end postId=${post.id} finalBookmarked=${post.bookmarked} bookmarkId=${post.bookmarkId}`);
-    return post.bookmarked === true;
   }
 
   private handleArkWebReadyChanged(): void {

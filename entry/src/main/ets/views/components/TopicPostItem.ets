@@ -2,7 +2,7 @@ import { curves } from '@kit.ArkUI';
 import { Poll, PollVoteResult, PostBoost, PostReaction, TopicPost } from '../../models/TopicDetail';
 import { CookedHtmlParser, RichInlineNode, RichInlineType } from '../../services/content/CookedHtmlParser';
 import { RelativeTime } from '../../common/utils/RelativeTime';
-import { ReactionMutation, ReactionSnapshot } from '../../services/topic/ReactionMutation';
+import { ReactionMutation } from '../../services/topic/ReactionMutation';
 import { getReactionEmoji, REACTION_ORDER } from './EmojiRegistry';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { PostRichContent } from './PostRichContent';
@@ -53,9 +53,9 @@ export struct TopicPostItem {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击继续上抛给页面(由页面经 LinkRouter 判断跳原生详情或通用 WebView)。
   onOpenLink: (url: string) => void = () => {};
-  // 表情回应切换:本组件就地乐观更新 this.post(@ObjectLink 自身变更→精准重渲染),
-  // 页面只负责发 PUT + 失败时用 snapshot 回滚。
-  onToggleReaction: (post: TopicPost, reaction: string, snapshot: ReactionSnapshot) => void = () => {};
+  // 表情回应切换:请求先行,页面发 PUT 并返回成败;成功后本组件才改 this.post
+  // (@ObjectLink 自身变更→精准重渲染),请求期间按钮转圈防重复点击。
+  onToggleReaction: (post: TopicPost, reaction: string) => Promise<boolean> = () => Promise.resolve(false);
   // 点该楼回复按钮:把整条 post 上抛给页面,由页面按 postNumber+作者昵称打开定向回复输入框。
   onReply: (post: TopicPost) => void = () => {};
   // 点火箭:把整条 post 上抛给页面,由页面打开 boost 输入浮层。
@@ -99,6 +99,8 @@ export struct TopicPostItem {
   @State private breathing: boolean = false;
   @State private breatheDim: boolean = false;
   private breatheTimerId: number = -1;
+  // 表情回应请求进行中:点赞按钮转圈,期间忽略再次点击(请求先行,不做乐观更新)。
+  @State private reactionLoading: boolean = false;
   // 目标楼高亮进行中:背景淡蓝,定时后渐隐回透明(backgroundColor 绑定隐式动画)。
   @State private flashActive: boolean = false;
   private flashTimerId: number = -1;
@@ -756,10 +758,15 @@ export struct TopicPostItem {
     return this.post.canBoost === true;
   }
 
-  // 按钮图标:未回应=空心灰心;heart=实心红心;其它表情=该表情 PNG。
+  // 按钮图标:请求中=转圈;未回应=空心灰心;heart=实心红心;其它表情=该表情 PNG。
   @Builder
   private LikeButtonIcon() {
-    if (this.post.currentUserReaction === 'heart') {
+    if (this.reactionLoading) {
+      LoadingProgress()
+        .width(16)
+        .height(16)
+        .color(LIKE_GRAY)
+    } else if (this.post.currentUserReaction === 'heart') {
       FaIconView({ icon: this.faIcon('heart'), color: LIKE_RED, iconSize: 16 })
     } else if (this.hasEmojiReaction()) {
       Image(this.currentReactionEmoji())
@@ -772,12 +779,19 @@ export struct TopicPostItem {
     }
   }
 
-  // 就地乐观切换:先快照,再改 this.post(触发本楼重渲染),把快照交给页面用于失败回滚。
-  private toggleReaction(reaction: string): void {
-    const snapshot: ReactionSnapshot = ReactionMutation.snapshot(this.post);
-    ReactionMutation.applyToggle(this.post, reaction);
-    this.playLikePop();
-    this.onToggleReaction(this.post, reaction, snapshot);
+  // 请求先行(与书签一致):按钮转圈期间禁止再点;成功才改 this.post(触发本楼重渲染)并播 pop,
+  // 失败 toast 由服务层负责,本地状态不动,不会出现"图标闪一下又弹回"的观感。
+  private async toggleReaction(reaction: string): Promise<void> {
+    if (this.reactionLoading) {
+      return;
+    }
+    this.reactionLoading = true;
+    const ok: boolean = await this.onToggleReaction(this.post, reaction);
+    this.reactionLoading = false;
+    if (ok) {
+      ReactionMutation.applyToggle(this.post, reaction);
+      this.playLikePop();
+    }
   }
 
   // 图标 pop:先瞬间缩到 0.7(不带动画),再用弹簧回弹到 1(低阻尼→overshoot 回弹)。
