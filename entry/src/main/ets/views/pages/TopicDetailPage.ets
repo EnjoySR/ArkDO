@@ -56,9 +56,9 @@ export struct TopicDetailPage {
   // 否则线会消失);锚楼 = 快照后第一条已加载未读楼的 post.id,楼层创建前确定,不再变化。
   private lastVisitedSnapshot: number = 0;
   private lastVisitedAnchorPostId: number = 0;
-  // 落地高亮的目标楼 post.id(通知/引用跳转):楼层创建时读取;短暂生效后清零,
-  // 避免 LazyForEach 销毁重建该楼时重播高亮。
-  private flashTargetPostId: number = 0;
+  // 落地高亮的目标楼 post.id(通知/引用跳转):@State 经 @Prop 下发给各楼,已在组件树上的楼
+  // 靠 @Watch 就地起播(已加载路径的楼内跳转)。短暂生效后清零,避免楼层销毁重建时重播。
+  @State private flashTargetPostId: number = 0;
   private flashClearTimerId: number = -1;
   // 当前视口首项的 List 下标(onScrollIndex 持续更新):头插落在布局范围内时据此手动重锚。
   private currentStartListIndex: number = 0;
@@ -179,7 +179,7 @@ export struct TopicDetailPage {
           post: post,
           lastReadPostNumber: this.detail?.lastReadPostNumber ?? -1,
           showLastVisitedLine: post.id === this.lastVisitedAnchorPostId && this.lastVisitedAnchorPostId > 0,
-          flashOnAppear: post.id === this.flashTargetPostId && this.flashTargetPostId > 0,
+          flashTargetPostId: this.flashTargetPostId,
           onOpenImages: (images: ViewerImage[], startIndex: number) => {
             this.openImageViewer(images, startIndex);
           },
@@ -501,6 +501,8 @@ export struct TopicDetailPage {
     const index: number = this.dataSource.findIndexByPostNumber(postNumber);
     console.info(`${LOG_TAG} jump request post=${postNumber} loadedIndex=${index}`);
     if (index >= 0) {
+      // 已加载:平滑滚动 + 落地高亮(与重开窗口路径观感一致)。
+      this.armTargetFlash(this.dataSource.getData(index).id);
       this.scroller.scrollToIndex(index + 1, true);
       return;
     }

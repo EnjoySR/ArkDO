@@ -47,8 +47,10 @@ export struct TopicPostItem {
   // 本楼是进入时快照的"第一条未读楼":顶部渲染"上次访问"红色分隔线(对齐官网 last visit 线)。
   // 普通 prop:锚楼由页面在楼层创建前确定且不再变化,无需响应式。
   showLastVisitedLine: boolean = false;
-  // 通知/引用跳转的目标楼:挂载后背景短暂高亮再渐隐(对齐官网 anchor 高亮),一次性。
-  flashOnAppear: boolean = false;
+  // 跳转目标楼的 post.id(页面 @State 下发):等于本楼 id 时背景短暂高亮再渐隐(对齐官网 anchor 高亮)。
+  // @Prop+@Watch 而非一次性布尔:楼内跳转的目标楼往往已在组件树上,aboutToAppear 不会再触发,
+  // 只能靠监听变化就地起播;新建楼(窗口式进入/重开窗口)则走 aboutToAppear 分支。
+  @Prop @Watch('onFlashTargetChanged') flashTargetPostId: number = 0;
   // 图片浏览器在页面级渲染，这里把 PostRichContent 的「打开」请求继续上抛给页面
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击继续上抛给页面(由页面经 LinkRouter 判断跳原生详情或通用 WebView)。
@@ -891,13 +893,28 @@ export struct TopicPostItem {
   aboutToAppear(): void {
     this.syncBreathing();
     this.bookmarkedLocal = this.post.bookmarked === true;
-    if (this.flashOnAppear) {
-      // 先无动画置为高亮底色,停留片刻后翻回触发渐隐(backgroundColor 上的隐式动画)。
-      this.flashActive = true;
-      this.flashTimerId = setTimeout(() => {
-        this.flashActive = false;
-      }, 900);
+    if (this.flashTargetPostId === this.post.id) {
+      this.startTargetFlash();
     }
+  }
+
+  // 页面下发的跳转目标变化:命中本楼即起播(已在组件树上的楼,楼内跳转路径)。清零(0)不命中,自然跳过。
+  private onFlashTargetChanged(): void {
+    if (this.flashTargetPostId === this.post.id) {
+      this.startTargetFlash();
+    }
+  }
+
+  // 起播目标楼高亮:置为高亮底色,停留片刻后翻回触发渐隐(backgroundColor 上的隐式动画)。
+  private startTargetFlash(): void {
+    if (this.flashTimerId >= 0) {
+      clearTimeout(this.flashTimerId);
+    }
+    this.flashActive = true;
+    this.flashTimerId = setTimeout(() => {
+      this.flashActive = false;
+      this.flashTimerId = -1;
+    }, 900);
   }
 
   aboutToDisappear(): void {
