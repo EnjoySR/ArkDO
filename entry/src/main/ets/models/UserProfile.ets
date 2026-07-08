@@ -1,5 +1,6 @@
 // 个人中心数据模型:字段分别来自
 // /u/{username}.json(资料)、/u/{username}/summary.json(统计+徽章)、/user_actions.json(最近活动)。
+import { TopicTag } from './Topic';
 
 export interface UserProfileDetail {
   id: number;
@@ -57,5 +58,6 @@ export interface UserActivityItem {
   postNumber?: number;
   title: string;
   categoryId?: number;
+  tags: TopicTag[];
   createdAt?: string;
 }

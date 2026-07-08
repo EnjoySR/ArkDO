@@ -95,6 +95,35 @@ export default function cookedHtmlParserTest() {
       expect(textInlines[0].text).assertEqual('真是欲哭无泪啊 月底清零 真的6');
     });
 
+    it('promotesBareAnimatedImageInMixedParagraphToImageBlock', 0, () => {
+      // 动图(class="animated")不套 lightbox,和正文塞在同一个 <p>。以前会被当行内图压成 18px,
+      // 现在应切成:文字段落 + 整幅 IMAGE 块(带原始宽高,渲染层据此按比例铺满栏宽)。
+      const html: string = '<p>天气卡片<br>\n' +
+        '<img src="https://cdn3.ldstatic.com/original/4X/6/2/7/weather.webp" alt="PixPin" width="690" height="415" class="animated"></p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(2);
+      expect(blocks[0].type).assertEqual(RichBlockType.PARAGRAPH);
+      expect(blocks[1].type).assertEqual(RichBlockType.IMAGE);
+      expect(blocks[1].src).assertEqual('https://cdn3.ldstatic.com/original/4X/6/2/7/weather.webp');
+      expect(blocks[1].width).assertEqual(690);
+      expect(blocks[1].height).assertEqual(415);
+    });
+
+    it('keepsSmallEmojiInlineWithinMixedParagraph', 0, () => {
+      // emoji(width=20 <= 48,class="emoji")必须保持行内,不能被误提升为整幅图块。
+      const html: string = '<p>哈哈 <img src="https://linux.do/images/emoji/smile.png" alt=":smile:" title=":smile:" class="emoji" width="20" height="20"> 收到</p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.PARAGRAPH);
+      const inlines: RichInlineNode[] = blocks[0].inlines ? blocks[0].inlines as RichInlineNode[] : [];
+      const hasInlineImage: boolean = inlines.some((node: RichInlineNode) => node.type === RichInlineType.IMAGE);
+      expect(hasInlineImage).assertTrue();
+    });
+
     it('parsesDetailsBlocksAsDisclosureBlocks', 0, () => {
       const html: string = '<details><summary>总结</summary><p>我的用户名是： Ryan119911</p></details>';
 

@@ -1,5 +1,9 @@
 import { AppConstants } from '../../common/constants/AppConstants';
 
+// 行内小图(emoji/小图标)的尺寸上限,与渲染层 PostRichContent.SMALL_IMAGE_MAX 对齐:
+// 宽或高超过它的独立 <img>(或动图)视为整幅内容图,提升为 IMAGE 块,不再压成 18px 行内图。
+const INLINE_IMAGE_MAX: number = 48;
+
 export enum RichBlockType {
   PARAGRAPH = 'paragraph',
   HEADING = 'heading',
@@ -890,15 +894,16 @@ export class CookedHtmlParser {
   }
 
   private static mixedBlocks(innerHtml: string): RichBlock[] {
-    // 处理"图 + 文字混排"容器：Discourse 会把 lightbox 图片和正文塞进同一个 <p>，
-    // 例如 <p><div class="lightbox-wrapper">图</div><br>文字</p>。按 lightbox 单元切分，
-    // 图片各自成 IMAGE 块、文字成段落，避免整段退化成一个 18px 行内小图。
+    // 处理"图 + 文字混排"容器：Discourse 会把图片和正文塞进同一个 <p>，例如
+    // <p><div class="lightbox-wrapper">图</div><br>文字</p>，或未套 lightbox 的独立大图/动图
+    // <p>文字<br><img class="animated" width="690"></p>。按"图片单元"切分：图片各自成 IMAGE 块、
+    // 文字成段落，避免大图退化成一个 18px 行内小图。
     const result: RichBlock[] = [];
     let rest: string = innerHtml;
     let guard: number = 0;
     while (rest.length > 0 && guard < 200) {
       guard++;
-      const unit: LightboxUnit | undefined = CookedHtmlParser.findLightboxUnit(rest);
+      const unit: LightboxUnit | undefined = CookedHtmlParser.findImageUnit(rest);
       if (!unit) {
         result.push(...CookedHtmlParser.paragraphBlocks(rest));
         break;
@@ -912,7 +917,10 @@ export class CookedHtmlParser {
     return result;
   }
 
-  private static findLightboxUnit(html: string): LightboxUnit | undefined {
+  // 从混排 HTML 中切出下一个"图片单元"：优先匹配 lightbox 容器(div/a),其次匹配未被 lightbox
+  // 包裹的独立大图/动图 <img>(见 isBlockLevelImageTag)。lightbox 容器的开标签总在其内部 <img>
+  // 之前出现,故会先命中容器、整段切出,不会把容器内的图当独立图误切。
+  private static findImageUnit(html: string): LightboxUnit | undefined {
     const lower: string = html.toLowerCase();
     let cursor: number = 0;
     while (cursor < html.length) {
@@ -941,9 +949,32 @@ export class CookedHtmlParser {
         };
         return unit;
       }
+      if (name === 'img' && !CookedHtmlParser.isClosingTag(tag) &&
+        CookedHtmlParser.isBlockLevelImageTag(tag)) {
+        const unit: LightboxUnit = {
+          before: html.substring(0, tagStart),
+          html: tag,
+          after: html.substring(tagEnd + 1)
+        };
+        return unit;
+      }
       cursor = tagEnd + 1;
     }
     return undefined;
+  }
+
+  // 判断一个独立 <img> 是否应按整幅图片块渲染:emoji 永远行内;动图(class="animated")或标注了
+  // 大尺寸(宽或高 > INLINE_IMAGE_MAX)的图提升为块级。无尺寸又非动图的裸图保持行内(安全默认)。
+  private static isBlockLevelImageTag(tag: string): boolean {
+    if (CookedHtmlParser.hasClassContaining(tag, 'emoji')) {
+      return false;
+    }
+    if (CookedHtmlParser.hasClassContaining(tag, 'animated')) {
+      return true;
+    }
+    const width: number = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(tag, 'width'));
+    const height: number = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(tag, 'height'));
+    return width > INLINE_IMAGE_MAX || height > INLINE_IMAGE_MAX;
   }
 
   private static imageBlockFromTag(tag: string, href: string): RichBlock | undefined {

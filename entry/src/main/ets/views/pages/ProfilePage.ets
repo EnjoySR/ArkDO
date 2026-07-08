@@ -6,6 +6,7 @@ import { FileLogger } from '../../services/logging/FileLogger';
 import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { TopicCategory } from '../../models/Topic';
+import { TopicMetadataBadges } from '../components/TopicBadges';
 import { User } from '../../models/User';
 import {
   UserActionType,
@@ -477,23 +478,25 @@ export struct ProfilePage {
       .width('100%')
       .alignItems(VerticalAlign.Top)
 
+      // 分类 + 标签与首页帖子列表同款组件;时间固定在最右侧。
       Row() {
-        if (this.getCategoryFor(item.categoryId)) {
-          Row() {
-            Rect({ width: 9, height: 9 })
-              .fill(this.getCategoryColor(item.categoryId))
-            Text(this.getCategoryName(item.categoryId))
-              .fontSize(12)
-              .fontColor($r('app.color.text_faint'))
-              .margin({ left: 5 })
-          }
+        if (this.hasActivityBadges(item)) {
+          TopicMetadataBadges({
+            category: this.getCategoryFor(item.categoryId),
+            parentCategory: this.getParentCategoryFor(item.categoryId),
+            tags: item.tags
+          })
+            .layoutWeight(1)
+        } else {
+          Blank()
         }
-        Blank()
         Text(RelativeTime.fromNow(item.createdAt))
           .fontSize(12)
           .fontColor($r('app.color.text_faint'))
+          .margin({ left: 8 })
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
       .margin({ top: 5 })
     }
     .width('100%')
@@ -1196,14 +1199,12 @@ export struct ProfilePage {
     return CategoryIndex.find(this.categories, categoryId);
   }
 
-  private getCategoryColor(categoryId?: number): string {
-    const category: TopicCategory | undefined = this.getCategoryFor(categoryId);
-    return category ? `#${category.color}` : '#6B7280';
+  private getParentCategoryFor(categoryId?: number): TopicCategory | undefined {
+    return CategoryIndex.findParent(this.categories, categoryId);
   }
 
-  private getCategoryName(categoryId?: number): string {
-    const category: TopicCategory | undefined = this.getCategoryFor(categoryId);
-    return category ? category.name : '';
+  private hasActivityBadges(item: UserActivityItem): boolean {
+    return this.getCategoryFor(item.categoryId) !== undefined || item.tags.length > 0;
   }
 
   // 千位缩写:与 Discourse 列表一致(1.2k / 12k)。纯整数运算避免浮点尾差。

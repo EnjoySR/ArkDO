@@ -258,7 +258,9 @@ export class UserProfileService {
     const item: UserActivityItem = {
       actionType: sourceAction.action_type,
       topicId: sourceAction.topic_id,
-      title: sourceAction.title
+      title: sourceAction.title,
+      // /user_actions.json 只返回 category_id,不含 tags 字段(实测),故最近活动仅显示分类,无标签。
+      tags: []
     };
     if (typeof sourceAction.post_number === 'number' && sourceAction.post_number > 1) {
       item.postNumber = sourceAction.post_number;

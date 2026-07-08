@@ -364,15 +364,6 @@ export struct PostRichContent {
           })
       }
 
-      if (!this.isSmallImage(block) && block.alt && block.alt.length > 0) {
-        Text(block.alt)
-          .fontSize(12)
-          .fontColor('#6B7280')
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 6 })
-          .width('100%')
-      }
     }
     .width('100%')
     .margin({ top: marginTop })
