@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 const LOG_TAG: string = '[ArkDO][TopicReadState]';
 
 // 从详情页回传给列表页的"已读状态"更新:离开详情页时结算一次,
@@ -30,12 +31,12 @@ export class TopicReadStateEventBus {
       listeners.push(listener);
     });
 
-    console.info(`${LOG_TAG} publish topicId=${state.topicId} unseen=${state.unseen} unreadPosts=${state.unreadPosts} listeners=${listeners.length}`);
+    Log.i(`${LOG_TAG} publish topicId=${state.topicId} unseen=${state.unseen} unreadPosts=${state.unreadPosts} listeners=${listeners.length}`);
     for (let index: number = 0; index < listeners.length; index++) {
       try {
         listeners[index](state);
       } catch (error) {
-        console.info(`${LOG_TAG} listener failed topicId=${state.topicId} error=${JSON.stringify(error)}`);
+        Log.i(`${LOG_TAG} listener failed topicId=${state.topicId} error=${JSON.stringify(error)}`);
       }
     }
   }

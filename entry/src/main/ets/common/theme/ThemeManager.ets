@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 
@@ -52,7 +53,7 @@ export class ThemeManager {
       const raw: string = store.getSync(PREF_KEY_THEME_MODE, ThemeMode.SYSTEM) as string;
       mode = ThemeManager.parseMode(raw);
     } catch (err) {
-      console.error(`${LOG_TAG} read theme mode failed: ${JSON.stringify(err)}`);
+      Log.e(`${LOG_TAG} read theme mode failed: ${JSON.stringify(err)}`);
     }
     AppStorage.setOrCreate(THEME_MODE_STORAGE_KEY, mode);
     ThemeManager.applyColorMode(context, mode);
@@ -67,7 +68,7 @@ export class ThemeManager {
       store.putSync(PREF_KEY_THEME_MODE, mode);
       store.flush();
     } catch (err) {
-      console.error(`${LOG_TAG} persist theme mode failed: ${JSON.stringify(err)}`);
+      Log.e(`${LOG_TAG} persist theme mode failed: ${JSON.stringify(err)}`);
     }
   }
 
@@ -75,7 +76,7 @@ export class ThemeManager {
     try {
       context.getApplicationContext().setColorMode(ThemeManager.toColorMode(mode));
     } catch (err) {
-      console.error(`${LOG_TAG} setColorMode failed: ${JSON.stringify(err)}`);
+      Log.e(`${LOG_TAG} setColorMode failed: ${JSON.stringify(err)}`);
     }
   }
 }

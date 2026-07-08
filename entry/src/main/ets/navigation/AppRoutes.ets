@@ -2,7 +2,8 @@ export enum AppRouteName {
   TOPIC_DETAIL = 'topicDetail',
   PROFILE = 'profile',
   WEB = 'web',
-  NOTIFICATIONS = 'notifications'
+  NOTIFICATIONS = 'notifications',
+  BOOKMARKS = 'bookmarks'
 }
 
 export interface TopicDetailRouteParam {
@@ -21,6 +22,24 @@ export interface ProfileRouteParam {
 
 export interface NotificationsRouteParam {
   source: string;
+}
+
+export interface BookmarksRouteParam {
+  username: string;
+}
+
+export function buildBookmarksRouteParam(username: string): BookmarksRouteParam {
+  return {
+    username: username
+  };
+}
+
+export function isBookmarksRouteParam(param: Object | undefined): boolean {
+  if (!param) {
+    return false;
+  }
+  const candidate: BookmarksRouteParam = param as BookmarksRouteParam;
+  return typeof candidate.username === 'string' && candidate.username.length > 0;
 }
 
 export function buildNotificationsRouteParam(source: string): NotificationsRouteParam {

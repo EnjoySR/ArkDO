@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { isChallengeCompletionResponse } from '../../services/challenge/ChallengeCompletionDetector';
@@ -77,12 +78,12 @@ export struct CfChallengePage {
           WebSessionManager.applyUserAgent(this.controller, 'CfChallengePage');
         })
         .onPageBegin((event: OnPageBeginEvent) => {
-          console.info(`${LOG_TAG} page begin url=${this.safeUrlLabel(event.url)}`);
+          Log.i(`${LOG_TAG} page begin url=${this.safeUrlLabel(event.url)}`);
           this.logDiagnostic('pageBegin', `url=${this.safeUrlLabel(event.url)}`);
           this.startChallengeCookiePolling();
         })
         .onPageEnd((event: OnPageEndEvent) => {
-          console.info(`${LOG_TAG} page end url=${this.safeUrlLabel(event.url)}`);
+          Log.i(`${LOG_TAG} page end url=${this.safeUrlLabel(event.url)}`);
           WebSessionManager.saveCookies('CfChallengePage');
           this.logDiagnostic('pageEnd', `url=${this.safeUrlLabel(event.url)}`);
           this.resolveIfCfClearanceExists('pageEnd');
@@ -90,7 +91,7 @@ export struct CfChallengePage {
         .onErrorReceive((event: OnErrorReceiveEvent) => {
           const url: string = this.safeRequestUrl(event.request);
           const code: number = this.safeErrorCode(event.error);
-          console.info(`${LOG_TAG} load error url=${this.safeUrlLabel(url)} code=${code} info=${this.safeErrorInfo(event.error)}`);
+          Log.i(`${LOG_TAG} load error url=${this.safeUrlLabel(url)} code=${code} info=${this.safeErrorInfo(event.error)}`);
           this.logDiagnostic('loadError', `url=${this.safeUrlLabel(url)} code=${code}`);
         })
         .onHttpErrorReceive((event: OnHttpErrorReceiveEvent) => {
@@ -98,7 +99,7 @@ export struct CfChallengePage {
           const statusCode: number = this.safeResponseCode(event.response);
           const isMainFrame: boolean = this.safeIsMainFrame(event.request);
           const cfMitigatedHeader: string = this.safeResponseHeader(event.response, 'cf-mitigated');
-          console.info(`${LOG_TAG} http error url=${this.safeUrlLabel(url)} status=${statusCode} mainFrame=${isMainFrame} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)} reason=${this.safeReasonMessage(event.response)}`);
+          Log.i(`${LOG_TAG} http error url=${this.safeUrlLabel(url)} status=${statusCode} mainFrame=${isMainFrame} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)} reason=${this.safeReasonMessage(event.response)}`);
           this.logDiagnostic('httpError', `url=${this.safeUrlLabel(url)} status=${statusCode} mainFrame=${isMainFrame} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)}`);
           if (this.resolveIfChallengeCompletionResponse(url, statusCode, isMainFrame, cfMitigatedHeader)) {
             return;
@@ -119,7 +120,7 @@ export struct CfChallengePage {
     }
 
     this.challengePollCount = 0;
-    console.info(`${LOG_TAG} cf_clearance polling start`);
+    Log.i(`${LOG_TAG} cf_clearance polling start`);
     this.logDiagnostic('pollStart', 'start');
     this.challengePollTimer = setInterval(() => {
       this.challengePollCount++;
@@ -133,12 +134,12 @@ export struct CfChallengePage {
 
       if (this.challengePollCount % 5 === 0) {
         const snapshot: CookiePresenceSnapshot = WebSessionManager.getCookiePresenceSnapshot('cf_clearance');
-        console.info(`${LOG_TAG} cf_clearance pending attempt=${this.challengePollCount}/${MAX_CHALLENGE_POLL_COUNT} cookieHeaderLength=${snapshot.headerLength}`);
+        Log.i(`${LOG_TAG} cf_clearance pending attempt=${this.challengePollCount}/${MAX_CHALLENGE_POLL_COUNT} cookieHeaderLength=${snapshot.headerLength}`);
         this.logDiagnostic('pollPending', `attempt=${this.challengePollCount}/${MAX_CHALLENGE_POLL_COUNT}`);
       }
 
       if (this.challengePollCount >= MAX_CHALLENGE_POLL_COUNT) {
-        console.info(`${LOG_TAG} cf_clearance polling timeout`);
+        Log.i(`${LOG_TAG} cf_clearance polling timeout`);
         this.stopChallengeCookiePolling();
       }
     }, CHALLENGE_POLL_INTERVAL_MS);
@@ -163,7 +164,7 @@ export struct CfChallengePage {
     }
 
     this.hasResolved = true;
-    console.info(`${LOG_TAG} cf_clearance detected stage=${stage} cookieHeaderLength=${snapshot.headerLength}`);
+    Log.i(`${LOG_TAG} cf_clearance detected stage=${stage} cookieHeaderLength=${snapshot.headerLength}`);
     this.logDiagnostic('resolvedByCookie', `stage=${stage}`);
     WebSessionManager.saveCookies('CfChallengePage');
     this.stopChallengeCookiePolling();
@@ -191,7 +192,7 @@ export struct CfChallengePage {
     }
 
     this.hasResolved = true;
-    console.info(`${LOG_TAG} challenge resolved by api probe stage=${stage}`);
+    Log.i(`${LOG_TAG} challenge resolved by api probe stage=${stage}`);
     this.logDiagnostic('resolvedByApiProbe', `stage=${stage}`);
     WebSessionManager.saveCookies('CfChallengePage');
     this.stopChallengeCookiePolling();
@@ -213,7 +214,7 @@ export struct CfChallengePage {
     }
 
     this.hasResolved = true;
-    console.info(`${LOG_TAG} challenge resolved by source 404 url=${this.safeUrlLabel(url)} status=${statusCode} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)}`);
+    Log.i(`${LOG_TAG} challenge resolved by source 404 url=${this.safeUrlLabel(url)} status=${statusCode} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)}`);
     this.logDiagnostic('resolvedBySource404', `url=${this.safeUrlLabel(url)} status=${statusCode} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)}`);
     WebSessionManager.saveCookies('CfChallengePage');
     this.stopChallengeCookiePolling();
@@ -223,7 +224,7 @@ export struct CfChallengePage {
 
   private logDiagnostic(stage: string, detail: string): void {
     const snapshot: CookiePresenceSnapshot = WebSessionManager.getCookiePresenceSnapshot('cf_clearance');
-    console.info(`${DIAG_TAG} stage=${stage} hasCfClearance=${snapshot.hasCookie} cookieHeaderLength=${snapshot.headerLength} pollCount=${this.challengePollCount} timerActive=${this.challengePollTimer >= 0} hasResolved=${this.hasResolved} apiProbeRunning=${this.isApiProbeRunning} ${detail}`);
+    Log.i(`${DIAG_TAG} stage=${stage} hasCfClearance=${snapshot.hasCookie} cookieHeaderLength=${snapshot.headerLength} pollCount=${this.challengePollCount} timerActive=${this.challengePollTimer >= 0} hasResolved=${this.hasResolved} apiProbeRunning=${this.isApiProbeRunning} ${detail}`);
   }
 
   private safeUrlLabel(url: string): string {

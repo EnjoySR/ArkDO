@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 const LOG_TAG: string = '[ArkDO][NotificationBus]';
 
 // 头像未读数快照。unread=常规未读(蓝点数字);highPriority=高优先级(私信等)。
@@ -33,12 +34,12 @@ export class NotificationEventBus {
       listeners.push(listener);
     });
 
-    console.info(`${LOG_TAG} publish unread=${snapshot.unread} highPriority=${snapshot.highPriority} listeners=${listeners.length}`);
+    Log.i(`${LOG_TAG} publish unread=${snapshot.unread} highPriority=${snapshot.highPriority} listeners=${listeners.length}`);
     for (let index: number = 0; index < listeners.length; index++) {
       try {
         listeners[index](snapshot);
       } catch (error) {
-        console.info(`${LOG_TAG} listener failed error=${JSON.stringify(error)}`);
+        Log.i(`${LOG_TAG} listener failed error=${JSON.stringify(error)}`);
       }
     }
   }

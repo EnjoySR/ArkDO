@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import {
   CookedHtmlParser,
   RichBlock,
@@ -322,10 +323,10 @@ export struct PostRichContent {
       pasteboard.getSystemPasteboard().setData(data).then(() => {
         this.getUIContext().getPromptAction().showToast({ message: '已复制', duration: 1500 });
       }).catch((err: Object) => {
-        console.error(`${LOG_TAG} copy code failed: ${JSON.stringify(err)}`);
+        Log.e(`${LOG_TAG} copy code failed: ${JSON.stringify(err)}`);
       });
     } catch (err) {
-      console.error(`${LOG_TAG} copy code failed: ${JSON.stringify(err)}`);
+      Log.e(`${LOG_TAG} copy code failed: ${JSON.stringify(err)}`);
     }
   }
 
@@ -884,7 +885,7 @@ export struct PostRichContent {
     if (url.length === 0) {
       return;
     }
-    console.info(`${LOG_TAG} link clicked url=${this.safeLinkLabel(url)}`);
+    Log.i(`${LOG_TAG} link clicked url=${this.safeLinkLabel(url)}`);
     this.onOpenLink(url);
   }
 

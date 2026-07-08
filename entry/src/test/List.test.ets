@@ -15,6 +15,7 @@ import themeManagerTest from './ThemeManager.test';
 import reactionMutationTest from './ReactionMutation.test';
 import userProfileServiceTest from './UserProfileService.test';
 import categoryIndexTest from './CategoryIndex.test';
+import bookmarkServiceTest from './BookmarkService.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -33,4 +34,5 @@ export default function testsuite() {
   themeManagerTest();
   userProfileServiceTest();
   categoryIndexTest();
+  bookmarkServiceTest();
 }

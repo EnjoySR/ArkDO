@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import { ChallengeState } from '../network/NetworkTypes';
 
 const LOG_TAG: string = '[ArkDO][Challenge]';
@@ -42,13 +43,13 @@ export class ChallengeEventBus {
       listeners.push(listener);
     });
 
-    console.info(`${LOG_TAG} required version=${version} source=${source} status=${statusCode} state=${challengeState} listenerCount=${listeners.length}`);
-    console.info(`${DIAG_TAG} stage=eventBusNotify version=${version} source=${source} status=${statusCode} state=${challengeState} listenerCount=${listeners.length}`);
+    Log.i(`${LOG_TAG} required version=${version} source=${source} status=${statusCode} state=${challengeState} listenerCount=${listeners.length}`);
+    Log.i(`${DIAG_TAG} stage=eventBusNotify version=${version} source=${source} status=${statusCode} state=${challengeState} listenerCount=${listeners.length}`);
     for (let index: number = 0; index < listeners.length; index++) {
       try {
         listeners[index](event);
       } catch (error) {
-        console.info(`${LOG_TAG} listener failed version=${version} error=${JSON.stringify(error)}`);
+        Log.i(`${LOG_TAG} listener failed version=${version} error=${JSON.stringify(error)}`);
       }
     }
 

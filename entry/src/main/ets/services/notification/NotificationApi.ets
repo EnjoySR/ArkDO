@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { NotificationItem, RawNotification, RawNotificationData, RawNotificationsResponse } from '../../models/Notification';
 import { JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
@@ -95,7 +96,7 @@ export class NotificationApi {
       };
     }
 
-    console.info(`${LOG_TAG} loaded count=${items.length} recent=${recent} offset=${offset}`);
+    Log.i(`${LOG_TAG} loaded count=${items.length} recent=${recent} offset=${offset}`);
     return {
       success: true,
       statusCode: response.statusCode,
@@ -110,7 +111,7 @@ export class NotificationApi {
       referrer: `${AppConstants.BASE_URL}/`,
       notifyChallenge: false
     });
-    console.info(`${LOG_TAG} markRead id=${id} success=${response.success}`);
+    Log.i(`${LOG_TAG} markRead id=${id} success=${response.success}`);
     return response.success;
   }
 
@@ -120,7 +121,7 @@ export class NotificationApi {
       referrer: `${AppConstants.BASE_URL}/`,
       notifyChallenge: false
     });
-    console.info(`${LOG_TAG} markAllRead success=${response.success}`);
+    Log.i(`${LOG_TAG} markAllRead success=${response.success}`);
     return response.success;
   }
 

@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import { NotificationItem } from '../../models/Notification';
 import { NotificationApi } from '../../services/notification/NotificationApi';
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
@@ -196,7 +197,7 @@ export struct NotificationPage {
     if (!result.success || result.data === undefined) {
       this.loadFailed = true;
       this.message = '通知加载失败,请重试';
-      console.info(`${LOG_TAG} initial load failed status=${result.statusCode}`);
+      Log.i(`${LOG_TAG} initial load failed status=${result.statusCode}`);
       return;
     }
 
@@ -219,7 +220,7 @@ export struct NotificationPage {
     this.isLoadingMore = false;
 
     if (!result.success || result.data === undefined) {
-      console.info(`${LOG_TAG} load more failed status=${result.statusCode}`);
+      Log.i(`${LOG_TAG} load more failed status=${result.statusCode}`);
       return;
     }
 

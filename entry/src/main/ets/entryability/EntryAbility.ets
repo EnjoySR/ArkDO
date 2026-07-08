@@ -1,7 +1,10 @@
-import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { Log } from '../services/logging/Log';
+import { AbilityConstant, errorManager, UIAbility, Want } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { ThemeManager } from '../common/theme/ThemeManager';
+import { FileLogger } from '../services/logging/FileLogger';
 import { AppStateEventBus } from '../services/session/AppStateEventBus';
 import { LINUXDO_FA_SYMBOLS_RAWFILE, loadFaIconsFromRawContent } from '../views/components/FaIcon';
 import { LINUXDO_TAG_ICONS_RAWFILE, loadTagIconsFromRawContent } from '../views/components/TagIconRegistry';
@@ -9,7 +12,12 @@ import { LINUXDO_TAG_ICONS_RAWFILE, loadTagIconsFromRawContent } from '../views/
 const DOMAIN = 0x0000;
 
 export default class EntryAbility extends UIAbility {
+  private crashObserverId: number = -1;
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    // 日志系统须最先初始化,后续经 Log 门面写入的日志才能落盘。
+    FileLogger.init(this.context);
+    this.registerCrashHandler();
     ThemeManager.init(this.context);
     this.loadIconAssets();
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
@@ -17,6 +25,8 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
+    this.unregisterCrashHandler();
+    FileLogger.flush();
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -47,6 +57,36 @@ export default class EntryAbility extends UIAbility {
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
     AppStateEventBus.notifyForegroundChanged(false);
+    // 退后台可能随即被系统回收,把缓冲日志强制落盘,避免丢最后一段。
+    FileLogger.flush();
+  }
+
+  // 全局未捕获异常:崩溃堆栈写入日志并立即刷盘,导出日志里保留闪退现场。
+  private registerCrashHandler(): void {
+    try {
+      this.crashObserverId = errorManager.on('error', {
+        onUnhandledException: (errMsg: string): void => {
+          Log.e(`[ArkDO][Crash] unhandledException: ${errMsg}`);
+          FileLogger.flush();
+        }
+      });
+    } catch (err) {
+      const error: BusinessError = err as BusinessError;
+      hilog.error(DOMAIN, 'testTag', 'register crash handler failed: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  private unregisterCrashHandler(): void {
+    if (this.crashObserverId < 0) {
+      return;
+    }
+    try {
+      errorManager.off('error', this.crashObserverId);
+    } catch (err) {
+      const error: BusinessError = err as BusinessError;
+      hilog.error(DOMAIN, 'testTag', 'unregister crash handler failed: %{public}s', JSON.stringify(error));
+    }
+    this.crashObserverId = -1;
   }
 
   private loadIconAssets(): void {

@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 const LOG_TAG: string = '[ArkDO][AppState]';
 
 export type AppForegroundListener = (isForeground: boolean) => void;
@@ -26,12 +27,12 @@ export class AppStateEventBus {
       listeners.push(listener);
     });
 
-    console.info(`${LOG_TAG} foreground=${isForeground} listenerCount=${listeners.length}`);
+    Log.i(`${LOG_TAG} foreground=${isForeground} listenerCount=${listeners.length}`);
     for (let index: number = 0; index < listeners.length; index++) {
       try {
         listeners[index](isForeground);
       } catch (error) {
-        console.info(`${LOG_TAG} listener failed error=${JSON.stringify(error)}`);
+        Log.i(`${LOG_TAG} listener failed error=${JSON.stringify(error)}`);
       }
     }
   }

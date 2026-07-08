@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 const LOG_TAG: string = '[ArkDO][Session]';
 
 export type SessionChangedListener = (version: number) => void;
@@ -26,12 +27,12 @@ export class SessionEventBus {
       listeners.push(listener);
     });
 
-    console.info(`${LOG_TAG} session changed version=${version} listenerCount=${listeners.length}`);
+    Log.i(`${LOG_TAG} session changed version=${version} listenerCount=${listeners.length}`);
     for (let index: number = 0; index < listeners.length; index++) {
       try {
         listeners[index](version);
       } catch (error) {
-        console.info(`${LOG_TAG} listener failed version=${version} error=${JSON.stringify(error)}`);
+        Log.i(`${LOG_TAG} listener failed version=${version} error=${JSON.stringify(error)}`);
       }
     }
 

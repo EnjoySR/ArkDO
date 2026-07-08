@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { CookiePresenceSnapshot } from '../../services/web/WebSessionManager';
@@ -52,25 +53,25 @@ export struct LoginPage {
         .imageAccess(true)
         .cacheMode(CacheMode.Default)
         .onPageBegin((event: OnPageBeginEvent) => {
-          console.info(`${LOG_TAG} page begin url=${event.url}`);
+          Log.i(`${LOG_TAG} page begin url=${event.url}`);
         })
         .onPageEnd((event: OnPageEndEvent) => {
-          console.info(`${LOG_TAG} page end url=${event.url}`);
+          Log.i(`${LOG_TAG} page end url=${event.url}`);
           WebSessionManager.saveCookies('LoginPage');
           this.logCfClearanceSnapshot('pageEnd');
           if (this.isLikelyLoggedInUrl(event.url)) {
-            console.info(`${LOG_TAG} login success detected url=${event.url}`);
+            Log.i(`${LOG_TAG} login success detected url=${event.url}`);
             this.stopChallengeCookiePolling();
             this.onLoginSuccess();
           }
         })
         .onErrorReceive((event: OnErrorReceiveEvent) => {
-          console.info(`${LOG_TAG} load error url=${this.safeRequestUrl(event.request)} code=${this.safeErrorCode(event.error)} info=${this.safeErrorInfo(event.error)}`);
+          Log.i(`${LOG_TAG} load error url=${this.safeRequestUrl(event.request)} code=${this.safeErrorCode(event.error)} info=${this.safeErrorInfo(event.error)}`);
         })
         .onHttpErrorReceive((event: OnHttpErrorReceiveEvent) => {
           const url: string = this.safeRequestUrl(event.request);
           const statusCode: number = this.safeResponseCode(event.response);
-          console.info(`${LOG_TAG} http error url=${url} status=${statusCode} reason=${this.safeReasonMessage(event.response)}`);
+          Log.i(`${LOG_TAG} http error url=${url} status=${statusCode} reason=${this.safeReasonMessage(event.response)}`);
           if (this.isChallengeRelatedHttpError(url, statusCode)) {
             this.startChallengeCookiePolling();
           }
@@ -106,12 +107,12 @@ export struct LoginPage {
     }
 
     this.challengePollCount = 0;
-    console.info(`${LOG_TAG} cf_clearance polling start`);
+    Log.i(`${LOG_TAG} cf_clearance polling start`);
     this.challengePollTimer = setInterval(() => {
       this.challengePollCount++;
       const snapshot: CookiePresenceSnapshot = WebSessionManager.getCookiePresenceSnapshot('cf_clearance');
       if (snapshot.hasCookie) {
-        console.info(`${LOG_TAG} cf_clearance detected, reload login`);
+        Log.i(`${LOG_TAG} cf_clearance detected, reload login`);
         WebSessionManager.saveCookies('LoginPage');
         this.stopChallengeCookiePolling();
         this.reloadLoginAfterChallenge();
@@ -119,11 +120,11 @@ export struct LoginPage {
       }
 
       if (this.challengePollCount % 5 === 0) {
-        console.info(`${LOG_TAG} cf_clearance pending attempt=${this.challengePollCount}/${MAX_CHALLENGE_POLL_COUNT} cookieHeaderLength=${snapshot.headerLength}`);
+        Log.i(`${LOG_TAG} cf_clearance pending attempt=${this.challengePollCount}/${MAX_CHALLENGE_POLL_COUNT} cookieHeaderLength=${snapshot.headerLength}`);
       }
 
       if (this.challengePollCount >= MAX_CHALLENGE_POLL_COUNT) {
-        console.info(`${LOG_TAG} cf_clearance polling timeout`);
+        Log.i(`${LOG_TAG} cf_clearance polling timeout`);
         this.stopChallengeCookiePolling();
       }
     }, CHALLENGE_POLL_INTERVAL_MS);
@@ -146,13 +147,13 @@ export struct LoginPage {
     try {
       this.controller.loadUrl(AppConstants.LOGIN_URL);
     } catch (error) {
-      console.info(`${LOG_TAG} reload login failed error=${JSON.stringify(error)}`);
+      Log.i(`${LOG_TAG} reload login failed error=${JSON.stringify(error)}`);
     }
   }
 
   private logCfClearanceSnapshot(stage: string): void {
     const snapshot: CookiePresenceSnapshot = WebSessionManager.getCookiePresenceSnapshot('cf_clearance');
-    console.info(`${LOG_TAG} cf_clearance snapshot stage=${stage} exists=${snapshot.hasCookie} cookieHeaderLength=${snapshot.headerLength}`);
+    Log.i(`${LOG_TAG} cf_clearance snapshot stage=${stage} exists=${snapshot.hasCookie} cookieHeaderLength=${snapshot.headerLength}`);
   }
 
   private safeRequestUrl(request: WebResourceRequest): string {

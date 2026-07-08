@@ -1,4 +1,5 @@
-import { AppRouteName, buildNotificationsRouteParam, buildProfileRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { Log } from '../../services/logging/Log';
+import { AppRouteName, BookmarksRouteParam, buildBookmarksRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -20,6 +21,7 @@ import { HomePage } from './HomePage';
 import { LoginPage } from './LoginPage';
 import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
+import { BookmarksPage } from './BookmarksPage';
 import { TopicDetailPage } from './TopicDetailPage';
 import { WebViewPage } from './WebViewPage';
 
@@ -186,6 +188,24 @@ export struct RootTabPage {
           },
           onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
             this.openTopicDetailById(topicId, undefined, title, postNumber, postNumber !== undefined);
+          },
+          onOpenBookmarks: (username: string) => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.BOOKMARKS, buildBookmarksRouteParam(username)));
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else if (name === AppRouteName.BOOKMARKS && isBookmarksRouteParam(param)) {
+      NavDestination() {
+        BookmarksPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as BookmarksRouteParam).username,
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
+            this.openTopicDetailById(topicId, undefined, title, postNumber, postNumber !== undefined);
           }
         })
       }
@@ -290,7 +310,7 @@ export struct RootTabPage {
   // 按帖子 ID 跳转详情的通用入口(slug/title 可选,缺省时详情页按 id 加载)。
   // targetPostNumber:定位楼号(未读徽标/通知);highlightTarget:落地后短暂高亮目标楼(通知)。
   private openTopicDetailById(topicId: number, slug?: string, title?: string, targetPostNumber?: number, highlightTarget?: boolean): void {
-    console.info(`${LOG_TAG} open topic detail topicId=${topicId} title=${title ? title : ''} target=${targetPostNumber ?? 0}`);
+    Log.i(`${LOG_TAG} open topic detail topicId=${topicId} title=${title ? title : ''} target=${targetPostNumber ?? 0}`);
     this.navPathStack.pushPath(new NavPathInfo(
       AppRouteName.TOPIC_DETAIL,
       buildTopicDetailRouteParam(topicId, slug, title ? title : '', targetPostNumber, highlightTarget)
@@ -302,7 +322,7 @@ export struct RootTabPage {
   private handleOpenLink(url: string): void {
     const target: LinkTarget = LinkRouter.resolve(url);
     if (target.kind === LinkTargetKind.TOPIC && target.topicId !== undefined) {
-      console.info(`${LOG_TAG} link -> native topic detail topicId=${target.topicId}`);
+      Log.i(`${LOG_TAG} link -> native topic detail topicId=${target.topicId}`);
       this.openTopicDetailById(target.topicId);
       return;
     }
@@ -340,7 +360,7 @@ export struct RootTabPage {
     try {
       this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
     } catch (err) {
-      console.info(`${LOG_TAG} toast failed: ${message}`);
+      Log.i(`${LOG_TAG} toast failed: ${message}`);
     }
   }
 
@@ -348,7 +368,7 @@ export struct RootTabPage {
     if (!url || url.length === 0) {
       return;
     }
-    console.info(`${LOG_TAG} open web page host=${url.replace(/^https?:\/\/([^\/?#]+).*$/i, '$1')}`);
+    Log.i(`${LOG_TAG} open web page host=${url.replace(/^https?:\/\/([^\/?#]+).*$/i, '$1')}`);
     this.navPathStack.pushPath(new NavPathInfo(AppRouteName.WEB, buildWebRouteParam(url, title)));
   }
 
@@ -369,13 +389,13 @@ export struct RootTabPage {
   private ensureIconSymbolsLoaded(): void {
     const hostContext: Context | undefined = this.getUIContext().getHostContext();
     if (!hostContext) {
-      console.info(`${LOG_TAG} icon symbols load skipped: no host context`);
+      Log.i(`${LOG_TAG} icon symbols load skipped: no host context`);
       return;
     }
 
     const iconCount: number = ensureFaIconsLoaded(hostContext.resourceManager);
     const tagIconCount: number = ensureTagIconsLoaded(hostContext.resourceManager);
-    console.info(`${LOG_TAG} icon assets loaded symbols=${iconCount} tagIcons=${tagIconCount}`);
+    Log.i(`${LOG_TAG} icon assets loaded symbols=${iconCount} tagIcons=${tagIconCount}`);
   }
 
   private handleLoginSuccess(): void {
@@ -424,7 +444,7 @@ export struct RootTabPage {
     if (result.success) {
       this.lastSessionCheckFailed = false;
       this.currentUser = result.data;
-      console.info(`${LOG_TAG} current user checked loggedIn=${this.currentUser !== undefined} username=${this.currentUser?.username ?? ''} hasAvatar=${this.currentUser?.avatarTemplate !== undefined}`);
+      Log.i(`${LOG_TAG} current user checked loggedIn=${this.currentUser !== undefined} username=${this.currentUser?.username ?? ''} hasAvatar=${this.currentUser?.avatarTemplate !== undefined}`);
       // 登录:本次响应已带未读数,立即广播一次(铃铛与头像同帧出现),再启动前台轮询;
       // 登出:停表并清零。
       if (this.currentUser !== undefined) {
@@ -442,13 +462,13 @@ export struct RootTabPage {
     // 检查失败(CF 盾/网络抖动)≠确认未登录:保持上一次的登录状态与通知轮询不动,
     // 仅记失败标记,等下一次下拉刷新时补查。只有成功响应且 current_user 为空才真正置为未登录。
     this.lastSessionCheckFailed = true;
-    console.info(`${LOG_TAG} current user check failed status=${result.statusCode} challenge=${result.challengeState}, keep previous loggedIn=${this.currentUser !== undefined}`);
+    Log.i(`${LOG_TAG} current user check failed status=${result.statusCode} challenge=${result.challengeState}, keep previous loggedIn=${this.currentUser !== undefined}`);
   }
 
   // 下拉刷新时的会话补查:仅在上次检查失败(状态可能不真实)时重查一次,正常情况零开销。
   private recheckSessionIfNeeded(): void {
     if (this.lastSessionCheckFailed && !this.isCheckingSession) {
-      console.info(`${LOG_TAG} recheck session after previous failure`);
+      Log.i(`${LOG_TAG} recheck session after previous failure`);
       this.checkCurrentUser();
     }
   }
@@ -468,20 +488,20 @@ export struct RootTabPage {
     }
 
     this.handledChallengeVersion = event.version;
-    console.info(`${LOG_TAG} challenge required version=${event.version} source=${event.source} status=${event.statusCode} state=${event.challengeState}`);
-    console.info(`${DIAG_TAG} stage=rootChallengeRequired version=${event.version} source=${event.source} status=${event.statusCode} state=${event.challengeState} activeSheet=${this.activeSheet} sheetVisible=${this.isSheetVisible}`);
+    Log.i(`${LOG_TAG} challenge required version=${event.version} source=${event.source} status=${event.statusCode} state=${event.challengeState}`);
+    Log.i(`${DIAG_TAG} stage=rootChallengeRequired version=${event.version} source=${event.source} status=${event.statusCode} state=${event.challengeState} activeSheet=${this.activeSheet} sheetVisible=${this.isSheetVisible}`);
     if (this.isSheetVisible) {
       return;
     }
 
     this.activeSheet = RootSheet.CHALLENGE;
     this.isSheetVisible = true;
-    console.info(`${DIAG_TAG} stage=rootChallengeOpen version=${event.version}`);
+    Log.i(`${DIAG_TAG} stage=rootChallengeOpen version=${event.version}`);
   }
 
   private handleChallengeResolved(): void {
-    console.info(`${LOG_TAG} challenge resolved`);
-    console.info(`${DIAG_TAG} stage=rootChallengeResolved sheetVisible=${this.isSheetVisible}`);
+    Log.i(`${LOG_TAG} challenge resolved`);
+    Log.i(`${DIAG_TAG} stage=rootChallengeResolved sheetVisible=${this.isSheetVisible}`);
     this.closeChallengePage();
     // 会话变化会触发 host webview 重载,先关闭就绪门闩,确保随后并发的 fetch 排队到重载完成后。
     this.bridge.markHostReloading();

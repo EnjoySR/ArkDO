@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 
@@ -120,7 +121,7 @@ export struct WebViewPage {
         return;
       }
     } catch (error) {
-      console.info(`${LOG_TAG} accessBackward failed: ${JSON.stringify(error)}`);
+      Log.i(`${LOG_TAG} accessBackward failed: ${JSON.stringify(error)}`);
     }
     this.onBack();
   }

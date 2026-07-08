@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import { fileUri } from '@kit.CoreFileKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { common, Want, wantConstant } from '@kit.AbilityKit';
@@ -43,11 +44,11 @@ export class DownloadService {
         flags: wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION
       };
       context.startAbility(want).catch((err: BusinessError) => {
-        console.info(`${LOG_TAG} open ability failed code=${err.code} msg=${err.message}`);
+        Log.i(`${LOG_TAG} open ability failed code=${err.code} msg=${err.message}`);
       });
     } catch (err) {
       const error: BusinessError = err as BusinessError;
-      console.info(`${LOG_TAG} open with system failed code=${error.code}`);
+      Log.i(`${LOG_TAG} open with system failed code=${error.code}`);
     }
   }
 

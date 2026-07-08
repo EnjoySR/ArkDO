@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
@@ -68,20 +69,20 @@ export struct ArkWebHost {
     }
 
     if (!this.isControllerReady) {
-      console.info(`${LOG_TAG} session changed before controller ready version=${version}`);
+      Log.i(`${LOG_TAG} session changed before controller ready version=${version}`);
       return;
     }
 
     try {
       this.handledSessionVersion = version;
-      console.info(`${LOG_TAG} reload base url for session version=${version}`);
+      Log.i(`${LOG_TAG} reload base url for session version=${version}`);
       // 重载开始前先关门:注入式 fetch 会排队等到重载后的 onPageEnd 再执行,避免落在被销毁的文档上。
       this.bridge.markHostReloading();
       this.controller.loadUrl(AppConstants.BASE_URL);
     } catch (error) {
       // loadUrl 抛异常时不会有后续 onPageEnd,需立即放行等待者以免请求悬住。
       this.bridge.markHostReady();
-      console.info(`${LOG_TAG} reload base url failed version=${version} error=${JSON.stringify(error)}`);
+      Log.i(`${LOG_TAG} reload base url failed version=${version} error=${JSON.stringify(error)}`);
     }
   }
 

@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 const LOG_TAG: string = '[ArkDO][DownloadBus]';
 
 // 一次附件下载的结果(由 host webview 的下载委托回调产生,派发给页面做 toast + 打开)。
@@ -29,12 +30,12 @@ export class DownloadEventBus {
     DownloadEventBus.listeners.forEach((listener: DownloadResultListener) => {
       snapshot.push(listener);
     });
-    console.info(`${LOG_TAG} notify success=${result.success} file=${result.fileName} listeners=${snapshot.length}`);
+    Log.i(`${LOG_TAG} notify success=${result.success} file=${result.fileName} listeners=${snapshot.length}`);
     for (let index: number = 0; index < snapshot.length; index++) {
       try {
         snapshot[index](result);
       } catch (error) {
-        console.info(`${LOG_TAG} listener failed error=${JSON.stringify(error)}`);
+        Log.i(`${LOG_TAG} listener failed error=${JSON.stringify(error)}`);
       }
     }
   }

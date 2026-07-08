@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
 import { Poll, PollVoteResult, PostBoost, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { TopicCategory, TopicTag } from '../../models/Topic';
@@ -60,8 +61,10 @@ export struct TopicDetailPage {
   // 靠 @Watch 就地起播(已加载路径的楼内跳转)。短暂生效后清零,避免楼层销毁重建时重播。
   @State private flashTargetPostId: number = 0;
   private flashClearTimerId: number = -1;
-  // 当前视口首项的 List 下标(onScrollIndex 持续更新):头插落在布局范围内时据此手动重锚。
+  // 当前视口首/末项的 List 下标(onScrollIndex 持续更新):头插落在布局范围内时据此手动重锚;
+  // 跳楼时据此判断目标楼是否已在屏内(在屏内则不滚动)。
   private currentStartListIndex: number = 0;
+  private currentEndListIndex: number = 0;
   // 跳未加载楼的重开窗口请求进行中(防重入 + 顶部悬浮胶囊提示)。请求期间旧列表原样保留,不白屏。
   @State private isRewindowing: boolean = false;
   // List 重建开关:翻转值使 build 里的 if/else 换分支,同一帧销毁旧 List、全新重建
@@ -248,6 +251,7 @@ export struct TopicDetailPage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .onScrollIndex((start: number, end: number) => {
       this.currentStartListIndex = start;
+      this.currentEndListIndex = end;
       // List 的 index 0 是 TopicSummary,楼层从 index 1 起 → 换算成 posts 下标再交给已读控制器。
       this.readController.onVisibleRange(start - 1, end - 1);
       // 摘要 ListItem 固定为 index 0:仍在视口内(start===0)显示"帖子详情",滑出后显示帖子标题与分类标签。
@@ -499,11 +503,16 @@ export struct TopicDetailPage {
   // 已加载直接平滑滚动;未加载原地重开窗口(先卸载 List 再以新窗口重建,见 rewindowToPost)。
   private async jumpToPostNumber(postNumber: number): Promise<void> {
     const index: number = this.dataSource.findIndexByPostNumber(postNumber);
-    console.info(`${LOG_TAG} jump request post=${postNumber} loadedIndex=${index}`);
+    Log.i(`${LOG_TAG} jump request post=${postNumber} loadedIndex=${index}`);
     if (index >= 0) {
-      // 已加载:平滑滚动 + 落地高亮(与重开窗口路径观感一致)。
+      // 已加载:落地高亮(与重开窗口路径观感一致)。
+      const targetListIndex: number = index + 1;
       this.armTargetFlash(this.dataSource.getData(index).id);
-      this.scroller.scrollToIndex(index + 1, true);
+      // 目标楼已在视口内(含部分可见)就不滚动,避免把它无谓地拽到屏顶;仅靠高亮提示位置。
+      if (targetListIndex >= this.currentStartListIndex && targetListIndex <= this.currentEndListIndex) {
+        return;
+      }
+      this.scroller.scrollToIndex(targetListIndex, true);
       return;
     }
     await this.rewindowToPost(postNumber);
@@ -529,7 +538,7 @@ export struct TopicDetailPage {
 
     if (!result.success || !result.data || result.data.posts.length === 0) {
       // 失败:旧列表还在原位,只提示。
-      console.info(`${LOG_TAG} rewindow failed post=${postNumber} status=${result.statusCode}`);
+      Log.i(`${LOG_TAG} rewindow failed post=${postNumber} status=${result.statusCode}`);
       this.showComposerToast('楼层定位失败，请稍后重试', 1500);
       return;
     }
@@ -551,7 +560,7 @@ export struct TopicDetailPage {
     // 翻转分支 → 旧 List 销毁、新 List 以新数据源 + initialIndex 重建,同帧完成,无加载页。
     this.listEpochEven = !this.listEpochEven;
     const posts: TopicPost[] = nextSource.getAll();
-    console.info(`${LOG_TAG} rewindow ok post=${postNumber} targetIndex=${targetIndex} stream=${stream.length} window=[${posts[0]?.postNumber}..${posts[posts.length - 1]?.postNumber}] hasEarlier=${this.hasEarlier} hasMore=${this.hasMorePosts}`);
+    Log.i(`${LOG_TAG} rewindow ok post=${postNumber} targetIndex=${targetIndex} stream=${stream.length} window=[${posts[0]?.postNumber}..${posts[posts.length - 1]?.postNumber}] hasEarlier=${this.hasEarlier} hasMore=${this.hasMorePosts}`);
   }
 
   // 武装目标楼落地高亮:短暂生效后清零,免得该楼被 LazyForEach 销毁重建时重播。
@@ -623,7 +632,7 @@ export struct TopicDetailPage {
     this.requiresChallenge = false;
     this.message = '正在加载帖子详情';
     this.loadSiteMetadataIfNeeded();
-    console.info(`${LOG_TAG} load detail start topicId=${this.param.topicId} slug=${this.getSlugLabel()}`);
+    Log.i(`${LOG_TAG} load detail start topicId=${this.param.topicId} slug=${this.getSlugLabel()}`);
 
     const result: NetworkResult<TopicDetail> =
       await new TopicService(this.bridge).getTopicDetail(this.param.topicId, this.param.slug, this.param.targetPostNumber);
@@ -660,14 +669,14 @@ export struct TopicDetailPage {
         }
       }
       this.updateLastVisitedAnchor();
-      console.info(`${LOG_TAG} load detail success topicId=${result.data.id} posts=${result.data.posts.length} stream=${result.data.stream ? result.data.stream.length : 0}`);
+      Log.i(`${LOG_TAG} load detail success topicId=${result.data.id} posts=${result.data.posts.length} stream=${result.data.stream ? result.data.stream.length : 0}`);
       this.startReadingTrackerIfNeeded();
       return;
     }
 
     this.requiresChallenge = result.error?.requiresChallenge === true;
     this.message = result.error?.message ? result.error.message : '帖子详情加载失败';
-    console.info(`${LOG_TAG} load detail failed topicId=${this.param.topicId} status=${result.statusCode}`);
+    Log.i(`${LOG_TAG} load detail failed topicId=${this.param.topicId} status=${result.statusCode}`);
   }
 
   private async loadMorePosts(): Promise<void> {
@@ -694,7 +703,7 @@ export struct TopicDetailPage {
       this.hasMorePosts = PostStreamPager.countLater(stream, this.dataSource.getAll()) > 0;
       this.loadMoreMessage = this.hasMorePosts ? '上拉加载更多' : '没有更多了';
       this.updateLastVisitedAnchor();
-      console.info(`${LOG_TAG} load more topicId=${topicId} added=${added} total=${this.postCount}`);
+      Log.i(`${LOG_TAG} load more topicId=${topicId} added=${added} total=${this.postCount}`);
       return;
     }
 
@@ -729,7 +738,7 @@ export struct TopicDetailPage {
     const stream: number[] = this.detail.stream ? this.detail.stream : [];
     const loaded: TopicPost[] = this.dataSource.getAll();
     const prevIds: number[] = PostStreamPager.collectPrevIds(stream, loaded, POSTS_PAGE_SIZE);
-    console.info(`${LOG_TAG} loadEarlier begin stream=${stream.length} loaded=${loaded.length} window=[${loaded[0]?.postNumber}..${loaded[loaded.length - 1]?.postNumber}] prevIds=${prevIds.length}`);
+    Log.i(`${LOG_TAG} loadEarlier begin stream=${stream.length} loaded=${loaded.length} window=[${loaded[0]?.postNumber}..${loaded[loaded.length - 1]?.postNumber}] prevIds=${prevIds.length}`);
     if (prevIds.length === 0) {
       this.hasEarlier = false;
       return;
@@ -750,13 +759,13 @@ export struct TopicDetailPage {
       // 视口内容会瞬移到新插入的楼——手动按"原下标 + 插入数"无动画锚回。范围外则框架已补偿,勿重复。
       if (added > 0 && startBefore - 1 <= POSTS_CACHED_COUNT) {
         this.scroller.scrollToIndex(startBefore + added, false);
-        console.info(`${LOG_TAG} manual re-anchor startBefore=${startBefore} added=${added} -> ${startBefore + added}`);
+        Log.i(`${LOG_TAG} manual re-anchor startBefore=${startBefore} added=${added} -> ${startBefore + added}`);
       }
-      console.info(`${LOG_TAG} loadEarlier ok added=${added} total=${this.postCount} hasEarlier=${this.hasEarlier} startBefore=${startBefore}`);
+      Log.i(`${LOG_TAG} loadEarlier ok added=${added} total=${this.postCount} hasEarlier=${this.hasEarlier} startBefore=${startBefore}`);
       return;
     }
 
-    console.info(`${LOG_TAG} loadEarlier failed topicId=${topicId} status=${result.statusCode} err=${result.error?.message ?? ''}`);
+    Log.i(`${LOG_TAG} loadEarlier failed topicId=${topicId} status=${result.statusCode} err=${result.error?.message ?? ''}`);
     this.showComposerToast(result.error?.message ? result.error.message : '加载更早楼层失败', 1500);
   }
 

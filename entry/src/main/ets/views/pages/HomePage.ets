@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
 import { Topic, TopicCategory } from '../../models/Topic';
@@ -270,7 +271,7 @@ export struct HomePage {
   }
 
   private jumpToTopic(topicId: number): void {
-    console.info(`${LOG_TAG} debug jump to topic topicId=${topicId}`);
+    Log.i(`${LOG_TAG} debug jump to topic topicId=${topicId}`);
     this.onOpenTopicById(topicId);
   }
 
@@ -407,7 +408,7 @@ export struct HomePage {
     }
 
     this.handledSessionVersion = version;
-    console.info(`${LOG_TAG} session changed version=${version}, refresh latest topics`);
+    Log.i(`${LOG_TAG} session changed version=${version}, refresh latest topics`);
     this.footerMessage = '会话已更新，正在刷新';
     this.refreshLatestTopics();
   }
@@ -423,7 +424,7 @@ export struct HomePage {
         if (topic.highestPostNumber !== undefined && topic.highestPostNumber > 0) {
           topic.lastReadPostNumber = Math.max(0, topic.highestPostNumber - state.unreadPosts);
         }
-        console.info(`${LOG_TAG} topic read state synced topicId=${state.topicId} unreadPosts=${state.unreadPosts}`);
+        Log.i(`${LOG_TAG} topic read state synced topicId=${state.topicId} unreadPosts=${state.unreadPosts}`);
         return;
       }
     }

@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import { ChallengeState, NetworkResult } from '../network/NetworkTypes';
 
 // ArkTS 版 Discourse screen-track:详情页停留时按 1 秒 tick 累加在屏楼层时间,
@@ -67,7 +68,7 @@ export class ReadingTracker {
     this.running = true;
     this.paused = false;
     this.startInterval();
-    console.info(`${LOG_TAG} start topicId=${topicId}`);
+    Log.i(`${LOG_TAG} start topicId=${topicId}`);
   }
 
   stop(): void {
@@ -85,7 +86,7 @@ export class ReadingTracker {
     this.flush();
     // 把队列里剩余的批次(含正好碰上 inProgress/退避而没发出的最后一批)强制发出去,避免丢读。
     this.drainRemaining();
-    console.info(`${LOG_TAG} stop topicId=${this.topicId}`);
+    Log.i(`${LOG_TAG} stop topicId=${this.topicId}`);
     this.reset();
   }
 
@@ -110,7 +111,7 @@ export class ReadingTracker {
       this.intervalId = -1;
     }
     this.paused = true;
-    console.info(`${LOG_TAG} pause topicId=${this.topicId}`);
+    Log.i(`${LOG_TAG} pause topicId=${this.topicId}`);
   }
 
   // 回到前台:重置时间基准(避免后台的巨大 diff 与过期的滚动暂停闸门)并重启 tick 循环。
@@ -123,7 +124,7 @@ export class ReadingTracker {
     this.lastScrolled = now;
     this.paused = false;
     this.startInterval();
-    console.info(`${LOG_TAG} resume topicId=${this.topicId}`);
+    Log.i(`${LOG_TAG} resume topicId=${this.topicId}`);
   }
 
   setOnscreen(postNumbers: number[]): void {
@@ -280,7 +281,7 @@ export class ReadingTracker {
         for (let index: number = 0; index < postNumbers.length; index++) {
           this.readPosts.add(postNumbers[index]);
         }
-        console.info(`${LOG_TAG} report success topicId=${item.topicId} posts=[${postNumbers.join(',')}]`);
+        Log.i(`${LOG_TAG} report success topicId=${item.topicId} posts=[${postNumbers.join(',')}]`);
         // 呼吸至少完整跑一下再收尾:清呼吸 → 触发淡出(现有 onRead 逻辑不变)。
         this.afterMinReporting(startedAt, () => {
           this.setReporting(postNumbers, false);
@@ -290,7 +291,7 @@ export class ReadingTracker {
           }
         });
       } else {
-        console.info(`${LOG_TAG} report failed topicId=${item.topicId} status=${result.statusCode} challenge=${result.challengeState} posts=${item.timings.size}`);
+        Log.i(`${LOG_TAG} report failed topicId=${item.topicId} status=${result.statusCode} challenge=${result.challengeState} posts=${item.timings.size}`);
         // 失败/challenge:清呼吸,蓝点停回静态。
         this.afterMinReporting(startedAt, () => this.setReporting(postNumbers, false));
         if (result.challengeState !== ChallengeState.NONE) {
@@ -303,7 +304,7 @@ export class ReadingTracker {
     }).catch((error: Object) => {
       this.inProgress = false;
       this.lastFlush = 0;
-      console.info(`${LOG_TAG} report error topicId=${item.topicId} posts=${item.timings.size} error=${JSON.stringify(error)}`);
+      Log.i(`${LOG_TAG} report error topicId=${item.topicId} posts=${item.timings.size} error=${JSON.stringify(error)}`);
       this.afterMinReporting(startedAt, () => this.setReporting(postNumbers, false));
       this.handleFailure(item, 0);
     });
@@ -333,7 +334,7 @@ export class ReadingTracker {
     if (!reportFn || this.consolidated.length === 0) {
       return;
     }
-    console.info(`${LOG_TAG} drain remaining batches=${this.consolidated.length} topicId=${this.topicId}`);
+    Log.i(`${LOG_TAG} drain remaining batches=${this.consolidated.length} topicId=${this.topicId}`);
     while (this.consolidated.length > 0) {
       const item: ConsolidatedTiming | undefined = this.consolidated.pop();
       if (!item) {
@@ -341,9 +342,9 @@ export class ReadingTracker {
       }
       const postCount: number = item.timings.size;
       reportFn(item.topicId, item.timings, item.topicTime).then((result: NetworkResult<string>) => {
-        console.info(`${LOG_TAG} drain report topicId=${item.topicId} posts=${postCount} success=${result.success} status=${result.statusCode}`);
+        Log.i(`${LOG_TAG} drain report topicId=${item.topicId} posts=${postCount} success=${result.success} status=${result.statusCode}`);
       }).catch((error: Object) => {
-        console.info(`${LOG_TAG} drain report topicId=${item.topicId} posts=${postCount} error=${JSON.stringify(error)}`);
+        Log.i(`${LOG_TAG} drain report topicId=${item.topicId} posts=${postCount} error=${JSON.stringify(error)}`);
       });
     }
   }
@@ -351,13 +352,13 @@ export class ReadingTracker {
   // 命中 CF 质询:静默丢弃本批。Referer 修复后 403 已很少,且多发生在从后台回前台的头一两分钟;
   // 这些楼层仍在屏、会随下一次周期 flush 自然重试并成功(日志已验证),因此无需弹验证、无需特殊处理。
   private handleChallenge(item: ConsolidatedTiming): void {
-    console.info(`${LOG_TAG} challenge detected, drop batch silently (will retry on next flush) topicId=${item.topicId} posts=${item.timings.size}`);
+    Log.i(`${LOG_TAG} challenge detected, drop batch silently (will retry on next flush) topicId=${item.topicId} posts=${item.timings.size}`);
   }
 
   private handleFailure(item: ConsolidatedTiming, statusCode: number): void {
     // 仅对允许的状态码退避重试并重新入队;其它(如 403 challenge)直接丢弃这批。
     if (!ALLOWED_AJAX_FAILURES.includes(statusCode)) {
-      console.info(`${LOG_TAG} report dropped (non-retryable) topicId=${item.topicId} status=${statusCode} posts=${item.timings.size}`);
+      Log.i(`${LOG_TAG} report dropped (non-retryable) topicId=${item.topicId} status=${statusCode} posts=${item.timings.size}`);
       return;
     }
     const delay: number | undefined = AJAX_FAILURE_DELAYS[this.ajaxFailures];
@@ -365,9 +366,9 @@ export class ReadingTracker {
     if (delay) {
       this.blockSendingTill = Date.now() + delay;
       this.consolidate(item.timings, item.topicTime);
-      console.info(`${LOG_TAG} report retry scheduled topicId=${item.topicId} status=${statusCode} attempt=${this.ajaxFailures} delayMs=${delay}`);
+      Log.i(`${LOG_TAG} report retry scheduled topicId=${item.topicId} status=${statusCode} attempt=${this.ajaxFailures} delayMs=${delay}`);
     } else {
-      console.info(`${LOG_TAG} report retry exhausted topicId=${item.topicId} status=${statusCode} attempts=${this.ajaxFailures}`);
+      Log.i(`${LOG_TAG} report retry exhausted topicId=${item.topicId} status=${statusCode} attempts=${this.ajaxFailures}`);
     }
   }
 }

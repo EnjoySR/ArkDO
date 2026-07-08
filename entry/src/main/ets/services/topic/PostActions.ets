@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { Poll, PollVoteResult, TopicPost } from '../../models/TopicDetail';
@@ -35,7 +36,7 @@ export class PostActions {
       await new TopicService(this.getBridge()).toggleReaction(post.id, this.resolveTopicId(post), reaction);
 
     if (!result.success) {
-      console.info(`${LOG_TAG} toggle reaction failed postId=${post.id} reaction=${reaction} status=${result.statusCode}`);
+      Log.i(`${LOG_TAG} toggle reaction failed postId=${post.id} reaction=${reaction} status=${result.statusCode}`);
       this.toast('回应失败，请稍后重试', 1500);
     }
     return result.success;
@@ -53,7 +54,7 @@ export class PostActions {
       PollMutation.applyServerResult(poll, result.data);
       return result.data;
     }
-    console.info(`${LOG_TAG} vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
+    Log.i(`${LOG_TAG} vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
     PollMutation.restore(poll, snapshot);
     this.toast('投票失败，请稍后重试', 1500);
     return null;
@@ -71,7 +72,7 @@ export class PostActions {
       PollMutation.applyServerResult(poll, result.data);
       return result.data;
     }
-    console.info(`${LOG_TAG} remove vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
+    Log.i(`${LOG_TAG} remove vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
     PollMutation.restore(poll, snapshot);
     this.toast('撤销投票失败，请稍后重试', 1500);
     return null;
@@ -99,13 +100,13 @@ export class PostActions {
     const service: TopicService = new TopicService(this.getBridge());
     const wasBookmarked: boolean = post.bookmarked === true;
     const prevId: number | undefined = post.bookmarkId;
-    console.info(`[ARKDO][Bookmark] toggle start postId=${post.id} topicId=${topicId} wasBookmarked=${wasBookmarked} prevId=${prevId}`);
+    Log.i(`[ARKDO][Bookmark] toggle start postId=${post.id} topicId=${topicId} wasBookmarked=${wasBookmarked} prevId=${prevId}`);
 
     if (wasBookmarked && prevId !== undefined) {
       post.bookmarked = false;
       post.bookmarkId = undefined;
       const result: NetworkResult<string> = await service.removeBookmark(prevId, topicId);
-      console.info(`[ARKDO][Bookmark] remove result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState}`);
+      Log.i(`[ARKDO][Bookmark] remove result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState}`);
       if (result.success) {
         this.toast('已取消收藏', 1500);
       } else {
@@ -116,7 +117,7 @@ export class PostActions {
     } else {
       post.bookmarked = true;
       const result: NetworkResult<number> = await service.addBookmark(post.id, topicId);
-      console.info(`[ARKDO][Bookmark] add result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState} id=${result.data}`);
+      Log.i(`[ARKDO][Bookmark] add result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState} id=${result.data}`);
       if (result.success && result.data !== undefined) {
         post.bookmarkId = result.data;
         this.toast('已收藏', 1500);
@@ -126,7 +127,7 @@ export class PostActions {
         this.toast('收藏失败', 1500);
       }
     }
-    console.info(`[ARKDO][Bookmark] toggle end postId=${post.id} finalBookmarked=${post.bookmarked} bookmarkId=${post.bookmarkId}`);
+    Log.i(`[ARKDO][Bookmark] toggle end postId=${post.id} finalBookmarked=${post.bookmarked} bookmarkId=${post.bookmarkId}`);
     return post.bookmarked === true;
   }
 

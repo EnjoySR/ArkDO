@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import { TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { AppStateEventBus } from '../session/AppStateEventBus';
 import { TopicReadStateEventBus } from '../session/TopicReadStateEventBus';
@@ -75,7 +76,7 @@ export class TopicReadController {
     );
     this.tracker.seedRead(this.collectAlreadyReadPostNumbers());
     this.started = true;
-    console.info(`${logTag} reading tracker started topicId=${detail.id}`);
+    Log.i(`${logTag} reading tracker started topicId=${detail.id}`);
   }
 
   // 可见楼层范围变化(入参为 posts 数组下标,列表头部占位的换算由页面完成):

@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import { curves } from '@kit.ArkUI';
 import { Poll, PollVoteResult, PostBoost, PostReaction, TopicPost } from '../../models/TopicDetail';
 import { CookedHtmlParser, RichInlineNode, RichInlineType } from '../../services/content/CookedHtmlParser';
@@ -734,11 +735,11 @@ export struct TopicPostItem {
         return;
       }
       this.bookmarkLoading = true;
-      console.info(`[ARKDO][Bookmark] tap postId=${this.post.id} bookmarkedLocal=${this.bookmarkedLocal} postBookmarked=${this.post.bookmarked} bookmarkId=${this.post.bookmarkId}`);
+      Log.i(`[ARKDO][Bookmark] tap postId=${this.post.id} bookmarkedLocal=${this.bookmarkedLocal} postBookmarked=${this.post.bookmarked} bookmarkId=${this.post.bookmarkId}`);
       this.onToggleBookmark(this.post).then((finalState: boolean) => {
         this.bookmarkedLocal = finalState;
         this.bookmarkLoading = false;
-        console.info(`[ARKDO][Bookmark] reconcile postId=${this.post.id} finalState=${finalState}`);
+        Log.i(`[ARKDO][Bookmark] reconcile postId=${this.post.id} finalState=${finalState}`);
       });
     })
   }

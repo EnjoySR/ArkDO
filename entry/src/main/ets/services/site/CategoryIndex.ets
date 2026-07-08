@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import { TopicCategory } from '../../models/Topic';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { SiteMetadata, SiteService } from './SiteService';
@@ -41,10 +42,10 @@ export class CategoryIndex {
     const result: NetworkResult<SiteMetadata> = await new SiteService(bridge).getSiteMetadata();
     if (result.success && result.data) {
       CategoryIndex.cachedCategories = result.data.categories;
-      console.info(`${logTag} site metadata loaded categories=${result.data.categories.length}`);
+      Log.i(`${logTag} site metadata loaded categories=${result.data.categories.length}`);
       return CategoryIndex.cachedCategories;
     }
-    console.info(`${logTag} site metadata skipped status=${result.statusCode}`);
+    Log.i(`${logTag} site metadata skipped status=${result.statusCode}`);
     return null;
   }
 

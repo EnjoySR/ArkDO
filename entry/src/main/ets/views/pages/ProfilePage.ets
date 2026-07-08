@@ -1,5 +1,8 @@
-import { bundleManager } from '@kit.AbilityKit';
+import { Log } from '../../services/logging/Log';
+import { bundleManager, common } from '@kit.AbilityKit';
 import { AppConstants } from '../../common/constants/AppConstants';
+import { DownloadService } from '../../services/content/DownloadService';
+import { FileLogger } from '../../services/logging/FileLogger';
 import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { TopicCategory } from '../../models/Topic';
@@ -49,9 +52,11 @@ export struct ProfilePage {
   @Prop isCheckingSession: boolean = false;
   @Prop hasCheckedSession: boolean = false;
   onLoginClick: () => void = () => {};
-  // 打开站内 Web 页(私信/书签/草稿等归档入口)与原生帖子详情,由 RootTabPage 注入。
+  // 打开站内 Web 页(私信/草稿等归档入口)与原生帖子详情,由 RootTabPage 注入。
   onOpenWeb: (url: string, title?: string) => void = () => {};
   onOpenTopic: (topicId: number, title: string, postNumber?: number) => void = () => {};
+  // 书签已原生化:进原生书签页而非 Web。
+  onOpenBookmarks: (username: string) => void = () => {};
   @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
   @State private profileDetail?: UserProfileDetail = undefined;
   @State private summaryStats?: UserSummaryStats = undefined;
@@ -60,6 +65,10 @@ export struct ProfilePage {
   @State private categories: TopicCategory[] = [];
   @State private isLoggingOut: boolean = false;
   @State private appVersion: string = '';
+  // 日志工具:大小标签实时展示,详细日志开关持久化,导出时防重复点击。
+  @State private logSizeLabel: string = '';
+  @State private verboseLog: boolean = false;
+  @State private isExportingLog: boolean = false;
   // 已加载资料的用户名:切换账号后重新加载,同账号重进不重复拉取。
   private loadedProfileUsername: string = '';
   private categoryIndex: CategoryIndex = new CategoryIndex();
@@ -67,6 +76,8 @@ export struct ProfilePage {
   aboutToAppear(): void {
     this.readAppVersion();
     this.handleAccountChanged();
+    this.verboseLog = FileLogger.isVerbose();
+    this.refreshLogSize();
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -200,8 +211,11 @@ export struct ProfilePage {
       Row() {
         this.QuickEntry($r('sys.symbol.envelope'), '私信', this.getUnreadMessageCount(), true, false,
           `/u/${this.getUsername()}/messages`)
-        this.QuickEntry($r('sys.symbol.bookmark'), '书签', 0, false, false,
-          `/u/${this.getUsername()}/activity/bookmarks`)
+        this.QuickEntryNative($r('sys.symbol.bookmark'), '书签', () => {
+          if (this.getUsername().length > 0) {
+            this.onOpenBookmarks(this.getUsername());
+          }
+        })
         this.QuickEntry($r('sys.symbol.heart'), '我的点赞', 0, false, true,
           `/u/${this.getUsername()}/activity/likes-given`)
         this.QuickEntry($r('sys.symbol.square_and_pencil'), '草稿', this.getDraftCount(), false, false,
@@ -280,6 +294,8 @@ export struct ProfilePage {
       }
       .cardStyle()
       .margin({ top: 0 })
+
+      this.LogGroup()
 
       // 卡片 6:退出登录
       Row() {
@@ -378,6 +394,24 @@ export struct ProfilePage {
     .layoutWeight(1)
     .onClick(() => {
       this.openWebPath(path, label);
+    })
+  }
+
+  // 无角标、走自定义点击的快捷入口(书签等已原生化的入口)。
+  @Builder
+  private QuickEntryNative(symbol: Resource, label: string, onEntryClick: () => void) {
+    Column() {
+      SymbolGlyph(symbol)
+        .fontSize(24)
+        .fontColor([$r('app.color.text_primary')])
+      Text(label)
+        .fontSize(12)
+        .fontColor($r('app.color.text_primary'))
+        .margin({ top: 7 })
+    }
+    .layoutWeight(1)
+    .onClick(() => {
+      onEntryClick();
     })
   }
 
@@ -645,6 +679,8 @@ export struct ProfilePage {
       .cardStyle()
       .margin({ top: 0 })
 
+      this.LogGroup()
+
       Row()
         .width('100%')
         .height(40)
@@ -654,6 +690,92 @@ export struct ProfilePage {
   }
 
   // ==================== 通用 Builder ====================
+
+  // 诊断日志工具组:导出(带大小)、详细日志开关、清空。用于用户脱机跑一天后导出日志分析。
+  @Builder
+  private LogGroup() {
+    this.GroupLabel('诊断日志')
+    Column() {
+      Row() {
+        SymbolGlyph($r('sys.symbol.envelope'))
+          .fontSize(20)
+          .fontColor([$r('app.color.text_secondary')])
+        Text('导出日志')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .layoutWeight(1)
+          .margin({ left: 14 })
+        if (this.isExportingLog) {
+          LoadingProgress()
+            .width(16)
+            .height(16)
+            .color($r('app.color.ld_accent'))
+            .margin({ right: 6 })
+        } else if (this.logSizeLabel.length > 0) {
+          Text(this.logSizeLabel)
+            .fontSize(13)
+            .fontColor($r('app.color.text_faint'))
+            .margin({ right: 6 })
+        }
+        this.ChevronIcon()
+      }
+      .width('100%')
+      .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 14, bottom: 14 })
+      .onClick(() => {
+        this.exportLog();
+      })
+
+      this.HairlineInset()
+
+      Row() {
+        SymbolGlyph($r('sys.symbol.info_circle'))
+          .fontSize(20)
+          .fontColor([$r('app.color.text_secondary')])
+        Column() {
+          Text('详细日志')
+            .fontSize(15)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+          Text('完整记录响应内容,排查时开启')
+            .fontSize(12)
+            .fontColor($r('app.color.text_faint'))
+            .width('100%')
+            .margin({ top: 2 })
+        }
+        .layoutWeight(1)
+        .margin({ left: 14 })
+        .alignItems(HorizontalAlign.Start)
+
+        Toggle({ type: ToggleType.Switch, isOn: this.verboseLog })
+          .selectedColor($r('app.color.ld_accent'))
+          .onChange((isOn: boolean) => {
+            this.setVerboseLog(isOn);
+          })
+      }
+      .width('100%')
+      .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
+
+      this.HairlineInset()
+
+      Row() {
+        SymbolGlyph($r('sys.symbol.trash'))
+          .fontSize(20)
+          .fontColor([$r('app.color.ld_danger')])
+        Text('清空日志')
+          .fontSize(15)
+          .fontColor($r('app.color.ld_danger'))
+          .layoutWeight(1)
+          .margin({ left: 14 })
+      }
+      .width('100%')
+      .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 14, bottom: 14 })
+      .onClick(() => {
+        this.confirmClearLog();
+      })
+    }
+    .cardStyle()
+    .margin({ top: 0 })
+  }
 
   @Builder
   private HairlineInset() {
@@ -740,9 +862,9 @@ export struct ProfilePage {
     if (result.success && result.data) {
       this.profileDetail = result.data;
       UserProfileCache.setDetail(username, result.data);
-      console.info(`${LOG_TAG} profile detail loaded trustLevel=${result.data.trustLevel ?? -1}`);
+      Log.i(`${LOG_TAG} profile detail loaded trustLevel=${result.data.trustLevel ?? -1}`);
     } else {
-      console.info(`${LOG_TAG} profile detail load failed status=${result.statusCode}`);
+      Log.i(`${LOG_TAG} profile detail load failed status=${result.statusCode}`);
     }
   }
 
@@ -755,9 +877,9 @@ export struct ProfilePage {
       this.summaryStats = result.data.stats;
       this.topBadges = result.data.topBadges;
       UserProfileCache.setSummary(username, result.data);
-      console.info(`${LOG_TAG} summary loaded badges=${result.data.topBadges.length}`);
+      Log.i(`${LOG_TAG} summary loaded badges=${result.data.topBadges.length}`);
     } else {
-      console.info(`${LOG_TAG} summary load failed status=${result.statusCode}`);
+      Log.i(`${LOG_TAG} summary load failed status=${result.statusCode}`);
     }
   }
 
@@ -769,9 +891,9 @@ export struct ProfilePage {
     if (result.success && result.data) {
       this.recentActivity = result.data;
       UserProfileCache.setActivity(username, result.data);
-      console.info(`${LOG_TAG} recent activity loaded count=${result.data.length}`);
+      Log.i(`${LOG_TAG} recent activity loaded count=${result.data.length}`);
     } else {
-      console.info(`${LOG_TAG} recent activity load failed status=${result.statusCode}`);
+      Log.i(`${LOG_TAG} recent activity load failed status=${result.statusCode}`);
     }
   }
 
@@ -819,10 +941,10 @@ export struct ProfilePage {
     this.isLoggingOut = false;
     if (!result.success) {
       this.showToast(result.error?.message ? result.error.message : '退出登录失败，请稍后再试');
-      console.info(`${LOG_TAG} logout failed status=${result.statusCode}`);
+      Log.i(`${LOG_TAG} logout failed status=${result.statusCode}`);
       return;
     }
-    console.info(`${LOG_TAG} logout success`);
+    Log.i(`${LOG_TAG} logout success`);
     this.showToast('已退出登录');
     // 会话变化会触发 host webview 重载,先关闭就绪门闩,与登录成功走同一条刷新链路。
     this.bridge.markHostReloading();
@@ -833,7 +955,7 @@ export struct ProfilePage {
     try {
       this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
     } catch (err) {
-      console.info(`${LOG_TAG} toast failed: ${message}`);
+      Log.i(`${LOG_TAG} toast failed: ${message}`);
     }
   }
 
@@ -858,13 +980,76 @@ export struct ProfilePage {
     ThemeManager.setMode(getContext(this), mode);
   }
 
+  // ==================== 诊断日志 ====================
+
+  private refreshLogSize(): void {
+    this.logSizeLabel = this.formatBytes(FileLogger.getTotalSizeBytes());
+  }
+
+  private formatBytes(bytes: number): string {
+    if (bytes <= 0) {
+      return '空';
+    }
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  private exportLog(): void {
+    if (this.isExportingLog) {
+      return;
+    }
+    this.isExportingLog = true;
+    // 合并落盘 + 拉起系统分享面板(复用附件分享链路),用户可选邮件/IM 发出。
+    const exportPath: string = FileLogger.exportToFile();
+    this.isExportingLog = false;
+    this.refreshLogSize();
+    if (exportPath.length === 0) {
+      this.showToast('日志导出失败,请稍后重试');
+      return;
+    }
+    DownloadService.openWithSystem(getContext(this) as common.UIAbilityContext, exportPath);
+  }
+
+  private setVerboseLog(isOn: boolean): void {
+    this.verboseLog = isOn;
+    FileLogger.setVerbose(getContext(this), isOn);
+  }
+
+  private confirmClearLog(): void {
+    this.getUIContext().showAlertDialog({
+      title: '清空日志',
+      message: '确定要清空本机所有日志吗?此操作不可恢复。',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '取消',
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '清空',
+        fontColor: $r('app.color.ld_danger'),
+        action: () => {
+          FileLogger.clear();
+          this.refreshLogSize();
+          this.showToast('日志已清空');
+        }
+      }
+    });
+  }
+
   private readAppVersion(): void {
     try {
       const info: bundleManager.BundleInfo =
         bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
       this.appVersion = info.versionName;
     } catch (err) {
-      console.info(`${LOG_TAG} read app version failed`);
+      Log.i(`${LOG_TAG} read app version failed`);
     }
   }
 

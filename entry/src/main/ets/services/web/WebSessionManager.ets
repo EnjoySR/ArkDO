@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import webview from '@ohos.web.webview';
 import { AppConstants } from '../../common/constants/AppConstants';
 
@@ -13,28 +14,28 @@ export class WebSessionManager {
     try {
       webview.WebCookieManager.putAcceptCookieEnabled(true);
       webview.WebCookieManager.putAcceptThirdPartyCookieEnabled(true);
-      console.info(`${LOG_TAG} cookie access enabled source=${source} thirdParty=${webview.WebCookieManager.isThirdPartyCookieAllowed()}`);
+      Log.i(`${LOG_TAG} cookie access enabled source=${source} thirdParty=${webview.WebCookieManager.isThirdPartyCookieAllowed()}`);
     } catch (error) {
-      console.info(`${LOG_TAG} cookie access configure failed source=${source} error=${JSON.stringify(error)}`);
+      Log.i(`${LOG_TAG} cookie access configure failed source=${source} error=${JSON.stringify(error)}`);
     }
   }
 
   static applyUserAgent(controller: webview.WebviewController, source: string): void {
     try {
       controller.setCustomUserAgent(AppConstants.DEFAULT_USER_AGENT);
-      console.info(`${LOG_TAG} user agent applied source=${source} ua=${AppConstants.DEFAULT_USER_AGENT}`);
+      Log.i(`${LOG_TAG} user agent applied source=${source} ua=${AppConstants.DEFAULT_USER_AGENT}`);
     } catch (error) {
-      console.info(`${LOG_TAG} user agent apply failed source=${source} error=${JSON.stringify(error)}`);
+      Log.i(`${LOG_TAG} user agent apply failed source=${source} error=${JSON.stringify(error)}`);
     }
   }
 
   static saveCookies(source: string): void {
     webview.WebCookieManager.saveCookieAsync()
       .then(() => {
-        console.info(`${LOG_TAG} cookie save success source=${source}`);
+        Log.i(`${LOG_TAG} cookie save success source=${source}`);
       })
       .catch((error: Object) => {
-        console.info(`${LOG_TAG} cookie save failed source=${source} error=${JSON.stringify(error)}`);
+        Log.i(`${LOG_TAG} cookie save failed source=${source} error=${JSON.stringify(error)}`);
       });
   }
 

@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import webview from '@ohos.web.webview';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -5,17 +6,20 @@ import { AppConstants } from '../../common/constants/AppConstants';
 import { ChallengeEventBus } from '../challenge/ChallengeEventBus';
 import { DownloadEventBus } from '../content/DownloadEventBus';
 import { detectChallenge } from './ChallengeDetector';
+import { FileLogger } from '../logging/FileLogger';
 import { ChallengeState, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from './NetworkTypes';
 
 const REQUEST_ID_TOKEN: string = '__ARKDO_REQUEST_ID__';
 const BODY_LOG_CHUNK_SIZE: number = 3000;
+// 响应体转储上限:仅对挑战/错误/异常响应保留头部证据(判定是挑战页还是数据),截断以控制日志体积。
+const BODY_LOG_MAX_CHARS: number = 1500;
 
 function logNetwork(message: string): void {
-  console.info(`[ArkDO][Network] ${message}`);
+  Log.i(`[ArkDO][Network] ${message}`);
 }
 
 function logNetworkBody(message: string): void {
-  console.info(`[ArkDO][Network][Body] ${message}`);
+  Log.i(`[ArkDO][Network][Body] ${message}`);
 }
 
 export interface ArkWebJsonExecutor {
@@ -149,7 +153,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   // 触发一次附件下载。成功交给 host webview 的下载委托,结果经 DownloadEventBus 上抛。
   startDownload(url: string): boolean {
     if (!this.controller) {
-      console.info('[ArkDO][Network] startDownload skipped: controller not ready');
+      Log.i('[ArkDO][Network] startDownload skipped: controller not ready');
       return false;
     }
     try {
@@ -157,7 +161,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       return true;
     } catch (error) {
       const err: BusinessError = error as BusinessError;
-      console.info(`[ArkDO][Network] startDownload failed code=${err.code} msg=${err.message}`);
+      Log.i(`[ArkDO][Network] startDownload failed code=${err.code} msg=${err.message}`);
       return false;
     }
   }
@@ -179,7 +183,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
           }
         } catch (error) {
           const err: BusinessError = error as BusinessError;
-          console.info(`[ArkDO][Network] download dir failed code=${err.code}`);
+          Log.i(`[ArkDO][Network] download dir failed code=${err.code}`);
         }
         const suggested: string = item.getSuggestedFileName();
         const fileName: string = suggested && suggested.length > 0 ? suggested : `download_${item.getGuid()}`;
@@ -196,10 +200,10 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       });
       this.controller.setDownloadDelegate(delegate);
       this.downloadDelegateReady = true;
-      console.info('[ArkDO][Network] download delegate configured');
+      Log.i('[ArkDO][Network] download delegate configured');
     } catch (error) {
       const err: BusinessError = error as BusinessError;
-      console.info(`[ArkDO][Network] configure download delegate failed code=${err.code}`);
+      Log.i(`[ArkDO][Network] configure download delegate failed code=${err.code}`);
     }
   }
 
@@ -777,7 +781,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     const body: string = envelope.body ? envelope.body : '';
     const challengeState: ChallengeState = detectChallenge(statusCode, contentType, body);
     logNetwork(`${method} ${path} response status=${statusCode} contentType=${contentType} bodyLength=${body.length} challenge=${challengeState}`);
-    this.logResponseBody(path, contentType, body, method);
+    this.logResponseBody(path, contentType, body, method, statusCode, challengeState);
 
     if (challengeState !== ChallengeState.NONE) {
       logNetwork(`${method} ${path} requires challenge state=${challengeState}`);
@@ -821,21 +825,45 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     return result;
   }
 
-  private logResponseBody(path: string, contentType: string, body: string, method: string): void {
-    const formattedBody: string = this.formatBodyForLog(contentType, body);
-    const chunkCount: number = Math.ceil(formattedBody.length / BODY_LOG_CHUNK_SIZE);
+  private logResponseBody(path: string, contentType: string, body: string, method: string, statusCode: number, challengeState: ChallengeState): void {
+    // 成功的 JSON 响应体积大且无排查价值(status 行已记 bodyLength);仅在挑战/错误/异常响应时转储。
+    if (!this.shouldLogResponseBody(contentType, body, statusCode, challengeState)) {
+      return;
+    }
 
-    logNetworkBody(`${method} ${path} body begin contentType=${contentType} rawLength=${body.length} formattedLength=${formattedBody.length} chunks=${chunkCount}`);
-    if (formattedBody.length === 0) {
+    const formattedBody: string = this.formatBodyForLog(contentType, body);
+    // 详细日志开关(设置里可开):开启时完整转储不截断,用于深挖某个具体响应;默认截断控制体积。
+    const loggedBody: string = FileLogger.isVerbose() || formattedBody.length <= BODY_LOG_MAX_CHARS
+      ? formattedBody
+      : `${formattedBody.substring(0, BODY_LOG_MAX_CHARS)}...(truncated ${formattedBody.length - BODY_LOG_MAX_CHARS} chars)`;
+    const chunkCount: number = Math.max(1, Math.ceil(loggedBody.length / BODY_LOG_CHUNK_SIZE));
+
+    logNetworkBody(`${method} ${path} body begin contentType=${contentType} rawLength=${body.length} loggedLength=${loggedBody.length} chunks=${chunkCount}`);
+    if (loggedBody.length === 0) {
       logNetworkBody(`${method} ${path} body chunk 1/1: `);
     }
 
-    for (let start: number = 0; start < formattedBody.length; start += BODY_LOG_CHUNK_SIZE) {
+    for (let start: number = 0; start < loggedBody.length; start += BODY_LOG_CHUNK_SIZE) {
       const chunkIndex: number = Math.floor(start / BODY_LOG_CHUNK_SIZE) + 1;
-      const chunk: string = formattedBody.substring(start, start + BODY_LOG_CHUNK_SIZE);
+      const chunk: string = loggedBody.substring(start, start + BODY_LOG_CHUNK_SIZE);
       logNetworkBody(`${method} ${path} body chunk ${chunkIndex}/${chunkCount}: ${chunk}`);
     }
     logNetworkBody(`${method} ${path} body end`);
+  }
+
+  // 是否值得转储响应体:挑战页/HTTP 错误/成功但非 JSON 的意外响应(可能是未识别的软拦截页)才留;
+  // 成功 JSON 和空体(如 timings 上报)一律跳过——这两类占日志体积绝大头且无排查价值。
+  private shouldLogResponseBody(contentType: string, body: string, statusCode: number, challengeState: ChallengeState): boolean {
+    if (FileLogger.isVerbose()) {
+      return true;
+    }
+    if (challengeState !== ChallengeState.NONE || statusCode >= 400) {
+      return true;
+    }
+    if (body.length === 0) {
+      return false;
+    }
+    return contentType.toLowerCase().indexOf('application/json') < 0;
   }
 
   private formatBodyForLog(contentType: string, body: string): string {

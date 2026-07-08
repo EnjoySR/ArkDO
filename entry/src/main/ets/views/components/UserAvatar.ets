@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
 
@@ -21,7 +22,7 @@ export struct UserAvatar {
           .backgroundColor($r('app.color.surface_muted'))
           .onError((event: ImageError) => {
             // 当前候选(如 CDN 动图)加载失败 → 切下一个候选(静态头像),都失败则显示首字母。
-            console.info(`[ArkDO][Avatar] load failed url=${this.currentAvatarUrl()} user=${this.user?.username} msg=${event.message}`);
+            Log.i(`[ArkDO][Avatar] load failed url=${this.currentAvatarUrl()} user=${this.user?.username} msg=${event.message}`);
             if (this.avatarSourceIndex < this.avatarCandidates().length) {
               this.avatarSourceIndex += 1;
             }

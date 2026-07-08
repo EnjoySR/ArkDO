@@ -1,3 +1,4 @@
+import { Log } from '../logging/Log';
 import { User } from '../../models/User';
 import { AuthService } from '../auth/AuthService';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
@@ -33,7 +34,7 @@ export class NotificationService {
     this.unsubscribeAppState = AppStateEventBus.subscribe((isForeground: boolean) => {
       this.handleForegroundChanged(isForeground);
     });
-    console.info(`${LOG_TAG} start foreground=${AppStateEventBus.isForeground()}`);
+    Log.i(`${LOG_TAG} start foreground=${AppStateEventBus.isForeground()}`);
     if (AppStateEventBus.isForeground()) {
       this.refresh();
       this.startInterval();
@@ -52,7 +53,7 @@ export class NotificationService {
       this.unsubscribeAppState = undefined;
     }
     this.refreshSequence++; // 作废进行中的请求
-    console.info(`${LOG_TAG} stop`);
+    Log.i(`${LOG_TAG} stop`);
     NotificationEventBus.publish({ unread: 0, highPriority: 0 });
   }
 
@@ -67,7 +68,7 @@ export class NotificationService {
     }
 
     if (!result.success) {
-      console.info(`${LOG_TAG} refresh failed status=${result.statusCode} challenge=${result.challengeState}`);
+      Log.i(`${LOG_TAG} refresh failed status=${result.statusCode} challenge=${result.challengeState}`);
       return;
     }
 
