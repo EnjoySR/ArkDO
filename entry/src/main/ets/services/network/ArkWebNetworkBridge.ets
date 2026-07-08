@@ -212,6 +212,26 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     this.reloading = true;
   }
 
+  // 主动重载 host 首页:一次真实页面导航,让 CF 挑战 JS 在真浏览器环境里运行以拿 cf_clearance
+  // (fetch 拿到的挑战页无法执行 JS)。用于挑战恢复协调器静默过盾;onPageEnd 会放行排队的 fetch。
+  reloadHost(): boolean {
+    if (!this.controller) {
+      Log.i('[ArkDO][Network] reloadHost skipped: controller not ready');
+      return false;
+    }
+    try {
+      this.markHostReloading();
+      this.controller.loadUrl(AppConstants.BASE_URL);
+      return true;
+    } catch (error) {
+      // loadUrl 抛异常时不会有后续 onPageEnd,立即放行等待者以免请求悬住。
+      this.markHostReady();
+      const err: BusinessError = error as BusinessError;
+      Log.i(`[ArkDO][Network] reloadHost failed code=${err.code}`);
+      return false;
+    }
+  }
+
   // host webview 重载完成（onPageEnd）：放行所有排队的 fetch，令其注入到刷新后的文档。
   markHostReady(): void {
     this.reloading = false;
@@ -471,7 +491,6 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     return `(() => {
       const requestId = '${REQUEST_ID_TOKEN}';
       const requestUrl = new URL(${encodedPath}, window.location.origin);
-      requestUrl.searchParams.set('_arkdo_ts', Date.now().toString());
       fetch(requestUrl.toString(), {
         credentials: 'include',
         cache: 'no-store',

@@ -6,7 +6,10 @@ import { AppStateEventBus } from '../session/AppStateEventBus';
 import { NotificationEventBus } from './NotificationEventBus';
 
 const LOG_TAG: string = '[ArkDO][Notification]';
-const POLL_INTERVAL_MS: number = 45000; // 前台驻留时的轮询周期
+// 前台轮询基准周期与抖动幅度:固定 45s 整节拍是 CF 行为分析的典型机器人特征,
+// 每次在 ±20% 内随机取值打散节拍(用 setTimeout 链而非 setInterval)。
+const POLL_INTERVAL_BASE_MS: number = 45000;
+const POLL_JITTER_RATIO: number = 0.2;
 
 // 头像未读数轮询服务:登录后由 RootTabPage start(),前台时每 POLL_INTERVAL_MS 拉一次
 // /session/current.json(复用 AuthService),解析未读并发到 NotificationEventBus。
@@ -97,20 +100,35 @@ export class NotificationService {
     }
   }
 
+  // setTimeout 链自调度:每次刷新后按抖动后的间隔再排下一次,避免固定节拍。
   private startInterval(): void {
     if (this.intervalId !== -1) {
       return;
     }
-    this.intervalId = setInterval(() => {
+    this.scheduleNextPoll();
+  }
+
+  private scheduleNextPoll(): void {
+    this.intervalId = setTimeout(() => {
       this.refresh();
-    }, POLL_INTERVAL_MS);
+      // stop()/后台会置 -1;仅在仍处于计时态时续排下一次。
+      if (this.intervalId !== -1) {
+        this.intervalId = -1;
+        this.scheduleNextPoll();
+      }
+    }, this.nextPollDelayMs());
+  }
+
+  private nextPollDelayMs(): number {
+    const jitter: number = (Math.random() * 2 - 1) * POLL_JITTER_RATIO;
+    return Math.round(POLL_INTERVAL_BASE_MS * (1 + jitter));
   }
 
   private stopInterval(): void {
     if (this.intervalId === -1) {
       return;
     }
-    clearInterval(this.intervalId);
+    clearTimeout(this.intervalId);
     this.intervalId = -1;
   }
 }

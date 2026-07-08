@@ -10,6 +10,10 @@ const LOG_TAG: string = '[ArkDO][ChallengePage]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
 const CHALLENGE_POLL_INTERVAL_MS: number = 1000;
 const MAX_CHALLENGE_POLL_COUNT: number = 90;
+// 挑战脚本资源(challenges.cloudflare.com)加载失败后的重载:该域在部分网络下时通时不通,
+// 失败即隔 2s 重载挑战页赌下一次能通,最多 3 次,避免用户对着加载页干等。
+const CHALLENGE_RELOAD_DELAY_MS: number = 2000;
+const MAX_CHALLENGE_RELOADS: number = 3;
 
 @Component
 export struct CfChallengePage {
@@ -21,6 +25,10 @@ export struct CfChallengePage {
   private challengePollCount: number = 0;
   private hasResolved: boolean = false;
   private isApiProbeRunning: boolean = false;
+  // 弹层打开时的 cf_clearance 值快照:失效旧 cookie 仍残留,只有值变化才是 CF 真发了新通行证。
+  private initialCfClearance: string = '';
+  // 挑战资源(challenges.cloudflare.com)加载失败时的自动重载次数,赌网络下一次能通。
+  private challengeReloadCount: number = 0;
 
   aboutToAppear(): void {
     webview.WebviewController.initializeWebEngine();
@@ -28,6 +36,8 @@ export struct CfChallengePage {
     this.hasResolved = false;
     this.isApiProbeRunning = false;
     this.challengePollCount = 0;
+    this.challengeReloadCount = 0;
+    this.initialCfClearance = WebSessionManager.getCfClearanceValue();
     this.logDiagnostic('appear', 'start');
     this.startChallengeCookiePolling();
   }
@@ -93,6 +103,7 @@ export struct CfChallengePage {
           const code: number = this.safeErrorCode(event.error);
           Log.i(`${LOG_TAG} load error url=${this.safeUrlLabel(url)} code=${code} info=${this.safeErrorInfo(event.error)}`);
           this.logDiagnostic('loadError', `url=${this.safeUrlLabel(url)} code=${code}`);
+          this.retryOnChallengeResourceFailure(url);
         })
         .onHttpErrorReceive((event: OnHttpErrorReceiveEvent) => {
           const url: string = this.safeRequestUrl(event.request);
@@ -158,18 +169,43 @@ export struct CfChallengePage {
       return true;
     }
 
-    const snapshot: CookiePresenceSnapshot = WebSessionManager.getCookiePresenceSnapshot('cf_clearance');
-    if (!snapshot.hasCookie) {
+    // "值变化"判定:仅凭存在性会被过期残留的旧 cf_clearance 误触发而秒关弹层;
+    // 必须与打开弹层时的快照不同,才算 CF 真的发了新通行证。
+    const current: string = WebSessionManager.getCfClearanceValue();
+    if (current.length === 0 || current === this.initialCfClearance) {
       return false;
     }
 
     this.hasResolved = true;
-    Log.i(`${LOG_TAG} cf_clearance detected stage=${stage} cookieHeaderLength=${snapshot.headerLength}`);
+    Log.i(`${LOG_TAG} cf_clearance changed stage=${stage}`);
     this.logDiagnostic('resolvedByCookie', `stage=${stage}`);
     WebSessionManager.saveCookies('CfChallengePage');
     this.stopChallengeCookiePolling();
     this.onChallengeResolved();
     return true;
+  }
+
+  // 挑战脚本资源加载失败时隔 2s 重载挑战页(限 3 次),赌该域下一次可达。
+  private retryOnChallengeResourceFailure(url: string): void {
+    if (this.hasResolved || this.safeUrlLabel(url) !== 'cloudflare_challenge_resource') {
+      return;
+    }
+    if (this.challengeReloadCount >= MAX_CHALLENGE_RELOADS) {
+      this.logDiagnostic('challengeResourceGaveUp', `count=${this.challengeReloadCount}`);
+      return;
+    }
+    this.challengeReloadCount++;
+    this.logDiagnostic('challengeResourceRetry', `count=${this.challengeReloadCount}`);
+    setTimeout(() => {
+      if (this.hasResolved) {
+        return;
+      }
+      try {
+        this.controller.refresh();
+      } catch (error) {
+        // 控制器未就绪等异常忽略,下一次资源失败还会再触发。
+      }
+    }, CHALLENGE_RELOAD_DELAY_MS);
   }
 
   private shouldProbeApi(): boolean {

@@ -7,6 +7,7 @@ import { common } from '@kit.AbilityKit';
 import { Topic } from '../../models/Topic';
 import { User } from '../../models/User';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
+import { ChallengeRecoveryCoordinator } from '../../services/challenge/ChallengeRecoveryCoordinator';
 import { AuthService } from '../../services/auth/AuthService';
 import { NotificationService } from '../../services/notification/NotificationService';
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
@@ -54,9 +55,23 @@ export struct RootTabPage {
   private unsubscribeChallengeRequired?: () => void = undefined;
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeDownload?: () => void = undefined;
+  // 挑战恢复协调器:优先后台静默过盾,失败才弹窗。惰性创建(需闭包引用本组件方法)。
+  private challengeRecovery?: ChallengeRecoveryCoordinator = undefined;
 
   aboutToAppear(): void {
     this.ensureIconSymbolsLoaded();
+    if (!this.challengeRecovery) {
+      this.challengeRecovery = new ChallengeRecoveryCoordinator(
+        this.bridge,
+        () => {
+          // 恢复成功:广播会话刷新——重载 host、复查登录态、刷新列表。
+          SessionEventBus.notifySessionChanged();
+        },
+        () => {
+          this.openChallengeSheet();
+        }
+      );
+    }
     if (!this.unsubscribeChallengeRequired) {
       this.unsubscribeChallengeRequired = ChallengeEventBus.subscribe((event: ChallengeRequiredEvent) => {
         this.handleChallengeRequired(event);
@@ -76,6 +91,7 @@ export struct RootTabPage {
 
   aboutToDisappear(): void {
     this.notificationService.stop();
+    this.challengeRecovery?.dispose();
     if (this.unsubscribeChallengeRequired) {
       this.unsubscribeChallengeRequired();
       this.unsubscribeChallengeRequired = undefined;
@@ -114,6 +130,8 @@ export struct RootTabPage {
       enableOutsideInteractive: false,
       onDisappear: () => {
         this.activeSheet = RootSheet.NONE;
+        // 弹窗以任意方式关闭(X/下滑/关闭按钮),若仍在等待兜底则让协调器复位;已解决则无副作用。
+        this.challengeRecovery?.notifySheetDismissed();
       }
     })
   }
@@ -490,22 +508,28 @@ export struct RootTabPage {
     this.handledChallengeVersion = event.version;
     Log.i(`${LOG_TAG} challenge required version=${event.version} source=${event.source} status=${event.statusCode} state=${event.challengeState}`);
     Log.i(`${DIAG_TAG} stage=rootChallengeRequired version=${event.version} source=${event.source} status=${event.statusCode} state=${event.challengeState} activeSheet=${this.activeSheet} sheetVisible=${this.isSheetVisible}`);
+    // 弹窗已开(登录/上一轮兜底)时不再打扰;其余交给协调器决定静默恢复还是升级弹窗。
     if (this.isSheetVisible) {
       return;
     }
+    this.challengeRecovery?.handleChallengeSignal(event.source);
+  }
 
+  // 协调器升级:静默两次失败后才打开交互式挑战弹窗兜底。
+  private openChallengeSheet(): void {
+    if (this.isSheetVisible) {
+      return;
+    }
     this.activeSheet = RootSheet.CHALLENGE;
     this.isSheetVisible = true;
-    Log.i(`${DIAG_TAG} stage=rootChallengeOpen version=${event.version}`);
+    Log.i(`${DIAG_TAG} stage=rootChallengeOpen`);
   }
 
   private handleChallengeResolved(): void {
     Log.i(`${LOG_TAG} challenge resolved`);
     Log.i(`${DIAG_TAG} stage=rootChallengeResolved sheetVisible=${this.isSheetVisible}`);
+    // 先进冷却再关窗:onDisappear 的 notifySheetDismissed 在冷却态下即为空操作。
+    this.challengeRecovery?.notifySheetResolved();
     this.closeChallengePage();
-    // 会话变化会触发 host webview 重载,先关闭就绪门闩,确保随后并发的 fetch 排队到重载完成后。
-    this.bridge.markHostReloading();
-    SessionEventBus.notifySessionChanged();
-    this.checkCurrentUser();
   }
 }

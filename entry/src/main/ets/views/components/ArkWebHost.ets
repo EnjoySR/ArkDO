@@ -58,8 +58,10 @@ export struct ArkWebHost {
           this.onReady();
         }
       })
-      .width(1)
-      .height(1)
+      // 满视口 + 近透明:host 在 Stack 底层被上层不透明 UI 完全遮挡,视觉无变化;但给 CF 挑战
+      // JS 一个真实浏览器视口(1×1 会被判机器人),非交互挑战才可能在此静默跑通并种下 cf_clearance。
+      .width('100%')
+      .height('100%')
       .opacity(0.01)
   }
 

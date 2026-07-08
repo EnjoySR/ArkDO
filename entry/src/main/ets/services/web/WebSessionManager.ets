@@ -62,6 +62,25 @@ export class WebSessionManager {
     return WebSessionManager.hasCookie('cf_clearance');
   }
 
+  // 取 cf_clearance 的值(不含名字)。挑战弹层用它做"值变化"判定:过期失效的旧 cookie 仍残留在
+  // cookie 仓里,靠"存在性"会被误判为已解决而秒关弹层;只有值发生变化才是 CF 真的发了新通行证。
+  static getCfClearanceValue(): string {
+    try {
+      const cookieHeader: string = webview.WebCookieManager.fetchCookieSync(AppConstants.BASE_URL, false);
+      const prefix: string = 'cf_clearance=';
+      const parts: string[] = cookieHeader.split(';');
+      for (let index: number = 0; index < parts.length; index++) {
+        const trimmed: string = parts[index].trim();
+        if (trimmed.startsWith(prefix)) {
+          return trimmed.substring(prefix.length);
+        }
+      }
+      return '';
+    } catch (error) {
+      return '';
+    }
+  }
+
   private static containsCookie(cookieHeader: string, cookieName: string): boolean {
     const prefix: string = `${cookieName}=`;
     const parts: string[] = cookieHeader.split(';');
