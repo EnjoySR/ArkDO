@@ -45,6 +45,8 @@ export struct RootTabPage {
   private notificationService: NotificationService = new NotificationService(this.bridge);
   private navPathStack: NavPathStack = new NavPathStack();
   private sessionCheckSequence: number = 0;
+  // 上次会话检查是否失败(CF 盾/网络原因,状态可能不真实),下拉刷新时据此补查。
+  private lastSessionCheckFailed: boolean = false;
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private handledChallengeVersion: number = ChallengeEventBus.getCurrentVersion();
   private unsubscribeChallengeRequired?: () => void = undefined;
@@ -172,8 +174,18 @@ export struct RootTabPage {
         ProfilePage({
           bridge: this.bridge,
           isArkWebReady: this.isArkWebReady,
+          accountUser: this.currentUser ?? this.getAnonymousUser(),
+          isLoggedIn: this.currentUser !== undefined,
+          isCheckingSession: this.isCheckingSession,
+          hasCheckedSession: this.hasCheckedSession,
           onLoginClick: () => {
             this.openLoginPage();
+          },
+          onOpenWeb: (url: string, title?: string) => {
+            this.openWebPage(url, title);
+          },
+          onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
+            this.openTopicDetailById(topicId, undefined, title, postNumber, postNumber !== undefined);
           }
         })
       }
@@ -234,6 +246,9 @@ export struct RootTabPage {
       hasCheckedSession: this.hasCheckedSession,
       onAccountClick: () => {
         this.handleAccountClick();
+      },
+      onSessionRecheck: () => {
+        this.recheckSessionIfNeeded();
       },
       onOpenNotifications: () => {
         this.navPathStack.pushPath(new NavPathInfo(AppRouteName.NOTIFICATIONS, buildNotificationsRouteParam('homeBell')));
@@ -407,6 +422,7 @@ export struct RootTabPage {
     this.isCheckingSession = false;
     this.hasCheckedSession = true;
     if (result.success) {
+      this.lastSessionCheckFailed = false;
       this.currentUser = result.data;
       console.info(`${LOG_TAG} current user checked loggedIn=${this.currentUser !== undefined} username=${this.currentUser?.username ?? ''} hasAvatar=${this.currentUser?.avatarTemplate !== undefined}`);
       // 登录:本次响应已带未读数,立即广播一次(铃铛与头像同帧出现),再启动前台轮询;
@@ -423,9 +439,18 @@ export struct RootTabPage {
       return;
     }
 
-    this.currentUser = undefined;
-    this.notificationService.stop();
-    console.info(`${LOG_TAG} current user check failed status=${result.statusCode} challenge=${result.challengeState}`);
+    // 检查失败(CF 盾/网络抖动)≠确认未登录:保持上一次的登录状态与通知轮询不动,
+    // 仅记失败标记,等下一次下拉刷新时补查。只有成功响应且 current_user 为空才真正置为未登录。
+    this.lastSessionCheckFailed = true;
+    console.info(`${LOG_TAG} current user check failed status=${result.statusCode} challenge=${result.challengeState}, keep previous loggedIn=${this.currentUser !== undefined}`);
+  }
+
+  // 下拉刷新时的会话补查:仅在上次检查失败(状态可能不真实)时重查一次,正常情况零开销。
+  private recheckSessionIfNeeded(): void {
+    if (this.lastSessionCheckFailed && !this.isCheckingSession) {
+      console.info(`${LOG_TAG} recheck session after previous failure`);
+      this.checkCurrentUser();
+    }
   }
 
   private handleSessionChanged(version: number): void {

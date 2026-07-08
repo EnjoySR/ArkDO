@@ -156,6 +156,9 @@ export struct CommentInputBar {
             // 光标离左侧圆角 12vp、上下各留 10vp，且 minHeight 44 让行盒明显大于光标高度。
             .padding({ left: 12, right: 12, top: 10, bottom: 10 })
             .fontSize(16)
+            // 行高 24 + 上下 padding 各 10 = 44，正好等于 minHeight：
+            // 单行时自然高度撑满最小高度，文字垂直居中（否则被 minHeight 拉高后文字贴顶）。
+            .lineHeight(24)
             .fontColor('#111827')
             .placeholderColor('#9CA3AF')
             .defaultFocus(true)

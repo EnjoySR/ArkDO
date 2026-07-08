@@ -13,6 +13,8 @@ import siteServiceTest from './SiteService.test';
 import topicBadgesTest from './TopicBadges.test';
 import themeManagerTest from './ThemeManager.test';
 import reactionMutationTest from './ReactionMutation.test';
+import userProfileServiceTest from './UserProfileService.test';
+import categoryIndexTest from './CategoryIndex.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -29,4 +31,6 @@ export default function testsuite() {
   siteServiceTest();
   topicBadgesTest();
   themeManagerTest();
+  userProfileServiceTest();
+  categoryIndexTest();
 }

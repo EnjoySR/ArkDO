@@ -15,6 +15,7 @@ interface DiscourseCurrentUser {
   animated_avatar?: string;
   unread_notifications?: number;
   unread_high_priority_notifications?: number;
+  draft_count?: number;
 }
 
 export class AuthService {
@@ -61,12 +62,33 @@ export class AuthService {
           avatarTemplate: sourceUser.avatar_template,
           animatedAvatar: sourceUser.animated_avatar ? sourceUser.animated_avatar : undefined,
           unreadNotifications: typeof sourceUser.unread_notifications === 'number' ? sourceUser.unread_notifications : 0,
-          unreadHighPriorityNotifications: typeof sourceUser.unread_high_priority_notifications === 'number' ? sourceUser.unread_high_priority_notifications : 0
+          unreadHighPriorityNotifications: typeof sourceUser.unread_high_priority_notifications === 'number' ? sourceUser.unread_high_priority_notifications : 0,
+          draftCount: typeof sourceUser.draft_count === 'number' ? sourceUser.draft_count : 0
         }
       };
     } catch (error) {
       return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 当前会话响应不是有效 JSON。');
     }
+  }
+
+  // 退出登录:DELETE /session/{username}(CSRF/Cookie 由 bridge 同源自动处理)。
+  // 成功后由调用方触发 SessionEventBus,走与登录相同的会话刷新链路。
+  async logout(username: string): Promise<NetworkResult<boolean>> {
+    const response: NetworkResult<string> = await this.bridge.deleteForm(`/session/${encodeURIComponent(username)}`, '');
+    if (!response.success) {
+      return {
+        success: false,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        error: response.error
+      };
+    }
+    return {
+      success: true,
+      statusCode: response.statusCode,
+      challengeState: response.challengeState,
+      data: true
+    };
   }
 
   private forwardFailure(response: NetworkResult<string>): NetworkResult<User | undefined> {

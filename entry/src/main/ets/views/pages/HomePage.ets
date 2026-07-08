@@ -39,6 +39,8 @@ export struct HomePage {
   @Prop isCheckingSession: boolean = false;
   @Prop hasCheckedSession: boolean = false;
   onAccountClick: () => void = () => {};
+  // 下拉刷新时通知宿主补查会话:上次会话检查被 CF 拦截时,右上角状态可能不真实。
+  onSessionRecheck: () => void = () => {};
   onOpenNotifications: () => void = () => {};
   onTopicClick: (topic: Topic) => void = () => {};
   // 按帖子 ID 直接跳转详情(通用入口,不依赖完整 Topic 对象)。
@@ -327,6 +329,8 @@ export struct HomePage {
     }
 
     this.loadSiteMetadataIfNeeded();
+    // 顺带补查会话状态:上次 current.json 被 CF 拦截时右上角可能误显示为未登录。
+    this.onSessionRecheck();
 
     if (this.isRefreshing || this.isLoadingMore || this.isInitialLoading) {
       return;

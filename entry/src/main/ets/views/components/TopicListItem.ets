@@ -12,7 +12,7 @@ export struct TopicListItem {
   category?: TopicCategory;
   parentCategory?: TopicCategory;
   onTopicClick: (topic: Topic) => void = () => {};
-  // 点未读数字徽标:直跳详情页第一条未读楼(与整行点击从头打开区分)。
+  // 有未读回复时整行点击走这里:直跳详情页第一条未读楼(无未读则走 onTopicClick 从头打开)。
   onUnreadBadgeClick: (topic: Topic) => void = () => {};
 
   build() {
@@ -22,11 +22,21 @@ export struct TopicListItem {
           .margin({ right: 8 })
 
         Column() {
-          // 蓝点作为内联 Span 追加在标题文本流末尾,始终贴在最后一行文字后面(对齐官网)。
-          // 用 baselineOffset 把圆点从基线上抬,对齐 CJK 文字视觉重心(否则看着偏下)。
+          // 未读徽标 / 小蓝点都作为内联 Span 追加在标题文本流末尾,始终贴在最后一行文字后面。
+          // 二者互斥:有未读回复 → 蓝色数字药丸(左右加空格撑开背景);否则(全新主题)→ 小蓝点。
+          // 用 baselineOffset 把标记从基线上抬,对齐 CJK 文字视觉重心。
           Text() {
             Span(this.topic.title)
-            if (this.topic.unseen === true) {
+            if (this.hasUnreadBadge()) {
+              // 无背景空格作真正的间隔(药丸自带的引导空格被算进背景里,不产生外间距)。
+              Span('  ')
+                .fontSize(12)
+              Span(` ${this.topic.unreadPosts} `)
+                .fontSize(12)
+                .fontColor(Color.White)
+                .textBackgroundStyle({ color: '#66CCFF', radius: 9 })
+                .baselineOffset(LengthMetrics.vp(2))
+            } else if (this.topic.unseen === true) {
               Span(' ●')
                 .fontSize(8)
                 .fontColor('#66CCFF')
@@ -38,58 +48,31 @@ export struct TopicListItem {
           .fontColor($r('app.color.text_primary'))
           .width('100%')
 
-          if (this.hasBadges()) {
-            TopicMetadataBadges({
-              category: this.category,
-              parentCategory: this.parentCategory,
-              tags: this.topic.tags
-            })
-            .width('100%')
-            .margin({ top: 3})
-          }
-
-          Row() {
+          // 分类 / 标签 与 时间同一行:徽标占剩余宽度可横向滚动,时间固定在最右侧。
+          if (this.hasBadges() || this.getRelativeTime().length > 0) {
             Row() {
-              // 有未读回复 → 蓝色数字徽标顶替"N 回复";否则显示回复数。
-              if (this.hasUnreadBadge()) {
-                Text(`${this.topic.unreadPosts}`)
-                  .fontSize(12)
-                  .fontColor(Color.White)
-                  .backgroundColor('#66CCFF')
-                  .borderRadius(9)
-                  .padding({ left: 7, right: 7, top: 1, bottom: 1 })
-                  // 徽标点击直跳未读楼:热区四向外扩(徽标本体太小),Block 阻止事件穿透到整行。
-                  .responseRegion({ x: '-50%', y: '-80%', width: '200%', height: '260%' })
-                  .hitTestBehavior(HitTestMode.Block)
-                  .onClick(() => {
-                    this.onUnreadBadgeClick(this.topic);
-                  })
+              if (this.hasBadges()) {
+                TopicMetadataBadges({
+                  category: this.category,
+                  parentCategory: this.parentCategory,
+                  tags: this.topic.tags
+                })
+                .layoutWeight(1)
               } else {
-                Text(`${this.getReplyCount()} 回复`)
-                  .fontSize(13)
-                  .fontColor($r('app.color.text_secondary'))
+                Blank()
               }
 
-              Text('·')
-                .fontSize(13)
-                .fontColor($r('app.color.text_secondary'))
-                .margin({ left: 8, right: 8 })
-
-              Text(`${this.topic.likeCount ? this.topic.likeCount : 0} 赞`)
-                .fontSize(13)
-                .fontColor($r('app.color.text_secondary'))
+              if (this.getRelativeTime().length > 0) {
+                Text(this.getRelativeTime())
+                  .fontSize(13)
+                  .fontColor($r('app.color.text_secondary'))
+                  .margin({ left: 8 })
+              }
             }
-
-            if (this.getRelativeTime().length > 0) {
-              Text(this.getRelativeTime())
-                .fontSize(13)
-                .fontColor($r('app.color.text_secondary'))
-                .margin({ left: 8 })
-            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+            .margin({ top: 3 })
           }
-          .width('100%')
-          .justifyContent(FlexAlign.SpaceBetween)
-          .margin({ top: 4 })
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
@@ -102,22 +85,18 @@ export struct TopicListItem {
       })
       .alignItems(VerticalAlign.Top)
       .onClick(() => {
-        this.onTopicClick(this.topic);
+        // 有未读徽标 → 整行点击直跳第一条未读楼;否则从第 1 层打开。
+        if (this.hasUnreadBadge()) {
+          this.onUnreadBadgeClick(this.topic);
+        } else {
+          this.onTopicClick(this.topic);
+        }
       })
     }
   }
 
   private hasUnreadBadge(): boolean {
     return this.topic.unreadPosts !== undefined && this.topic.unreadPosts > 0;
-  }
-
-  // 回复数口径与网页一致:总楼层数减去主楼(posts_count - 1)。
-  private getReplyCount(): number {
-    const postsCount: number | undefined = this.topic.postsCount;
-    if (typeof postsCount === 'number' && postsCount > 0) {
-      return postsCount - 1;
-    }
-    return 0;
   }
 
   private getRelativeTime(): string {

@@ -35,6 +35,50 @@
     {
       "name": "avatar_fg",
       "value": "#4B5563"
+    },
+    {
+      "name": "ld_accent",
+      "value": "#0088CC"
+    },
+    {
+      "name": "ld_love",
+      "value": "#FA6C8D"
+    },
+    {
+      "name": "ld_success",
+      "value": "#009900"
+    },
+    {
+      "name": "ld_danger",
+      "value": "#C80001"
+    },
+    {
+      "name": "ld_gold",
+      "value": "#D4A017"
+    },
+    {
+      "name": "ld_silver",
+      "value": "#9EA7AD"
+    },
+    {
+      "name": "ld_bronze",
+      "value": "#B87333"
+    },
+    {
+      "name": "surface_band",
+      "value": "#F6F6F6"
+    },
+    {
+      "name": "page_bg_gray",
+      "value": "#F2F4F6"
+    },
+    {
+      "name": "surface_card",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "text_faint",
+      "value": "#909090"
     }
   ]
 }

@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ArkDO 个人中心 · Linux.do 风格 v3</title>
+<style>
+  :root {
+    --bg: #F4F6F8; --surface: #FFFFFF; --text: #222; --muted: #646464;
+    --border: #E4E7EC; --accent: #0088CC;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131519; --surface: #1E2126; --text: #E7E9EE; --muted: #9AA0AB;
+      --border: #2E3238; --accent: #33A6DD;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text); margin: 0;
+    font-family: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", -apple-system, sans-serif;
+    line-height: 1.6; padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; }
+  h1 { font-size: 26px; font-weight: 700; margin: 0 0 6px; }
+  .lede { color: var(--muted); font-size: 14px; margin: 0 0 32px; max-width: 66ch; }
+
+  .frames { display: flex; gap: 36px; flex-wrap: wrap; align-items: flex-start; }
+  .frame-col { display: flex; flex-direction: column; gap: 10px; }
+  .frame-label { font-size: 13px; color: var(--muted); text-align: center; }
+
+  .phone {
+    width: 375px; border-radius: 30px; padding: 8px;
+    border: 1px solid var(--border); background: #FDFDFE;
+    box-shadow: 0 20px 50px -30px rgba(20, 30, 55, 0.4);
+  }
+  .phone .screen { border-radius: 23px; overflow: hidden; }
+
+  /* ============ Discourse / Linux.do 调色板 ============ */
+  /* 浅色:用户提供的站点实测变量
+     primary #222 / secondary #fff / tertiary #08c / quaternary #e45735
+     highlight #ffff4d / danger #c80001 / success #090 / love #fa6c8d
+     primary-low #e9e9e9 / primary-medium #909090 / primary-high #646464
+     d-selected #d1f0ff / tertiary-low #d1efff                           */
+  .ph-light {
+    --p-bg: #FFFFFF;
+    --p-text: #222222;
+    --p-high: #646464;        /* primary-high  次级文字 */
+    --p-mid: #909090;         /* primary-medium 弱文字 */
+    --p-low: #E9E9E9;         /* primary-low   边框/分割 */
+    --p-lowest: #F6F6F6;      /* 弱底色(chip/banner) */
+    --p-tert: #0088CC;        /* tertiary  链接/主操作 */
+    --p-tert-low: #D1EFFF;    /* tertiary-low 选中底 */
+    --p-quat: #E45735;        /* quaternary */
+    --p-danger: #C80001;
+    --p-success: #009900;
+    --p-love: #FA6C8D;
+    --p-gold: #D4A017; --p-silver: #9EA7AD; --p-bronze: #B87333;
+  }
+  /* 深色:按同一语义推导(站点深色方案待用户提供后替换) */
+  .ph-dark {
+    --p-bg: #17191D;
+    --p-text: #DDDDDD;
+    --p-high: #A8ADB5;
+    --p-mid: #7C828B;
+    --p-low: #2C2F34;
+    --p-lowest: #202329;
+    --p-tert: #33A6DD;
+    --p-tert-low: #123246;
+    --p-quat: #E4694A;
+    --p-danger: #E85D5D;
+    --p-success: #4CAF50;
+    --p-love: #FA6C8D;
+    --p-gold: #E0B84C; --p-silver: #9AA6B8; --p-bronze: #C89066;
+  }
+  .screen { background: var(--p-bg); color: var(--p-text); font-size: 14px; }
+
+  .statusbar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 24px 4px; font-size: 13px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .sb-icons { display: flex; gap: 5px; align-items: center; }
+  .sb-icons span { display: block; background: var(--p-text); }
+  .sb-signal { width: 15px; height: 9px; clip-path: polygon(0 100%, 100% 0, 100% 100%); }
+  .sb-batt { width: 20px; height: 10px; border-radius: 3px; opacity: 0.9; }
+
+  /* ---------- 用户头部:Discourse 个人页横幅 ---------- */
+  .profile-head {
+    background: linear-gradient(180deg, var(--p-tert-low), var(--p-bg) 88%);
+    padding: 18px 20px 0;
+  }
+  .ph-row { display: flex; gap: 14px; align-items: center; }
+  .avatar {
+    width: 64px; height: 64px; border-radius: 50%; flex: none;
+    background: var(--p-tert); color: #fff; font-size: 27px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ph-main { flex: 1; min-width: 0; }
+  .ph-name { font-size: 20px; font-weight: 700; line-height: 1.3; }
+  .ph-handle { font-size: 13px; color: var(--p-high); margin-top: 1px; }
+  .ph-title { font-size: 12px; color: var(--p-mid); margin-top: 3px; }
+  .ph-meta { font-size: 12px; color: var(--p-mid); padding: 10px 0 12px; }
+  .ph-meta b { color: var(--p-high); font-weight: 600; }
+
+  /* Discourse 式横向页签 */
+  .usertabs { display: flex; gap: 4px; border-bottom: 1px solid var(--p-low); padding: 0 12px; }
+  .utab {
+    padding: 8px 12px 9px; font-size: 14px; color: var(--p-high);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .utab.active { color: var(--p-text); font-weight: 600; border-bottom-color: var(--p-tert); }
+
+  /* ---------- 统计(Discourse 摘要式) ---------- */
+  .sec-h {
+    font-size: 13px; font-weight: 700; color: var(--p-high);
+    padding: 18px 20px 4px; display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .sec-h a { font-size: 12px; font-weight: 400; color: var(--p-tert); text-decoration: none; }
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    padding: 8px 10px 6px; row-gap: 14px;
+  }
+  .stat { text-align: center; }
+  .stat b { display: block; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 11px; color: var(--p-mid); }
+
+  .divider { height: 1px; background: var(--p-low); margin: 14px 0 0; }
+
+  /* ---------- 快捷入口:链接蓝 + 语义色 ---------- */
+  .quick-row { display: grid; grid-template-columns: repeat(4, 1fr); padding: 14px 8px 4px; }
+  .quick {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--p-high);
+  }
+  .quick .q-ic { position: relative; width: 24px; height: 24px; }
+  .quick svg { width: 24px; height: 24px; stroke: var(--p-high); }
+  .quick .ic-love svg { stroke: var(--p-love); }
+  .q-badge {
+    position: absolute; top: -5px; right: -9px; min-width: 16px; height: 16px;
+    border-radius: 8px; color: #fff; font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; padding: 0 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .q-badge.hi { background: var(--p-danger); }   /* 高优先级:私信 */
+  .q-badge.norm { background: var(--p-tert); }   /* 常规未读:通知/草稿 */
+
+  /* ---------- 徽章:Discourse 徽章卡 ---------- */
+  .badge-scroll { display: flex; gap: 8px; overflow-x: auto; padding: 8px 20px 4px; scrollbar-width: none; }
+  .badge-scroll::-webkit-scrollbar { display: none; }
+  .badge-chip {
+    flex: none; display: flex; align-items: center; gap: 7px; font-size: 12.5px;
+    color: var(--p-high); background: var(--p-lowest);
+    border: 1px solid var(--p-low); border-radius: 4px; padding: 5px 10px;
+  }
+  .b-dot { width: 9px; height: 9px; border-radius: 50%; }
+  .b-gold { background: var(--p-gold); }
+  .b-silver { background: var(--p-silver); }
+  .b-bronze { background: var(--p-bronze); }
+
+  /* ---------- 最近活动:话题列表行 ---------- */
+  .topic-row { padding: 12px 20px 11px; border-bottom: 1px solid var(--p-low); }
+  .t-title { font-size: 14.5px; line-height: 1.45; color: var(--p-text); }
+  .t-title .reply-ic { color: var(--p-mid); font-size: 12px; margin-right: 4px; }
+  .t-meta { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 12px; color: var(--p-mid); }
+  .cat { display: inline-flex; align-items: center; gap: 5px; }
+  .cat i { width: 9px; height: 9px; display: inline-block; }
+  .t-meta .spacer { flex: 1; }
+  .t-meta .n { font-variant-numeric: tabular-nums; }
+  .solved { color: var(--p-success); font-weight: 600; }
+  .more-link { display: block; padding: 10px 20px 2px; font-size: 13px; color: var(--p-tert); text-decoration: none; }
+
+  /* ---------- 列表行(设置等) ---------- */
+  .cell { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--p-low); }
+  .cell svg { width: 20px; height: 20px; stroke: var(--p-high); flex: none; }
+  .cell-label { flex: 1; font-size: 14.5px; }
+  .cell-value { color: var(--p-mid); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .chev { color: var(--p-mid); font-size: 15px; flex: none; }
+  .logout { text-align: center; padding: 14px 20px 4px; font-size: 14.5px; color: var(--p-danger); }
+
+  /* ---------- Tab 栏 ---------- */
+  .tabbar { display: flex; border-top: 1px solid var(--p-low); padding: 8px 0 18px; margin-top: 14px; }
+  .tab { flex: 1; text-align: center; font-size: 11px; color: var(--p-mid); position: relative; }
+  .tab svg { width: 22px; height: 22px; stroke: var(--p-mid); display: block; margin: 0 auto 2px; }
+  .tab.active { color: var(--p-tert); font-weight: 600; }
+  .tab.active svg { stroke: var(--p-tert); }
+  .tab .q-badge { position: absolute; top: -2px; left: calc(50% + 6px); }
+
+  /* ---------- 未登录 ---------- */
+  .anon-hero { text-align: center; padding: 34px 24px 6px; }
+  .anon-avatar {
+    width: 68px; height: 68px; border-radius: 50%; margin: 0 auto 16px;
+    background: var(--p-lowest); border: 1px solid var(--p-low);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .anon-avatar svg { width: 32px; height: 32px; stroke: var(--p-mid); }
+  .anon-title { font-size: 19px; font-weight: 700; }
+  .anon-sub { font-size: 13px; color: var(--p-high); margin-top: 6px; }
+  .login-btn {
+    margin: 20px 0 4px; display: inline-block; background: var(--p-tert); color: #fff;
+    font-size: 15px; font-weight: 600; padding: 10px 40px; border-radius: 4px;
+  }
+  .anon-perks { margin: 12px 0 18px; padding: 0; list-style: none; }
+  .anon-perks li { font-size: 13px; color: var(--p-mid); padding: 3px 0; }
+
+  /* ---------- 说明 ---------- */
+  h2 { font-size: 18px; font-weight: 700; margin: 52px 0 14px; }
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .note { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 16px 18px; }
+  .note h3 { margin: 0 0 6px; font-size: 14.5px; }
+  .note p { margin: 0; font-size: 13px; color: var(--muted); }
+  .note code {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12px;
+    background: var(--bg); border-radius: 4px; padding: 1px 5px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ArkDO 个人中心 · Linux.do 风格 v3</h1>
+  <p class="lede">配色直接取自 Linux.do 站点实测的 Discourse 变量:链接蓝 #0088CC、点赞粉 #fa6c8d、采纳绿 #090、危险红 #c80001、文字 #222 与三级灰阶。版式模仿 Discourse 个人页:横幅渐变头部、横向页签、话题列表行、4px 小圆角。</p>
+
+  <div class="frames">
+
+    <!-- ===== 登录态 · 浅色(深色版由 JS 克隆) ===== -->
+    <div class="frame-col">
+      <div class="phone">
+        <div class="screen ph-light" id="phone-main">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sb-icons"><span class="sb-signal"></span><span class="sb-batt"></span></span>
+          </div>
+
+          <!-- 1 个人页横幅头部 -->
+          <div class="profile-head">
+            <div class="ph-row">
+              <div class="avatar">云</div>
+              <div class="ph-main">
+                <div class="ph-name">云樵</div>
+                <div class="ph-handle">yinqiao</div>
+                <div class="ph-title">活跃用户 · 信任等级 3</div>
+              </div>
+            </div>
+            <div class="ph-meta">加入于 <b>2025-02-14</b> · 最近发帖 <b>2 小时前</b> · 浏览量 <b>5.6k</b></div>
+          </div>
+
+          <!-- 2 Discourse 式页签 -->
+          <div class="usertabs">
+            <div class="utab active">摘要</div>
+            <div class="utab">活动</div>
+            <div class="utab">徽章</div>
+            <div class="utab">偏好设置</div>
+          </div>
+
+          <!-- 3 统计 -->
+          <div class="sec-h">统计<a>完整摘要 ›</a></div>
+          <div class="stats-grid">
+            <div class="stat"><b>512</b><span>访问天数</span></div>
+            <div class="stat"><b>68h</b><span>阅读时长</span></div>
+            <div class="stat"><b>3.4k</b><span>收到的赞</span></div>
+            <div class="stat"><b>1.2k</b><span>送出的赞</span></div>
+            <div class="stat"><b>42</b><span>创建话题</span></div>
+            <div class="stat"><b>866</b><span>回复</span></div>
+            <div class="stat"><b>3.2k</b><span>浏览话题</span></div>
+            <div class="stat"><b>9</b><span>解决方案</span></div>
+          </div>
+          <div class="divider"></div>
+
+          <!-- 4 快捷入口 -->
+          <div class="quick-row">
+            <div class="quick">
+              <span class="q-ic">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg>
+                <span class="q-badge hi">2</span>
+              </span>私信
+            </div>
+            <div class="quick">
+              <span class="q-ic">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>
+              </span>书签
+            </div>
+            <div class="quick ic-love">
+              <span class="q-ic">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21C7 17 3 13.5 3 9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 9 2.5c0 4-4 7.5-9 11.5z"/></svg>
+              </span>我的点赞
+            </div>
+            <div class="quick">
+              <span class="q-ic">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/></svg>
+                <span class="q-badge norm">1</span>
+              </span>草稿
+            </div>
+          </div>
+          <div class="divider"></div>
+
+          <!-- 5 徽章 -->
+          <div class="sec-h">徽章 · 27<a>全部 ›</a></div>
+          <div class="badge-scroll">
+            <span class="badge-chip"><span class="b-dot b-gold"></span>三级用户</span>
+            <span class="badge-chip"><span class="b-dot b-silver"></span>年度纪念日</span>
+            <span class="badge-chip"><span class="b-dot b-silver"></span>热情</span>
+            <span class="badge-chip"><span class="b-dot b-bronze"></span>受欢迎的链接</span>
+            <span class="badge-chip"><span class="b-dot b-bronze"></span>读者</span>
+          </div>
+          <div class="divider" style="margin-top:12px"></div>
+
+          <!-- 6 最近活动:Discourse 话题行 -->
+          <div class="sec-h">最近活动<a>我的话题 42 · 回复 866 ›</a></div>
+          <div class="topic-row">
+            <div class="t-title">ArkUI LazyForEach 首屏跳帧问题的一个解法</div>
+            <div class="t-meta">
+              <span class="cat"><i style="background:#0088CC"></i>开发调优</span>
+              <span class="spacer"></span>
+              <span class="n">23 回复</span><span>2 小时前</span>
+            </div>
+          </div>
+          <div class="topic-row">
+            <div class="t-title"><span class="reply-ic">↩</span>回复:鸿蒙上有哪些好用的 Discourse 客户端?</div>
+            <div class="t-meta">
+              <span class="cat"><i style="background:#E45735"></i>搞七捻三</span>
+              <span class="solved">✓ 已采纳</span>
+              <span class="spacer"></span>
+              <span class="n">156 回复</span><span>昨天</span>
+            </div>
+          </div>
+          <a class="more-link">查看全部活动 ›</a>
+          <div class="divider" style="margin-top:10px"></div>
+
+          <!-- 7 设置 -->
+          <div class="sec-h">设置</div>
+          <div class="cell">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14A8.5 8.5 0 0 1 10 4a8 8 0 1 0 10 10z"/></svg>
+            <span class="cell-label">外观</span><span class="cell-value">跟随系统</span><span class="chev">›</span>
+          </div>
+          <div class="cell">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg>
+            <span class="cell-label">账号与安全</span><span class="chev">›</span>
+          </div>
+          <div class="cell">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+            <span class="cell-label">关于 ArkDO</span><span class="cell-value">v0.9.0</span><span class="chev">›</span>
+          </div>
+          <div class="logout">退出登录</div>
+
+          <!-- Tab 栏:通知角标用 tertiary,贴近 Discourse 语义 -->
+          <div class="tabbar">
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7v9h-5v-6h-6v6H4z"/></svg>首页
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>通知
+              <span class="q-badge norm">12</span>
+            </div>
+            <div class="tab active">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>我的
+            </div>
+          </div>
+        </div>
+      </div>
+      <span class="frame-label">登录态 · 浅色(站点实测配色)</span>
+    </div>
+
+    <!-- 深色版占位 -->
+    <div class="frame-col" id="dark-slot">
+      <span class="frame-label">登录态 · 深色(按同语义推导)</span>
+    </div>
+
+    <!-- ===== 未登录态 ===== -->
+    <div class="frame-col">
+      <div class="phone">
+        <div class="screen ph-light">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sb-icons"><span class="sb-signal"></span><span class="sb-batt"></span></span>
+          </div>
+
+          <div class="anon-hero">
+            <div class="anon-avatar">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+            </div>
+            <div class="anon-title">登录 Linux.do</div>
+            <div class="anon-sub">真诚、友善、团结、专业,共建你我引以为荣之社区</div>
+            <div><span class="login-btn">立即登录</span></div>
+            <ul class="anon-perks">
+              <li>参与回帖、点赞与投票</li>
+              <li>私信与实时通知提醒</li>
+              <li>跨设备同步阅读进度</li>
+            </ul>
+          </div>
+
+          <div class="divider"></div>
+          <div class="sec-h">设置</div>
+          <div class="cell">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14A8.5 8.5 0 0 1 10 4a8 8 0 1 0 10 10z"/></svg>
+            <span class="cell-label">外观</span><span class="cell-value">跟随系统</span><span class="chev">›</span>
+          </div>
+          <div class="cell">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+            <span class="cell-label">关于 ArkDO</span><span class="cell-value">v0.9.0</span><span class="chev">›</span>
+          </div>
+
+          <div class="tabbar">
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7v9h-5v-6h-6v6H4z"/></svg>首页
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>通知
+            </div>
+            <div class="tab active">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>我的
+            </div>
+          </div>
+        </div>
+      </div>
+      <span class="frame-label">未登录态 · 浅色</span>
+    </div>
+  </div>
+
+  <h2>这版怎么向 Linux.do 靠拢</h2>
+  <div class="notes">
+    <div class="note">
+      <h3>配色一比一映射</h3>
+      <p>直接使用你抓到的站点变量:链接与主操作 <code>--tertiary #08c</code>,点赞 <code>--love #fa6c8d</code>,已采纳 <code>--success #090</code>,高优先级角标 <code>--danger #c80001</code>,文字与灰阶 <code>#222 / #646464 / #909090 / #e9e9e9</code>,头部横幅渐变用 <code>tertiary-low #d1efff</code>。</p>
+    </div>
+    <div class="note">
+      <h3>Discourse 个人页版式</h3>
+      <p>头部照搬 Web 端个人页:淡蓝横幅 + 大头像 + 用户名/头衔,下接「摘要 / 活动 / 徽章 / 偏好设置」横向页签(active 用 2px 蓝色下划线)。统计块即 Discourse 的「统计」区。</p>
+    </div>
+    <div class="note">
+      <h3>话题列表行</h3>
+      <p>「最近活动」直接用论坛话题行的语法:标题 + 分类色块(开发调优蓝 / 搞七捻三橙红)+ 回复数 + 相对时间,被采纳的回复带绿色 ✓。这是最能让人一眼认出 Linux.do 的元素。</p>
+    </div>
+    <div class="note">
+      <h3>角标语义分级</h3>
+      <p>沿用 Discourse 通知语义:常规未读(通知、草稿)用蓝色 <code>#08c</code> 角标,高优先级(私信)才用红色 <code>#c80001</code>——和网页端头像上的两种气泡一致。</p>
+    </div>
+    <div class="note">
+      <h3>圆角与密度</h3>
+      <p>Discourse 的克制圆角:按钮/徽章 chip 4px,其余直角 + 1px <code>#e9e9e9</code> 分割线;行距和留白比 v2 略紧,更接近论坛的信息密度。</p>
+    </div>
+    <div class="note">
+      <h3>深色是推导的</h3>
+      <p>你只发了浅色变量;深色版按同一语义推导(蓝提亮为 #33A6DD 等)。如果你在站点切到深色模式再跑一遍那段脚本发我,我就把深色也换成实测值。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var light = document.getElementById('phone-main');
+    var slot = document.getElementById('dark-slot');
+    var phone = document.createElement('div');
+    phone.className = 'phone';
+    phone.style.background = '#101114';
+    var dark = light.cloneNode(true);
+    dark.removeAttribute('id');
+    dark.classList.remove('ph-light');
+    dark.classList.add('ph-dark');
+    phone.appendChild(dark);
+    slot.insertBefore(phone, slot.firstChild);
+  })();
+</script>
+</body>
+</html>

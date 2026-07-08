@@ -97,7 +97,8 @@ export struct FaIconView {
     id: '',
     rawfilePath: ''
   };
-  color: string = '#6B7280';
+  // 支持资源色($r),深浅色模式切换时随资源重解析;字符串色值保持兼容。
+  color: ResourceColor = '#6B7280';
   iconSize: number = FALLBACK_FA_ICON_SIZE;
 
   build() {

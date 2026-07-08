@@ -8,4 +8,6 @@ export interface User {
   // unreadNotifications=常规未读(蓝点数字);unreadHighPriorityNotifications=高优先级(私信等)。
   unreadNotifications?: number;
   unreadHighPriorityNotifications?: number;
+  // 未发出的草稿数(current_user.draft_count),个人中心草稿角标用。
+  draftCount?: number;
 }
