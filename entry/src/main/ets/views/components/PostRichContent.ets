@@ -15,6 +15,10 @@ const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
 // 不撑满栏宽，避免小表情被 .width('100%') 拉成大方块。
 const SMALL_IMAGE_MAX: number = 48;
+// 剧透打码字符(块级与行内共用)。想换观感改这一行即可,如 ░(浅)/▒(中)/▓(深)/█(实心)。
+const SPOILER_REDACT_CHAR: string = '▒';
+// 打码字符与图片占位块的颜色,接近正文字色。
+const SPOILER_REDACT_COLOR: string = '#374151';
 
 @Component
 export struct PostRichContent {
@@ -34,6 +38,8 @@ export struct PostRichContent {
   // 作为数据源,才能在投票/撤销就地改 Poll 字段后重渲染;若直接源自普通输入属性 polls,deep 变更不会传播。
   @State private renderablePolls: Poll[] = [];
   @State private expandedDisclosures: string[] = [];
+  // 已揭示的剧透块/行内剧透段。key 是块路径(嵌套时形如 "2-q0-s1"),块级与行内共用。
+  @State private revealedSpoilers: string[] = [];
 
   aboutToAppear(): void {
     this.renderablePolls = this.polls;
@@ -42,7 +48,7 @@ export struct PostRichContent {
   build() {
     Column() {
       ForEach(this.getRenderableBlocks(), (block: RichBlock, index: number) => {
-        this.BlockView(block, index)
+        this.BlockView(block, index, `${index}`)
       }, (block: RichBlock, index: number) => `${index}-${block.type}`)
     }
     .width('100%')
@@ -50,21 +56,23 @@ export struct PostRichContent {
   }
 
   @Builder
-  private BlockView(block: RichBlock, index: number) {
+  private BlockView(block: RichBlock, index: number, path: string) {
     if (block.type === RichBlockType.PARAGRAPH) {
-      this.InlineTextBlock(this.safeInlines(block), index > 0 ? 10 : 0)
+      this.InlineTextBlock(this.safeInlines(block), index > 0 ? 10 : 0, path)
     } else if (block.type === RichBlockType.HEADING) {
-      this.HeadingBlock(block, index > 0 ? 14 : 0)
+      this.HeadingBlock(block, index > 0 ? 14 : 0, path)
     } else if (block.type === RichBlockType.QUOTE) {
-      this.QuoteBlock(block, index > 0 ? 12 : 0)
+      this.QuoteBlock(block, index > 0 ? 12 : 0, path)
     } else if (block.type === RichBlockType.CODE) {
       this.CodeBlock(block, index > 0 ? 12 : 0)
     } else if (block.type === RichBlockType.IMAGE) {
       this.ImageBlock(block, index > 0 ? 12 : 0)
     } else if (block.type === RichBlockType.LIST) {
-      this.ListBlock(block, index > 0 ? 10 : 0)
+      this.ListBlock(block, index > 0 ? 10 : 0, path)
     } else if (block.type === RichBlockType.DISCLOSURE) {
-      this.DisclosureBlock(block, index, index > 0 ? 12 : 0)
+      this.DisclosureBlock(block, index, index > 0 ? 12 : 0, path)
+    } else if (block.type === RichBlockType.SPOILER) {
+      this.SpoilerBlock(block, index > 0 ? 12 : 0, path)
     } else if (block.type === RichBlockType.DIVIDER) {
       Divider()
         .strokeWidth(1)
@@ -102,10 +110,10 @@ export struct PostRichContent {
   }
 
   @Builder
-  private InlineTextBlock(inlines: RichInlineNode[], marginTop: number) {
+  private InlineTextBlock(inlines: RichInlineNode[], marginTop: number, path: string) {
     Text() {
       ForEach(inlines, (token: RichInlineNode, index: number) => {
-        this.InlineToken(token)
+        this.InlineToken(token, path)
       }, (token: RichInlineNode, index: number) => `${index}-${token.type}-${token.text}`)
     }
     .fontSize(15)
@@ -117,8 +125,29 @@ export struct PostRichContent {
   }
 
   @Builder
-  private InlineToken(token: RichInlineNode) {
-    if (token.type === RichInlineType.IMAGE && token.src && token.src.length > 0) {
+  private InlineToken(token: RichInlineNode, path: string) {
+    if (token.spoiler && !this.isSpoilerRevealed(path)) {
+      // 行内剧透未揭示:逐字符替换成 ░ 打码,点击揭示同段全部剧透。
+      // 复制到的也只是 ░,不会漏真实文字。
+      if (token.type === RichInlineType.LINE_BREAK) {
+        Span('\n')
+      } else if (token.type === RichInlineType.IMAGE) {
+        // 行内 emoji 用一个打码字符占位,隐藏时不加载图片。
+        Span(SPOILER_REDACT_CHAR)
+          .fontSize(15)
+          .fontColor(SPOILER_REDACT_COLOR)
+          .onClick(() => {
+            this.toggleSpoiler(path);
+          })
+      } else {
+        Span(this.redactChars(token.text))
+          .fontSize(token.type === RichInlineType.CODE || token.code ? 14 : 15)
+          .fontColor(SPOILER_REDACT_COLOR)
+          .onClick(() => {
+            this.toggleSpoiler(path);
+          })
+      }
+    } else if (token.type === RichInlineType.IMAGE && token.src && token.src.length > 0) {
       ImageSpan(token.src)
         .width(18)
         .height(18)
@@ -152,11 +181,32 @@ export struct PostRichContent {
           this.openLink(token.href as string);
         })
     } else if (token.type === RichInlineType.CODE || token.code) {
+      if (token.spoiler) {
+        Span(token.text)
+          .fontSize(14)
+          .fontFamily('monospace')
+          .fontColor('#B45309')
+          .backgroundColor('#FEF3C7')
+          .onClick(() => {
+            this.toggleSpoiler(path);
+          })
+      } else {
+        Span(token.text)
+          .fontSize(14)
+          .fontFamily('monospace')
+          .fontColor('#B45309')
+          .backgroundColor('#FEF3C7')
+      }
+    } else if (token.spoiler) {
+      // 已揭示的行内剧透文字:再点一下恢复遮蔽(链接/emoji 保持各自的点击行为)。
       Span(token.text)
-        .fontSize(14)
-        .fontFamily('monospace')
-        .fontColor('#B45309')
-        .backgroundColor('#FEF3C7')
+        .fontSize(15)
+        .fontColor('#374151')
+        .fontWeight(token.bold ? FontWeight.Bold : FontWeight.Normal)
+        .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
+        .onClick(() => {
+          this.toggleSpoiler(path);
+        })
     } else {
       Span(token.text)
         .fontSize(15)
@@ -167,10 +217,10 @@ export struct PostRichContent {
   }
 
   @Builder
-  private HeadingBlock(block: RichBlock, marginTop: number) {
+  private HeadingBlock(block: RichBlock, marginTop: number, path: string) {
     Text() {
       ForEach(this.safeInlines(block), (token: RichInlineNode, index: number) => {
-        this.InlineToken(token)
+        this.InlineToken(token, path)
       }, (token: RichInlineNode, index: number) => `${index}-${token.type}-${token.text}`)
     }
     .fontSize(this.getHeadingFontSize(block.level ? block.level : 2))
@@ -182,11 +232,11 @@ export struct PostRichContent {
   }
 
   @Builder
-  private QuoteBlock(block: RichBlock, marginTop: number) {
+  private QuoteBlock(block: RichBlock, marginTop: number, path: string) {
     Column() {
       Column() {
         ForEach(this.safeBlocks(block), (inner: RichBlock, index: number) => {
-          this.BlockView(inner, index)
+          this.BlockView(inner, index, `${path}-q${index}`)
         }, (inner: RichBlock, index: number) => `${index}-${inner.type}`)
       }
       .width('100%')
@@ -329,7 +379,7 @@ export struct PostRichContent {
   }
 
   @Builder
-  private ListBlock(block: RichBlock, marginTop: number) {
+  private ListBlock(block: RichBlock, marginTop: number, path: string) {
     Column() {
       ForEach(this.safeItems(block), (item: RichListItem, index: number) => {
         Row() {
@@ -339,7 +389,7 @@ export struct PostRichContent {
             .width(24)
 
           Column() {
-            this.InlineTextBlock(item.inlines, 0)
+            this.InlineTextBlock(item.inlines, 0, `${path}-i${index}`)
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
@@ -457,7 +507,7 @@ export struct PostRichContent {
   }
 
   @Builder
-  private DisclosureBlock(block: RichBlock, index: number, marginTop: number) {
+  private DisclosureBlock(block: RichBlock, index: number, marginTop: number, path: string) {
     Column() {
       Row() {
         Text('▼')
@@ -483,7 +533,7 @@ export struct PostRichContent {
       if (this.isDisclosureExpanded(index)) {
         Column() {
           ForEach(this.safeBlocks(block), (inner: RichBlock, childIndex: number) => {
-            this.BlockView(inner, childIndex)
+            this.BlockView(inner, childIndex, `${path}-d${childIndex}`)
           }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
         }
         .width('100%')
@@ -495,6 +545,145 @@ export struct PostRichContent {
     .backgroundColor('#F5F5F5')
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
+  }
+
+  // 块级剧透:涂黑(redaction)。未揭示时不渲染真实内容,渲染「涂黑版」——每段文字
+  // 变成透明字 + 深色底的实心条(行数/宽度与真实文字一致,换行自动断条,即 ███ 观感),
+  // 图片变成深灰占位块(不加载图片本身)。点整块揭示;揭示后右上角「隐藏」胶囊糊回去
+  // (不能依赖点空白冒泡:正文 Text 开 copyOption、图片/代码块各有点击消费者)。
+  @Builder
+  private SpoilerBlock(block: RichBlock, marginTop: number, path: string) {
+    if (this.isSpoilerRevealed(path)) {
+      Stack() {
+        Column() {
+          ForEach(this.safeBlocks(block), (inner: RichBlock, childIndex: number) => {
+            this.BlockView(inner, childIndex, `${path}-s${childIndex}`)
+          }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+
+        Row() {
+          Image($rawfile('fa_icons/eye-slash.svg'))
+            .width(12)
+            .height(12)
+            .objectFit(ImageFit.Contain)
+            .renderMode(ImageRenderMode.Template)
+            .fillColor('#FFFFFF')
+            .draggable(false)
+          Text('隐藏')
+            .fontSize(11)
+            .fontColor('#FFFFFF')
+            .margin({ left: 4 })
+        }
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .borderRadius(12)
+        .backgroundColor('#8C111827')
+        .position({ top: 0, right: 0 })
+        .onClick(() => {
+          this.toggleSpoiler(path);
+        })
+      }
+      .width('100%')
+      .margin({ top: marginTop })
+      .alignContent(Alignment.TopStart)
+    } else {
+      Column() {
+        ForEach(this.safeBlocks(block), (inner: RichBlock, childIndex: number) => {
+          this.RedactedBlockView(inner, childIndex)
+        }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .margin({ top: marginTop })
+      .onClick(() => {
+        this.toggleSpoiler(path);
+      })
+    }
+  }
+
+  // 打码占位。文字类块:逐字符替换为 ░(U+2591),行数/长短与真实内容一致但读不出
+  // 内容,复制到的也只是 ░。图片:深灰块占位(隐藏时不创建 Image,不加载图片)。
+  @Builder
+  private RedactedBlockView(block: RichBlock, index: number) {
+    if (block.type === RichBlockType.IMAGE) {
+      Column()
+        .width('60%')
+        .aspectRatio(this.hasImageSize(block) ? this.getImageAspectRatio(block) : 1.6)
+        .constraintSize({ maxHeight: 220 })
+        .backgroundColor(SPOILER_REDACT_COLOR)
+        .borderRadius(4)
+        .margin({ top: index > 0 ? 10 : 0 })
+    } else if (block.blocks && block.blocks.length > 0) {
+      // 引用/折叠等容器:拍平递归打码,不保留容器样式(样式本身也可能剧透)。
+      ForEach(block.blocks, (inner: RichBlock, childIndex: number) => {
+        this.RedactedBlockView(inner, index + childIndex)
+      }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+    } else {
+      Text(this.redactChars(this.redactedBlockText(block)))
+        .fontSize(15)
+        .lineHeight(22)
+        .fontColor(SPOILER_REDACT_COLOR)
+        .width('100%')
+        .margin({ top: index > 0 ? 10 : 0 })
+    }
+  }
+
+  // 逐字符打码:换行保留(行结构可见),其余字符一律替换成打码字符。
+  private redactChars(text: string): string {
+    let out: string = '';
+    for (let i: number = 0; i < text.length; i++) {
+      out = `${out}${text.charAt(i) === '\n' ? '\n' : SPOILER_REDACT_CHAR}`;
+    }
+    return out;
+  }
+
+  // 打码底稿:只用于撑出与真实内容一致的行数/长短,展示前必经 redactChars 替换。
+  private redactedBlockText(block: RichBlock): string {
+    if (block.type === RichBlockType.CODE && block.text && block.text.length > 0) {
+      return block.text;
+    }
+    if (block.inlines && block.inlines.length > 0) {
+      let text: string = '';
+      for (let i: number = 0; i < block.inlines.length; i++) {
+        text = `${text}${block.inlines[i].text}`;
+      }
+      if (text.trim().length > 0) {
+        return text;
+      }
+    }
+    if (block.items && block.items.length > 0) {
+      const lines: string[] = [];
+      for (let i: number = 0; i < block.items.length; i++) {
+        let line: string = '';
+        const inlines: RichInlineNode[] = block.items[i].inlines;
+        for (let j: number = 0; j < inlines.length; j++) {
+          line = `${line}${inlines[j].text}`;
+        }
+        lines.push(line);
+      }
+      return lines.join('\n');
+    }
+    if (block.text && block.text.length > 0) {
+      return block.text;
+    }
+    return SPOILER_REDACT_CHAR.repeat(8);
+  }
+
+  private isSpoilerRevealed(path: string): boolean {
+    return this.revealedSpoilers.indexOf(path) >= 0;
+  }
+
+  // 揭示/恢复遮蔽切换(与官方 web 一致,可反复点)。
+  private toggleSpoiler(path: string): void {
+    this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
+      if (this.isSpoilerRevealed(path)) {
+        this.revealedSpoilers = this.revealedSpoilers.filter((item: string) => item !== path);
+      } else {
+        this.revealedSpoilers = this.revealedSpoilers.concat([path]);
+      }
+    });
   }
 
   private getRenderableBlocks(): RichBlock[] {
@@ -644,16 +833,18 @@ export struct PostRichContent {
   }
 
   // 收集当前 post 内所有块级图片（含嵌在引用/折叠块里的），按出现顺序，
-  // 看图用高清原图 href；行内 emoji 不计入。
+  // 看图用高清原图 href；行内 emoji 不计入。未揭示的剧透块里的图片不收集,
+  // 否则从其他图片左右滑动就能看到剧透图。路径前缀规则须与 BlockView 一致。
   private collectImages(): ViewerImage[] {
     const result: ViewerImage[] = [];
-    this.collectImagesFrom(this.getRenderableBlocks(), result);
+    this.collectImagesFrom(this.getRenderableBlocks(), result, '');
     return result;
   }
 
-  private collectImagesFrom(blocks: RichBlock[], result: ViewerImage[]): void {
+  private collectImagesFrom(blocks: RichBlock[], result: ViewerImage[], pathPrefix: string): void {
     for (let i: number = 0; i < blocks.length; i++) {
       const block: RichBlock = blocks[i];
+      const path: string = `${pathPrefix}${i}`;
       if (block.type === RichBlockType.IMAGE) {
         const primary: string = this.primaryImageUrl(block);
         if (primary.length > 0) {
@@ -663,7 +854,17 @@ export struct PostRichContent {
         }
       }
       if (block.blocks && block.blocks.length > 0) {
-        this.collectImagesFrom(block.blocks, result);
+        if (block.type === RichBlockType.SPOILER) {
+          if (this.isSpoilerRevealed(path)) {
+            this.collectImagesFrom(block.blocks, result, `${path}-s`);
+          }
+        } else if (block.type === RichBlockType.QUOTE) {
+          this.collectImagesFrom(block.blocks, result, `${path}-q`);
+        } else if (block.type === RichBlockType.DISCLOSURE) {
+          this.collectImagesFrom(block.blocks, result, `${path}-d`);
+        } else {
+          this.collectImagesFrom(block.blocks, result, `${path}-x`);
+        }
       }
     }
   }

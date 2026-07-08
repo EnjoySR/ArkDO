@@ -141,6 +141,69 @@ export default function cookedHtmlParserTest() {
       expect(blocks[0].pollName).assertEqual('poll');
     });
 
+    it('parsesBlockSpoilerAsSpoilerBlockWithInnerContent', 0, () => {
+      const html: string = '<div class="spoiler"><p>剧透正文 <strong>加粗</strong></p>' +
+        '<p><img src="/uploads/default/original/1X/s.png" width="320" height="180"></p></div>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.SPOILER);
+      const inner: RichBlock[] = blocks[0].blocks ? blocks[0].blocks as RichBlock[] : [];
+      expect(inner.length).assertEqual(2);
+      expect(inner[0].type).assertEqual(RichBlockType.PARAGRAPH);
+      const innerInlines: RichInlineNode[] = inner[0].inlines ? inner[0].inlines as RichInlineNode[] : [];
+      expect(innerInlines[0].text).assertEqual('剧透正文 ');
+      expect(inner[1].type).assertEqual(RichBlockType.IMAGE);
+    });
+
+    it('marksInlineSpoilerSpansAndKeepsSurroundingTextPlain', 0, () => {
+      const html: string = '<p>前文 <span class="spoiler">秘密 <em>内容</em></span> 后文</p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.PARAGRAPH);
+      const inlines: RichInlineNode[] = blocks[0].inlines ? blocks[0].inlines as RichInlineNode[] : [];
+      expect(inlines.length).assertEqual(4);
+      expect(inlines[0].text).assertEqual('前文 ');
+      expect(!!inlines[0].spoiler).assertFalse();
+      expect(inlines[1].text).assertEqual('秘密 ');
+      expect(inlines[1].spoiler).assertTrue();
+      expect(inlines[2].text).assertEqual('内容');
+      expect(inlines[2].spoiler).assertTrue();
+      expect(inlines[2].italic).assertTrue();
+      expect(inlines[3].text).assertEqual(' 后文');
+      expect(!!inlines[3].spoiler).assertFalse();
+    });
+
+    it('marksInlineSpoilerEmojiImage', 0, () => {
+      const html: string = '<p><span class="spoiler">看这个 <img src="/images/emoji/apple/joy.png" ' +
+        'title=":joy:" class="emoji" alt=":joy:" width="20" height="20"></span></p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      const inlines: RichInlineNode[] = blocks[0].inlines ? blocks[0].inlines as RichInlineNode[] : [];
+      expect(inlines.length).assertEqual(2);
+      expect(inlines[0].spoiler).assertTrue();
+      expect(inlines[1].type).assertEqual(RichInlineType.IMAGE);
+      expect(inlines[1].spoiler).assertTrue();
+    });
+
+    it('keepsPlainSpansUnmarkedAfterSpoilerCloses', 0, () => {
+      const html: string = '<p><span class="spoiler">A</span><span class="chcxy">B</span>C</p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      const inlines: RichInlineNode[] = blocks[0].inlines ? blocks[0].inlines as RichInlineNode[] : [];
+      expect(inlines.length).assertEqual(2);
+      expect(inlines[0].text).assertEqual('A');
+      expect(inlines[0].spoiler).assertTrue();
+      // spoiler 闭合后普通 span 与裸文本合并为无标记文本。
+      expect(inlines[1].text).assertEqual('BC');
+      expect(!!inlines[1].spoiler).assertFalse();
+    });
+
     it('marksUnsupportedDiscourseBlocksAsTodo', 0, () => {
       const html: string = '<table><tr><td>A</td></tr></table>';
 

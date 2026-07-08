@@ -8,6 +8,8 @@ export enum RichBlockType {
   IMAGE = 'image',
   LIST = 'list',
   DISCLOSURE = 'disclosure',
+  // discourse-spoiler-alert 块级剧透:<div class="spoiler">…</div>,揭示前整块遮蔽。
+  SPOILER = 'spoiler',
   DIVIDER = 'divider',
   POLL = 'poll',
   ONEBOX = 'onebox',
@@ -33,6 +35,8 @@ export interface RichInlineNode {
   code?: boolean;
   // 附件下载链接(Discourse <a class="attachment"> 或指向 /uploads/ 的链接):渲染时前置下载图标,点击触发原生下载。
   attachment?: boolean;
+  // 行内剧透(<span class="spoiler">):揭示前渲染为涂抹条,点击后显示。
+  spoiler?: boolean;
 }
 
 export interface RichListItem {
@@ -71,6 +75,9 @@ class InlineState {
   hrefStack: string[] = [];
   // 与 hrefStack 同步入栈:当前链接是否为附件下载链接。
   attachmentStack: boolean[] = [];
+  // 每遇到一个 <span> 就入栈(是否带 spoiler class);</span> 出栈。
+  // 闭合标签不带 class,只能整体跟踪 span 嵌套才能正确配对。
+  spanSpoilerStack: boolean[] = [];
 
   clone(): InlineState {
     const state: InlineState = new InlineState();
@@ -79,6 +86,7 @@ class InlineState {
     state.code = this.code;
     state.hrefStack = this.hrefStack.slice();
     state.attachmentStack = this.attachmentStack.slice();
+    state.spanSpoilerStack = this.spanSpoilerStack.slice();
     return state;
   }
 
@@ -94,6 +102,15 @@ class InlineState {
       return false;
     }
     return this.attachmentStack[this.attachmentStack.length - 1];
+  }
+
+  currentSpoiler(): boolean {
+    for (let index: number = 0; index < this.spanSpoilerStack.length; index++) {
+      if (this.spanSpoilerStack[index]) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 
@@ -279,6 +296,17 @@ export class CookedHtmlParser {
       }];
     }
 
+    // discourse-spoiler-alert 块级剧透:<div class="spoiler">(web 端揭示后变 spoiled)。
+    // 内部照常递归解析,遮蔽交给渲染层,避免旧「待实现」占位把明文泄出来。
+    if (CookedHtmlParser.hasClassContaining(openTag, 'spoiler') ||
+      CookedHtmlParser.hasClassContaining(openTag, 'spoiled')) {
+      const spoilerBlocks: RichBlock[] = CookedHtmlParser.parseBlocks(innerHtml);
+      return [{
+        type: RichBlockType.SPOILER,
+        blocks: spoilerBlocks
+      }];
+    }
+
     const unsupportedKind: string = CookedHtmlParser.detectUnsupportedKind(tagName, openTag, innerHtml);
     if (unsupportedKind.length > 0) {
       return [CookedHtmlParser.unsupportedBlock(unsupportedKind, innerHtml)];
@@ -362,11 +390,13 @@ export class CookedHtmlParser {
       const href: string = state.currentHref();
       const type: RichInlineType = state.code > 0 ? RichInlineType.CODE : (href.length > 0 ? RichInlineType.LINK : RichInlineType.TEXT);
       const attachment: boolean = type === RichInlineType.LINK && state.currentAttachment();
+      const spoiler: boolean = state.currentSpoiler();
       const last: RichInlineNode | undefined = out.length > 0 ? out[out.length - 1] : undefined;
       if (last &&
         last.type === type &&
         (last.href ? last.href : '') === href &&
         !!last.attachment === attachment &&
+        !!last.spoiler === spoiler &&
         !!last.bold === state.bold > 0 &&
         !!last.italic === state.italic > 0 &&
         !!last.code === state.code > 0) {
@@ -386,6 +416,9 @@ export class CookedHtmlParser {
       }
       if (attachment) {
         token.attachment = true;
+      }
+      if (spoiler) {
+        token.spoiler = true;
       }
       out.push(token);
     };
@@ -432,6 +465,13 @@ export class CookedHtmlParser {
       } else if (tagName === 'code') {
         flush();
         state.code = Math.max(0, state.code + (closing ? -1 : 1));
+      } else if (tagName === 'span') {
+        flush();
+        if (closing) {
+          state.spanSpoilerStack.pop();
+        } else if (!selfClosing) {
+          state.spanSpoilerStack.push(CookedHtmlParser.hasClassContaining(tag, 'spoiler'));
+        }
       } else if (tagName === 'a') {
         flush();
         if (closing) {
@@ -451,13 +491,17 @@ export class CookedHtmlParser {
         const src: string = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(tag, 'src'));
         const alt: string = CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.extractAttr(tag, 'alt'));
         if (src.length > 0) {
-          out.push({
+          const imageToken: RichInlineNode = {
             type: RichInlineType.IMAGE,
             text: alt.length > 0 ? alt : ' ',
             src,
             alt,
             href: state.currentHref()
-          });
+          };
+          if (state.currentSpoiler()) {
+            imageToken.spoiler = true;
+          }
+          out.push(imageToken);
         } else if (alt.length > 0) {
           appendText(alt);
         }
@@ -755,11 +799,6 @@ export class CookedHtmlParser {
 
     if (tagName === 'table' || combined.indexOf('<table') >= 0) {
       return '表格';
-    }
-
-    if (CookedHtmlParser.hasClassContaining(openTag, 'spoiler') ||
-      CookedHtmlParser.hasClassContaining(openTag, 'spoiled')) {
-      return '折叠/剧透内容';
     }
 
     if (tagName === 'video' || tagName === 'iframe' ||
@@ -1137,6 +1176,9 @@ export class CookedHtmlParser {
     }
     if (block.type === RichBlockType.DISCLOSURE) {
       return (!!block.title && block.title.length > 0) || (!!block.blocks && block.blocks.length > 0);
+    }
+    if (block.type === RichBlockType.SPOILER) {
+      return !!block.blocks && block.blocks.length > 0;
     }
     if (block.type === RichBlockType.POLL) {
       // POLL 块无 inlines/blocks,仅靠 pollName 占位,别被内容过滤器丢掉。
