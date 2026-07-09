@@ -10,6 +10,7 @@ import {
 import { ViewerImage } from './ImageViewer';
 import { AudioPlayer } from './AudioPlayer';
 import { VideoPlayer } from './VideoPlayer';
+import { FaIconView, getFaIcon, FaIconDefinition } from './FaIcon';
 import { Poll, PollVoteResult } from '../../models/TopicDetail';
 import { PollView } from './PollView';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -45,6 +46,9 @@ export struct PostRichContent {
   @State private expandedDisclosures: string[] = [];
   // 已揭示的剧透块/行内剧透段。key 是块路径(嵌套时形如 "2-q0-s1"),块级与行内共用。
   @State private revealedSpoilers: string[] = [];
+  // 被用户点过(即"从默认折叠态翻转")的 callout 路径。展开态 = defaultExpanded XOR (path ∈ 此表),
+  // 这样无需在 aboutToAppear 预知动态 path 即可支持每个 callout 各自的默认展开/折叠。
+  @State private toggledCallouts: string[] = [];
 
   aboutToAppear(): void {
     this.renderablePolls = this.polls;
@@ -68,6 +72,8 @@ export struct PostRichContent {
       this.HeadingBlock(block, index > 0 ? 14 : 0, path)
     } else if (block.type === RichBlockType.QUOTE) {
       this.QuoteBlock(block, index > 0 ? 12 : 0, path)
+    } else if (block.type === RichBlockType.CALLOUT) {
+      this.CalloutBlock(block, index > 0 ? 12 : 0, path)
     } else if (block.type === RichBlockType.CODE) {
       this.CodeBlock(block, index > 0 ? 12 : 0)
     } else if (block.type === RichBlockType.IMAGE) {
@@ -259,6 +265,102 @@ export struct PostRichContent {
       color: '#CBD5E1'
     })
     // .borderRadius(8)
+    .margin({ top: marginTop })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  // callout 标题专用行内渲染:整段染成主色(继承外层 Text 的加粗),链接仍可点(主色+下划线),
+  // 与正文 InlineToken 区分——后者把普通文字硬编码成 #374151,会盖掉标题主色。
+  @Builder
+  private CalloutTitleToken(token: RichInlineNode, path: string, accent: string) {
+    if (token.type === RichInlineType.IMAGE && token.src && token.src.length > 0) {
+      ImageSpan(token.src)
+        .width(18)
+        .height(18)
+        .margin({ left: 1, right: 1 })
+        .verticalAlign(ImageSpanAlignment.CENTER)
+        .onClick(() => {
+          this.openLink(token.href ? token.href : token.src as string);
+        })
+    } else if (token.type === RichInlineType.LINE_BREAK) {
+      Span(' ')
+    } else if (token.type === RichInlineType.LINK && token.href && token.href.length > 0) {
+      Span(token.text)
+        .fontColor(accent)
+        .decoration({ type: TextDecorationType.Underline, color: accent })
+        .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
+        .onClick(() => {
+          this.openLink(token.href as string);
+        })
+    } else if (token.type === RichInlineType.CODE || token.code) {
+      Span(token.text)
+        .fontFamily('monospace')
+        .fontColor(accent)
+    } else {
+      Span(token.text)
+        .fontColor(accent)
+        .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
+    }
+  }
+
+  // Obsidian/Discourse callout 提示框:主色淡底(10%)、圆角、无边框;标题行为「图标 + 类型色加粗标题
+  // (+ 可折叠时右侧箭头)」,可折叠时点标题行展开/收起(动画同剧透)。默认观感对齐 discourse-quote-callouts。
+  @Builder
+  private CalloutBlock(block: RichBlock, marginTop: number, path: string) {
+    Column() {
+      Row() {
+        if (this.hasCalloutIcon(block)) {
+          FaIconView({
+            icon: this.calloutIconDef(block),
+            color: this.calloutColor(block),
+            iconSize: 15
+          })
+        }
+
+        Text() {
+          ForEach(this.calloutTitle(block), (token: RichInlineNode, tokenIndex: number) => {
+            this.CalloutTitleToken(token, `${path}-ct`, this.calloutColor(block))
+          }, (token: RichInlineNode, tokenIndex: number) => `${tokenIndex}-${token.type}-${token.text}`)
+        }
+        .fontSize(15)
+        .lineHeight(22)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.calloutColor(block))
+        .layoutWeight(1)
+        .margin({ left: this.hasCalloutIcon(block) ? 8 : 0 })
+
+        if (block.collapsible) {
+          Text('▼')
+            .fontSize(13)
+            .fontColor(this.calloutColor(block))
+            .margin({ left: 6 })
+            .rotate({ angle: this.isCalloutExpanded(path, block.defaultExpanded === true) ? 0 : -90 })
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => {
+        if (block.collapsible) {
+          this.toggleCallout(path);
+        }
+      })
+
+      if (this.safeBlocks(block).length > 0 &&
+        (!block.collapsible || this.isCalloutExpanded(path, block.defaultExpanded === true))) {
+        Column() {
+          ForEach(this.safeBlocks(block), (inner: RichBlock, childIndex: number) => {
+            this.BlockView(inner, childIndex, `${path}-c${childIndex}`)
+          }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+        }
+        .width('100%')
+        .margin({ top: 8 })
+        .alignItems(HorizontalAlign.Start)
+      }
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+    .backgroundColor(this.calloutBackground(block))
+    .borderRadius(8)
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
   }
@@ -708,6 +810,54 @@ export struct PostRichContent {
         this.revealedSpoilers = this.revealedSpoilers.filter((item: string) => item !== path);
       } else {
         this.revealedSpoilers = this.revealedSpoilers.concat([path]);
+      }
+    });
+  }
+
+  private calloutColor(block: RichBlock): string {
+    return block.calloutColor && block.calloutColor.length > 0 ? block.calloutColor : '#027aff';
+  }
+
+  // 主色 @ 10% 透明度作淡底(#AARRGGBB,0x1A≈10%)。非 6 位十六进制则原样返回。
+  private calloutBackground(block: RichBlock): string {
+    const c: string = this.calloutColor(block);
+    return c.length === 7 ? `#1A${c.substring(1)}` : c;
+  }
+
+  private calloutIconDef(block: RichBlock): FaIconDefinition {
+    const found: FaIconDefinition | undefined =
+      block.calloutIcon && block.calloutIcon.length > 0 ? getFaIcon(block.calloutIcon) : undefined;
+    return found ? found : { id: '', rawfilePath: '' };
+  }
+
+  private hasCalloutIcon(block: RichBlock): boolean {
+    return this.calloutIconDef(block).rawfilePath.length > 0;
+  }
+
+  // 标题:优先 titleInlines;为空则回退为类型名(首字母大写),与 Obsidian 无标题时一致。
+  private calloutTitle(block: RichBlock): RichInlineNode[] {
+    if (block.titleInlines && block.titleInlines.length > 0) {
+      return block.titleInlines;
+    }
+    const kind: string = block.calloutKind && block.calloutKind.length > 0 ? block.calloutKind : 'note';
+    return [{
+      type: RichInlineType.TEXT,
+      text: kind.charAt(0).toUpperCase() + kind.substring(1)
+    }];
+  }
+
+  // 展开态 = defaultExpanded XOR (path 被翻转过)。toggledCallouts 记录用户翻转过的 path。
+  private isCalloutExpanded(path: string, defaultExpanded: boolean): boolean {
+    const flipped: boolean = this.toggledCallouts.indexOf(path) >= 0;
+    return defaultExpanded !== flipped;
+  }
+
+  private toggleCallout(path: string): void {
+    this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+      if (this.toggledCallouts.indexOf(path) >= 0) {
+        this.toggledCallouts = this.toggledCallouts.filter((item: string) => item !== path);
+      } else {
+        this.toggledCallouts = this.toggledCallouts.concat([path]);
       }
     });
   }

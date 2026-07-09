@@ -8,6 +8,9 @@ export enum RichBlockType {
   PARAGRAPH = 'paragraph',
   HEADING = 'heading',
   QUOTE = 'quote',
+  // Obsidian/Discourse callout(discourse-quote-callouts 主题组件):首段以 [!type]± 开头的
+  // blockquote → 彩色可折叠提示框。type 决定图标/主色,+ 默认展开、- 默认折叠、无后缀不可折叠。
+  CALLOUT = 'callout',
   CODE = 'code',
   IMAGE = 'image',
   LIST = 'list',
@@ -76,7 +79,73 @@ export interface RichBlock {
   faviconUrl?: string;
   description?: string;
   thumbnailUrl?: string;
+  // CALLOUT 块字段:calloutKind 归一后的类型(用于无标题时回退成类型名);calloutColor 主色(标题+图标);
+  // calloutIcon FontAwesome 图标 id(对应 rawfile/fa_icons);collapsible 是否可折叠;
+  // defaultExpanded 折叠态默认(+→true、-→false);titleInlines 标题段行内节点(可含粗体/链接);blocks 为正文子块。
+  calloutKind?: string;
+  calloutColor?: string;
+  calloutIcon?: string;
+  collapsible?: boolean;
+  defaultExpanded?: boolean;
+  titleInlines?: RichInlineNode[];
 }
+
+// callout 类型别名 → 归一类型(与 discourse-quote-callouts settings.yml 的 alias 一致)。
+const CALLOUT_ALIASES: Map<string, string> = ((): Map<string, string> => {
+  const m: Map<string, string> = new Map();
+  m.set('summary', 'abstract');
+  m.set('tldr', 'abstract');
+  m.set('hint', 'tip');
+  m.set('important', 'tip');
+  m.set('check', 'success');
+  m.set('done', 'success');
+  m.set('help', 'question');
+  m.set('faq', 'question');
+  m.set('caution', 'warning');
+  m.set('attention', 'warning');
+  m.set('fail', 'failure');
+  m.set('missing', 'failure');
+  m.set('error', 'danger');
+  m.set('cite', 'quote');
+  return m;
+})();
+
+interface CalloutStyleDef {
+  color: string;
+  icon: string;
+}
+
+// 归一类型 → 主色 + 图标 id。取值为 discourse-quote-callouts 上游默认(settings.yml)。
+const CALLOUT_STYLES: Map<string, CalloutStyleDef> = ((): Map<string, CalloutStyleDef> => {
+  const m: Map<string, CalloutStyleDef> = new Map();
+  m.set('note', { color: '#086ddd', icon: 'far-pen-to-square' });
+  m.set('abstract', { color: '#00bfbc', icon: 'far-clipboard' });
+  m.set('info', { color: '#027aff', icon: 'far-lightbulb' });
+  m.set('todo', { color: '#027aff', icon: 'far-circle-check' });
+  m.set('tip', { color: '#00bfbc', icon: 'fire-flame-curved' });
+  m.set('success', { color: '#44cf6e', icon: 'check' });
+  m.set('question', { color: '#ec7500', icon: 'far-circle-question' });
+  m.set('warning', { color: '#ec7500', icon: 'triangle-exclamation' });
+  m.set('failure', { color: '#e93147', icon: 'xmark' });
+  m.set('danger', { color: '#e93147', icon: 'bolt' });
+  m.set('bug', { color: '#e93147', icon: 'bug' });
+  m.set('example', { color: '#7852ee', icon: 'list' });
+  m.set('quote', { color: '#9e9e9e', icon: 'quote-left' });
+  return m;
+})();
+
+// 无法识别的类型:回退主色/图标(settings.yml 的 callout_fallback_*),行为按 note 处理。
+const CALLOUT_FALLBACK: CalloutStyleDef = { color: '#027aff', icon: 'far-pen-to-square' };
+
+interface CalloutStyle {
+  kind: string;
+  color: string;
+  icon: string;
+}
+
+// blockquote 首段命中 [!type]± 才是 callout。type 仅取 ASCII 字母(与上游一致),
+// 非字母(如 [!名称])不识别,原样退回普通引用。可选 +/- 折叠标记,后随可选一个空格。
+const CALLOUT_MARKER: RegExp = /^\s*\[!([a-zA-Z]+)\]([+-]?)\s?/;
 
 class InlineState {
   bold: number = 0;
@@ -270,6 +339,12 @@ export class CookedHtmlParser {
         // Discourse 引用：<aside class="quote"> 内的 <blockquote> 才是引用正文，
         // 展开它，避免正文再被包成一层带竖线的嵌套引用。
         quoteBlocks = CookedHtmlParser.unwrapNestedQuotes(quoteBlocks);
+      } else {
+        // 纯 <blockquote>(非 aside 用户引用):首段 [!type]± 命中则升级为 callout 提示框。
+        const callout: RichBlock | undefined = CookedHtmlParser.calloutFromQuote(quoteBlocks);
+        if (callout) {
+          return [callout];
+        }
       }
       return [{
         type: RichBlockType.QUOTE,
@@ -388,6 +463,98 @@ export class CookedHtmlParser {
       } else {
         out.push(block);
       }
+    }
+    return out;
+  }
+
+  // 把已解析好的引用子块尝试识别为 callout。首段(段落)首个文本节点以 [!type]± 开头才算命中,
+  // 否则返回 undefined 让调用方回退成普通引用。命中后:剥掉标记,首行(遇 <br> 截断)作标题,
+  // 换行后的残余与其余子块作正文。
+  private static calloutFromQuote(quoteBlocks: RichBlock[]): RichBlock | undefined {
+    if (quoteBlocks.length === 0) {
+      return undefined;
+    }
+    const first: RichBlock = quoteBlocks[0];
+    if (first.type !== RichBlockType.PARAGRAPH || !first.inlines || first.inlines.length === 0) {
+      return undefined;
+    }
+    const head: RichInlineNode = first.inlines[0];
+    if (head.type !== RichInlineType.TEXT) {
+      return undefined;
+    }
+    const match: RegExpMatchArray | null = head.text.match(CALLOUT_MARKER);
+    if (!match) {
+      return undefined;
+    }
+
+    const rawType: string = match[1].toLowerCase();
+    const fold: string = match[2] ? match[2] : '';
+    const style: CalloutStyle = CookedHtmlParser.resolveCalloutStyle(rawType);
+
+    // 去掉首文本节点里的 [!type]± 标记(其余标题文本/样式保留)。
+    head.text = head.text.replace(CALLOUT_MARKER, '');
+
+    // 标题段可能内含 <br>:换行前为标题,换行后回落成正文首段。
+    const firstLineInlines: RichInlineNode[] = [];
+    const overflowInlines: RichInlineNode[] = [];
+    let hitBreak: boolean = false;
+    for (let i: number = 0; i < first.inlines.length; i++) {
+      const node: RichInlineNode = first.inlines[i];
+      if (!hitBreak && node.type === RichInlineType.LINE_BREAK) {
+        hitBreak = true;
+        continue;
+      }
+      if (hitBreak) {
+        overflowInlines.push(node);
+      } else {
+        firstLineInlines.push(node);
+      }
+    }
+
+    const titleInlines: RichInlineNode[] = CookedHtmlParser.trimLeadingEmptyText(firstLineInlines);
+
+    const contentBlocks: RichBlock[] = [];
+    if (overflowInlines.length > 0 && CookedHtmlParser.hasVisibleInlines(overflowInlines)) {
+      contentBlocks.push({
+        type: RichBlockType.PARAGRAPH,
+        inlines: overflowInlines
+      });
+    }
+    for (let i: number = 1; i < quoteBlocks.length; i++) {
+      contentBlocks.push(quoteBlocks[i]);
+    }
+
+    return {
+      type: RichBlockType.CALLOUT,
+      calloutKind: style.kind,
+      calloutColor: style.color,
+      calloutIcon: style.icon,
+      collapsible: fold.length > 0,
+      defaultExpanded: fold !== '-',
+      titleInlines,
+      blocks: contentBlocks
+    };
+  }
+
+  // 类型 → 主色/图标。先按别名归一,再查样式表;未命中用 fallback 色/图标,kind 保留原始串。
+  private static resolveCalloutStyle(rawType: string): CalloutStyle {
+    const alias: string | undefined = CALLOUT_ALIASES.get(rawType);
+    const canonical: string = alias ? alias : rawType;
+    const def: CalloutStyleDef | undefined = CALLOUT_STYLES.get(canonical);
+    if (def) {
+      return { kind: canonical, color: def.color, icon: def.icon };
+    }
+    return { kind: rawType, color: CALLOUT_FALLBACK.color, icon: CALLOUT_FALLBACK.icon };
+  }
+
+  // 丢掉标题前导的空白文本节点(标记剥离后可能残留 "" 或空格),并去掉首个文本节点的左侧空格。
+  private static trimLeadingEmptyText(inlines: RichInlineNode[]): RichInlineNode[] {
+    const out: RichInlineNode[] = inlines.slice();
+    while (out.length > 0 && out[0].type === RichInlineType.TEXT && out[0].text.trim().length === 0) {
+      out.shift();
+    }
+    if (out.length > 0 && out[0].type === RichInlineType.TEXT) {
+      out[0].text = out[0].text.replace(/^\s+/, '');
     }
     return out;
   }
@@ -1257,6 +1424,10 @@ export class CookedHtmlParser {
     }
     if (block.type === RichBlockType.SPOILER) {
       return !!block.blocks && block.blocks.length > 0;
+    }
+    if (block.type === RichBlockType.CALLOUT) {
+      // 有标题或有正文即保留;二者皆空的极端情形也留着(至少能显示类型名标题)。
+      return true;
     }
     if (block.type === RichBlockType.POLL) {
       // POLL 块无 inlines/blocks,仅靠 pollName 占位,别被内容过滤器丢掉。
