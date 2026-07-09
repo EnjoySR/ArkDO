@@ -189,6 +189,9 @@ export struct TopicDetailPage {
           onOpenLink: (url: string) => {
             this.onOpenLink(url);
           },
+          onResolveMedia: (url: string): Promise<string> => {
+            return this.bridge.downloadMedia(url);
+          },
           onToggleReaction: (targetPost: TopicPost, reaction: string): Promise<boolean> => {
             return this.postActions.toggleReaction(targetPost, reaction);
           },

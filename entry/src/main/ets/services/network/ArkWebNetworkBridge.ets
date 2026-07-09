@@ -10,6 +10,8 @@ import { FileLogger } from '../logging/FileLogger';
 import { ChallengeState, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from './NetworkTypes';
 
 const REQUEST_ID_TOKEN: string = '__ARKDO_REQUEST_ID__';
+// 媒体下载兜底超时:委托始终不回调(如 URL 无效/挑战未过)时,自愈拒绝以免播放器永久转圈。
+const MEDIA_DOWNLOAD_TIMEOUT_MS: number = 120000;
 const BODY_LOG_CHUNK_SIZE: number = 3000;
 // 响应体转储上限:仅对挑战/错误/异常响应保留头部证据(判定是挑战页还是数据),截断以控制日志体积。
 const BODY_LOG_MAX_CHARS: number = 1500;
@@ -46,6 +48,32 @@ class PendingJsonRequest {
   timeoutId: number;
 
   constructor(resolve: (value: string) => void, reject: (reason: string) => void, timeoutId: number) {
+    this.resolve = resolve;
+    this.reject = reject;
+    this.timeoutId = timeoutId;
+  }
+}
+
+// 一次下载意图:委托的 getUrl() 会被重写成跟随 302 后的 CDN 直链,无法按 URL 回认。
+// 故每次发起下载按顺序入队一个意图,onBeforeDownload 按序出队即可辨别当前下载是媒体还是附件、
+// 以及媒体对应的原始 URL(下载在单线程 native 队列中按发起顺序回调)。
+class DownloadIntent {
+  isMedia: boolean;
+  url: string;
+
+  constructor(isMedia: boolean, url: string) {
+    this.isMedia = isMedia;
+    this.url = url;
+  }
+}
+
+// 一次媒体下载的等待者:委托完成/失败后按原始 URL 找到它并 resolve 本地路径 / reject。
+class MediaDownloadWaiter {
+  resolve: (path: string) => void;
+  reject: (reason: Object) => void;
+  timeoutId: number;
+
+  constructor(resolve: (path: string) => void, reject: (reason: Object) => void, timeoutId: number) {
     this.resolve = resolve;
     this.reject = reject;
     this.timeoutId = timeoutId;
@@ -137,11 +165,34 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   private controller?: webview.WebviewController;
   private downloadContext?: Context;
   private downloadDelegateReady: boolean = false;
+  // 媒体下载(音视频)复用同一下载委托。CF 会对非浏览器客户端(fetch/http/AVPlayer)返回 403,
+  // 唯有 host webview(Chromium)下载能过盾、跟 302、带 cookie。按 URL 缓存本地路径 + 并发去重;
+  // guid→url 用于在委托完成回调里把结果对回到正确的等待者(而非走附件的「用系统打开」通用流程)。
+  private mediaWaiters: Map<string, MediaDownloadWaiter> = new Map();
+  private mediaInflight: Map<string, Promise<string>> = new Map();
+  private mediaGuidUrl: Map<string, string> = new Map();
+  private mediaCache: Map<string, string> = new Map();
+  // 下载意图 FIFO:按发起顺序入队,onBeforeDownload 出队辨别媒体/附件。
+  private downloadIntents: DownloadIntent[] = [];
 
   attachController(controller: webview.WebviewController): void {
     this.controller = controller;
     this.setExecutor(this.ensureWebviewExecutor(controller));
     this.configureDownloadDelegate();
+  }
+
+  // 清空媒体缓存目录(音视频下到 filesDir/media_cache)。冷启动时调用,避免缓存无限增长;
+  // 同会话内文件保留以便重复播放不重复下载。不碰附件目录 download(那是用户主动下的文件)。
+  static clearMediaCacheDir(context: Context): void {
+    const dir: string = `${context.filesDir}/media_cache`;
+    try {
+      if (fs.accessSync(dir)) {
+        fs.rmdirSync(dir);
+        Log.i(`[ArkDO][Network] media cache cleared dir=${dir}`);
+      }
+    } catch (error) {
+      Log.i(`[ArkDO][Network] media cache clear failed error=${JSON.stringify(error)}`);
+    }
   }
 
   // 记录用于保存下载文件的沙箱上下文(filesDir)。在 host 就绪前由页面注入一次。
@@ -156,27 +207,89 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       Log.i('[ArkDO][Network] startDownload skipped: controller not ready');
       return false;
     }
+    this.downloadIntents.push(new DownloadIntent(false, url));
     try {
       this.controller.startDownload(url);
       return true;
     } catch (error) {
+      this.downloadIntents.pop();
       const err: BusinessError = error as BusinessError;
       Log.i(`[ArkDO][Network] startDownload failed code=${err.code} msg=${err.message}`);
       return false;
     }
   }
 
-  // 给 host 控制器挂下载委托:onBeforeDownload 选沙箱保存路径并启动;完成/失败经 DownloadEventBus 通知页面。
-  // 需控制器与保存上下文都就绪,且只挂一次。
+  // 触发一次媒体下载(音视频),返回下到沙箱后的本地文件路径。走 host webview 下载委托过 CF。
+  // 已下过的直接命中缓存;进行中的复用同一 Promise(去重),避免重复播放重复下载。
+  downloadMedia(url: string): Promise<string> {
+    const cached: string | undefined = this.mediaCache.get(url);
+    if (cached !== undefined) {
+      return Promise.resolve(cached);
+    }
+    const pending: Promise<string> | undefined = this.mediaInflight.get(url);
+    if (pending !== undefined) {
+      return pending;
+    }
+    if (!this.controller) {
+      return Promise.reject(new Error('宿主尚未就绪'));
+    }
+    const promise: Promise<string> = new Promise<string>((resolve: (path: string) => void, reject: (reason: Object) => void) => {
+      const timeoutId: number = setTimeout(() => {
+        this.settleMediaFailure(url, new Error('媒体下载超时'));
+      }, MEDIA_DOWNLOAD_TIMEOUT_MS);
+      this.mediaWaiters.set(url, new MediaDownloadWaiter(resolve, reject, timeoutId));
+    });
+    this.mediaInflight.set(url, promise);
+    this.downloadIntents.push(new DownloadIntent(true, url));
+    try {
+      this.controller.startDownload(url);
+    } catch (error) {
+      this.downloadIntents.pop();
+      const err: BusinessError = error as BusinessError;
+      Log.i(`[ArkDO][Network] downloadMedia start failed code=${err.code}`);
+      this.settleMediaFailure(url, new Error('媒体下载启动失败'));
+    }
+    return promise;
+  }
+
+  private settleMediaSuccess(url: string, path: string): void {
+    this.mediaInflight.delete(url);
+    this.mediaCache.set(url, path);
+    const waiter: MediaDownloadWaiter | undefined = this.mediaWaiters.get(url);
+    if (waiter) {
+      this.mediaWaiters.delete(url);
+      clearTimeout(waiter.timeoutId);
+      waiter.resolve(path);
+    }
+  }
+
+  private settleMediaFailure(url: string, reason: Object): void {
+    this.mediaInflight.delete(url);
+    const waiter: MediaDownloadWaiter | undefined = this.mediaWaiters.get(url);
+    if (waiter) {
+      this.mediaWaiters.delete(url);
+      clearTimeout(waiter.timeoutId);
+      waiter.reject(reason);
+    }
+  }
+
+  // 给 host 控制器挂下载委托:onBeforeDownload 选沙箱保存路径并启动;完成/失败经 DownloadEventBus 通知页面
+  // (媒体下载则对回到 downloadMedia 的等待者)。需控制器与保存上下文都就绪,且只挂一次。
   private configureDownloadDelegate(): void {
     if (this.downloadDelegateReady || !this.controller || !this.downloadContext) {
       return;
     }
     const context: Context = this.downloadContext;
-    const dir: string = `${context.filesDir}/download`;
+    const attachmentDir: string = `${context.filesDir}/download`;
+    const mediaDir: string = `${context.filesDir}/media_cache`;
     try {
       const delegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
       delegate.onBeforeDownload((item: webview.WebDownloadItem) => {
+        // 先按发起顺序出队意图:委托的 getUrl() 已是 CDN 直链,无法回认,故靠 FIFO 顺序辨别媒体/附件。
+        const intent: DownloadIntent | undefined = this.downloadIntents.shift();
+        const isMedia: boolean = intent !== undefined && intent.isMedia;
+        // 媒体下到独立目录(便于整目录清理、不误删用户附件);附件仍到 download。
+        const dir: string = isMedia ? mediaDir : attachmentDir;
         try {
           if (!fs.accessSync(dir)) {
             fs.mkdirSync(dir);
@@ -188,13 +301,33 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
         const suggested: string = item.getSuggestedFileName();
         const fileName: string = suggested && suggested.length > 0 ? suggested : `download_${item.getGuid()}`;
         item.start(`${dir}/${fileName}`);
+        // 媒体:用 guid 记住它对应的原始 URL(media 等待者以原始 URL 为键)。
+        if (isMedia && intent) {
+          this.mediaGuidUrl.set(item.getGuid(), intent.url);
+        }
       });
       delegate.onDownloadFinish((item: webview.WebDownloadItem) => {
         const fullPath: string = item.getFullPath();
+        const guid: string = item.getGuid();
+        const mediaUrl: string | undefined = this.mediaGuidUrl.get(guid);
+        if (mediaUrl !== undefined) {
+          this.mediaGuidUrl.delete(guid);
+          Log.i(`[ArkDO][Network] media download finished path=${fullPath}`);
+          this.settleMediaSuccess(mediaUrl, fullPath);
+          return;
+        }
         const fileName: string = fullPath.substring(fullPath.lastIndexOf('/') + 1);
         DownloadEventBus.notify({ success: true, fileName, filePath: fullPath, message: `已下载：${fileName}` });
       });
       delegate.onDownloadFailed((item: webview.WebDownloadItem) => {
+        const guid: string = item.getGuid();
+        const mediaUrl: string | undefined = this.mediaGuidUrl.get(guid);
+        if (mediaUrl !== undefined) {
+          this.mediaGuidUrl.delete(guid);
+          Log.i('[ArkDO][Network] media download failed');
+          this.settleMediaFailure(mediaUrl, new Error('媒体下载失败'));
+          return;
+        }
         const suggested: string = item.getSuggestedFileName();
         DownloadEventBus.notify({ success: false, fileName: suggested, filePath: '', message: '下载失败' });
       });

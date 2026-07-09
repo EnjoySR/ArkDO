@@ -8,6 +8,7 @@ import { FileLogger } from '../services/logging/FileLogger';
 import { AppStateEventBus } from '../services/session/AppStateEventBus';
 import { LINUXDO_FA_SYMBOLS_RAWFILE, loadFaIconsFromRawContent } from '../views/components/FaIcon';
 import { LINUXDO_TAG_ICONS_RAWFILE, loadTagIconsFromRawContent } from '../views/components/TagIconRegistry';
+import { ArkWebNetworkBridge } from '../services/network/ArkWebNetworkBridge';
 
 const DOMAIN = 0x0000;
 
@@ -20,6 +21,8 @@ export default class EntryAbility extends UIAbility {
     this.registerCrashHandler();
     ThemeManager.init(this.context);
     this.loadIconAssets();
+    // 冷启动清空音视频缓存目录,避免下载文件无限堆积占存储。
+    ArkWebNetworkBridge.clearMediaCacheDir(this.context);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 

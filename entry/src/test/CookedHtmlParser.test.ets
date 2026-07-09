@@ -243,5 +243,28 @@ export default function cookedHtmlParserTest() {
       expect(blocks[0].unsupportedKind).assertEqual('表格');
       expect(blocks[0].text).assertEqual('A');
     });
+
+    it('parsesAudioIntoAudioBlockWithResolvedSource', 0, () => {
+      const html: string = '<audio controls="">\n  <source src="/uploads/short-url/abc.xz" type="audio/mp4">\n  Your browser does not support the audio element.\n</audio>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.AUDIO);
+      expect(blocks[0].src).assertEqual('https://linux.do/uploads/short-url/abc.xz');
+      expect(blocks[0].mediaType).assertEqual('audio/mp4');
+    });
+
+    it('parsesVideoIntoVideoBlockWithDimensions', 0, () => {
+      const html: string = '<video width="640" height="360" controls="">\n  <source src="/uploads/short-url/xyz.xz" type="video/mp4">\n  您的浏览器不支持 HTML5 video 标签。\n</video>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.VIDEO);
+      expect(blocks[0].src).assertEqual('https://linux.do/uploads/short-url/xyz.xz');
+      expect(blocks[0].width).assertEqual(640);
+      expect(blocks[0].height).assertEqual(360);
+    });
   });
 }

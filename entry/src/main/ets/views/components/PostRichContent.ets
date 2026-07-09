@@ -8,6 +8,8 @@ import {
   RichListItem
 } from '../../services/content/CookedHtmlParser';
 import { ViewerImage } from './ImageViewer';
+import { AudioPlayer } from './AudioPlayer';
+import { VideoPlayer } from './VideoPlayer';
 import { Poll, PollVoteResult } from '../../models/TopicDetail';
 import { PollView } from './PollView';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -30,6 +32,8 @@ export struct PostRichContent {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 点击正文链接 / onebox 卡片时上抛给页面,由页面经 LinkRouter 判断跳原生详情或通用 WebView。
   onOpenLink: (url: string) => void = () => {};
+  // 音视频播放:把媒体 URL 交给页面(经 bridge 下载委托过 CF)下到沙箱,返回本地路径。
+  onResolveMedia: (url: string) => Promise<string> = () => Promise.reject(new Error('媒体下载未接入'));
   // 该 post 的投票列表(动态票数/已投项);cooked 里的 POLL 块按 name 关联到这里的 Poll 对象。
   polls: Poll[] = [];
   // 投票/撤销回调上抛给页面做乐观闭环。返回服务端校正结果;null=失败(供 PollView 回滚本地态)。
@@ -83,6 +87,10 @@ export struct PostRichContent {
       this.PollBlock(block, index > 0 ? 12 : 0)
     } else if (block.type === RichBlockType.ONEBOX) {
       this.OneboxBlock(block, index > 0 ? 12 : 0)
+    } else if (block.type === RichBlockType.AUDIO) {
+      this.AudioBlock(block, index > 0 ? 12 : 0)
+    } else if (block.type === RichBlockType.VIDEO) {
+      this.VideoBlock(block, index > 0 ? 12 : 0)
     } else {
       this.UnsupportedBlock(block, index > 0 ? 10 : 0)
     }
@@ -466,6 +474,32 @@ export struct PostRichContent {
 
   private hasOneboxHeader(block: RichBlock): boolean {
     return (!!block.domain && block.domain.length > 0) || (!!block.faviconUrl && block.faviconUrl.length > 0);
+  }
+
+  @Builder
+  private AudioBlock(block: RichBlock, marginTop: number) {
+    Column() {
+      AudioPlayer({ src: block.src ? block.src : '', onResolveMedia: this.onResolveMedia })
+    }
+    .width('100%')
+    .margin({ top: marginTop })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  // 视频:点击后经下载委托下到沙箱再用原生 Video 播本地文件(同音频,直连拿不到字节)。
+  // 有自带宽高时按比例,缺失时退到 16:9。
+  @Builder
+  private VideoBlock(block: RichBlock, marginTop: number) {
+    Column() {
+      VideoPlayer({
+        src: block.src ? block.src : '',
+        videoAspectRatio: this.hasImageSize(block) ? this.getImageAspectRatio(block) : 1.78,
+        onResolveMedia: this.onResolveMedia
+      })
+    }
+    .width('100%')
+    .margin({ top: marginTop })
+    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder

@@ -17,6 +17,10 @@ export enum RichBlockType {
   DIVIDER = 'divider',
   POLL = 'poll',
   ONEBOX = 'onebox',
+  // <audio>/<video>:原生播放器就地播放。src 为解析后的媒体 URL(和图片同源 /uploads/),
+  // 直接喂给 AVPlayer / Video 组件流式播放。
+  AUDIO = 'audio',
+  VIDEO = 'video',
   UNSUPPORTED = 'unsupported'
 }
 
@@ -61,6 +65,8 @@ export interface RichBlock {
   width?: number;
   height?: number;
   href?: string;
+  // AUDIO/VIDEO 块:媒体 MIME(如 audio/mp4、video/mp4),来自 <source type>,供播放器与降级判断参考。
+  mediaType?: string;
   ordered?: boolean;
   level?: number;
   // POLL 块:data-poll-name,用于在正文正确位置占位、并按名字关联 TopicPost.polls 的动态数据。
@@ -309,6 +315,13 @@ export class CookedHtmlParser {
         type: RichBlockType.SPOILER,
         blocks: spoilerBlocks
       }];
+    }
+
+    if (tagName === 'audio' || tagName === 'video') {
+      const mediaBlock: RichBlock | undefined = CookedHtmlParser.mediaBlockFromElement(tagName, openTag, innerHtml);
+      if (mediaBlock) {
+        return [mediaBlock];
+      }
     }
 
     const unsupportedKind: string = CookedHtmlParser.detectUnsupportedKind(tagName, openTag, innerHtml);
@@ -805,9 +818,8 @@ export class CookedHtmlParser {
       return '表格';
     }
 
-    if (tagName === 'video' || tagName === 'iframe' ||
-      combined.indexOf('<video') >= 0 ||
-      combined.indexOf('<iframe') >= 0) {
+    // <video>/<audio> 已由 mediaBlockFromElement 提升为播放块,这里只兜住 iframe 类嵌入(YouTube/B 站等)。
+    if (tagName === 'iframe' || combined.indexOf('<iframe') >= 0) {
       return '视频/嵌入内容';
     }
 
@@ -998,6 +1010,38 @@ export class CookedHtmlParser {
     return block;
   }
 
+  // <audio>/<video> → 媒体块。源优先取内部首个 <source src>(其 type 作 MIME),缺失时回退标签自身 src。
+  // <video> 额外带 width/height 供渲染定尺寸。无有效 src 则返回 undefined,交回上层走「不支持」降级。
+  private static mediaBlockFromElement(tagName: string, openTag: string, innerHtml: string): RichBlock | undefined {
+    let src: string = '';
+    let mediaType: string = '';
+    const sourceMatch: RegExpMatchArray | null = innerHtml.match(/<source\b[^>]*>/i);
+    if (sourceMatch) {
+      src = CookedHtmlParser.extractAttr(sourceMatch[0], 'src');
+      mediaType = CookedHtmlParser.extractAttr(sourceMatch[0], 'type');
+    }
+    if (src.length === 0) {
+      src = CookedHtmlParser.extractAttr(openTag, 'src');
+    }
+    const resolvedSrc: string = CookedHtmlParser.resolveUrl(src);
+    if (resolvedSrc.length === 0) {
+      return undefined;
+    }
+
+    const block: RichBlock = {
+      type: tagName === 'video' ? RichBlockType.VIDEO : RichBlockType.AUDIO,
+      src: resolvedSrc
+    };
+    if (mediaType.length > 0) {
+      block.mediaType = mediaType;
+    }
+    if (tagName === 'video') {
+      block.width = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(openTag, 'width'));
+      block.height = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(openTag, 'height'));
+    }
+    return block;
+  }
+
   private static extractCodeLanguage(codeOpenTag: string): string {
     const className: string = CookedHtmlParser.extractAttr(codeOpenTag, 'class');
     const languageMatch: RegExpMatchArray | null = className.match(/(?:lang|language)-([a-zA-Z0-9_+-]+)/);
@@ -1177,6 +1221,7 @@ export class CookedHtmlParser {
       tagName === 'figure' ||
       tagName === 'table' ||
       tagName === 'details' ||
+      tagName === 'audio' ||
       tagName === 'video' ||
       tagName === 'iframe' ||
       CookedHtmlParser.isHeadingTag(tagName);
@@ -1199,7 +1244,9 @@ export class CookedHtmlParser {
     if (block.type === RichBlockType.UNSUPPORTED) {
       return (!!block.text && block.text.length > 0) || (!!block.unsupportedKind && block.unsupportedKind.length > 0);
     }
-    if (block.type === RichBlockType.IMAGE) {
+    if (block.type === RichBlockType.IMAGE ||
+      block.type === RichBlockType.AUDIO ||
+      block.type === RichBlockType.VIDEO) {
       return !!block.src && block.src.length > 0;
     }
     if (block.type === RichBlockType.LIST) {

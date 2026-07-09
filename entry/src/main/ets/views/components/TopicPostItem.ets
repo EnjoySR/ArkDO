@@ -56,6 +56,8 @@ export struct TopicPostItem {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击继续上抛给页面(由页面经 LinkRouter 判断跳原生详情或通用 WebView)。
   onOpenLink: (url: string) => void = () => {};
+  // 音视频播放:媒体 URL 经页面 bridge 的下载委托下到沙箱,返回本地路径。
+  onResolveMedia: (url: string) => Promise<string> = () => Promise.reject(new Error('媒体下载未接入'));
   // 表情回应切换:请求先行,页面发 PUT 并返回成败;成功后本组件才改 this.post
   // (@ObjectLink 自身变更→精准重渲染),请求期间按钮转圈防重复点击。
   onToggleReaction: (post: TopicPost, reaction: string) => Promise<boolean> = () => Promise.resolve(false);
@@ -124,6 +126,7 @@ export struct TopicPostItem {
           fallbackText: this.post.plainText,
           onOpenImages: this.onOpenImages,
           onOpenLink: this.onOpenLink,
+          onResolveMedia: this.onResolveMedia,
           polls: this.post.polls ? this.post.polls : [],
           onVote: (poll: Poll, optionIds: string[]) => {
             return this.onVote(this.post, poll, optionIds);
@@ -376,7 +379,8 @@ export struct TopicPostItem {
                     cookedHtml: reply.cookedHtml,
                     fallbackText: reply.plainText,
                     onOpenImages: this.onOpenImages,
-                    onOpenLink: this.onOpenLink
+                    onOpenLink: this.onOpenLink,
+                    onResolveMedia: this.onResolveMedia
                   })
                     .width('100%')
                     .margin({ top: 6 })
