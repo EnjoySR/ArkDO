@@ -19,6 +19,7 @@ import { ImageViewer, ViewerImage } from '../components/ImageViewer';
 import { CommentInputBar, REPLY_BLUE } from '../components/CommentInputBar';
 import { ComposerWindowGuard } from '../components/ComposerWindowGuard';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
+import { TopicScrubber } from '../components/TopicScrubber';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
@@ -76,6 +77,15 @@ export struct TopicDetailPage {
   @State private viewerStartIndex: number = 0;
   // 顶部摘要(标题/分类/标签)是否可见:滑出视口后,头部由"帖子详情"切换为显示帖子标题与分类标签行。
   @State private summaryVisible: boolean = true;
+  // 当前视口首楼的楼号:驱动右缘 scrubber 的滑块位置(onScrollIndex 持续更新)。
+  @State private currentPostNumber: number = 1;
+  // 视口是否可滚动(摘要与末尾项同时可见 = 一屏放得下):不可滚动时隐藏 scrubber(滑块位置无意义,
+  // 顺带解决"只有两楼滑块该放哪"的歧义)。
+  @State private listScrollable: boolean = true;
+  // "钉到底"闩:真正滚到话题结尾(onReachEnd 且无更多可加载=末楼已加载)时置位,让 scrubber 到底,
+  // 补上短楼场景下"首楼映射够不到底"的末段行程;末尾项滚出视口即撤销。用 onReachEnd 而非"末楼可见"
+  // 作触发——后者末楼冒出 1px 就误判到底,超长末楼会翻车;onReachEnd 是与楼高无关的真·触底信号。
+  @State private atListEnd: boolean = false;
   // 评论输入浮层是否展开(点右下角悬浮回复按钮打开)。展开时由 ComposerWindowGuard 切全屏布局
   // (让浮层遮罩盖住状态栏、输入条贴键盘上沿),并给主内容补一个状态栏高度的顶部内边距抵消整体上移。
   @State @Watch('onComposerToggle') private showComposer: boolean = false;
@@ -245,6 +255,8 @@ export struct TopicDetailPage {
     }
     .width('100%')
     .layoutWeight(1)
+    // 关掉系统默认滚动条:右缘已有楼层 scrubber,两者并存会视觉打架。
+    .scrollBar(BarState.Off)
     // 左右留白下放到各 item 内部(楼层高亮背景要通栏),List 不再统一内缩。
     // 头部插入更早楼层时保持可视内容不动。重要:只在"List 创建后从未吃过 onDataReloaded"时可靠
     // ——对活 List 做 reset 会让后续补偿全部失效(实测),原地换窗必须走 epoch 翻转重建。
@@ -259,6 +271,8 @@ export struct TopicDetailPage {
       this.readController.onVisibleRange(start - 1, end - 1);
       // 摘要 ListItem 固定为 index 0:仍在视口内(start===0)显示"帖子详情",滑出后显示帖子标题与分类标签。
       this.summaryVisible = start === 0;
+      // 右缘 scrubber:维护可滚动性、钉底闩、当前楼号(见 updateScrubberFromScroll)。
+      this.updateScrubberFromScroll(start, end);
       // 快到已加载区间顶部时预取更早楼层:响应回来时插入点须仍在布局范围外才有框架补偿,
       // 阈值要给"网络期间用户继续上滑"留够余量(实测 3 太小,必现视口瞬移)。
       if (this.hasEarlier && start - 1 <= EARLIER_PREFETCH_INDEX) {
@@ -271,6 +285,12 @@ export struct TopicDetailPage {
     })
     .onReachEnd(() => {
       this.loadMorePosts();
+      // 真正滚到话题结尾(无更多可加载 → 末楼已加载)才钉滑块到底;loadMorePosts 在 !hasMorePosts 时
+      // 自身 no-op,故此处同步判定即当前状态。有更多待加载时不钉,交给分页继续拉。
+      if (!this.hasMorePosts) {
+        this.atListEnd = true;
+        this.currentPostNumber = this.getHighestPostNumber();
+      }
     })
   }
 
@@ -315,6 +335,44 @@ export struct TopicDetailPage {
     // 绑 composerFullScreen 而非 showComposer:关闭时全屏延后落下,补偿也随之延后,避免关闭途中背景跳。
     .padding({ top: this.composerFullScreen ? this.composerWindowGuard.statusBarHeight : 0 })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+
+    // 右缘楼层 scrubber:话题够长(最高楼 > 1)且浮层未展开时挂载,拖动直接跳楼。
+    // 覆盖层自身透明、只在右缘 Slider 处拦截触摸,不影响正文滚动。
+    if (this.detail && this.getHighestPostNumber() > 1 && this.listScrollable
+      && !this.showComposer && !this.composerFullScreen) {
+      TopicScrubber({
+        currentPostNumber: this.currentPostNumber,
+        highestPostNumber: this.getHighestPostNumber(),
+        onJump: (postNumber: number): Promise<void> => {
+          return this.jumpToPostNumber(postNumber);
+        }
+      })
+    }
+
+    // 回到顶部 mini 按钮:滚出首屏(摘要卡不可见)才淡入,叠在蓝色回复 FAB 正上方。
+    if (this.detail && !this.summaryVisible && !this.showComposer && !this.composerFullScreen) {
+      Button({ type: ButtonType.Circle, stateEffect: true }) {
+        FaIconView({
+          icon: this.backToTopIcon(),
+          color: '#4B5563',
+          iconSize: 18
+        })
+      }
+      .width(40)
+      .height(40)
+      .backgroundColor('#FFFFFF')
+      .border({ width: 0.5, color: '#E5E7EB' })
+      .shadow({ radius: 6, color: '#22000000', offsetX: 0, offsetY: 1 })
+      // 与 52 的回复 FAB 中线对齐(16 + (52-40)/2),竖直叠在其上方 8px。
+      .margin({ right: 22, bottom: 84 })
+      .transition(TransitionEffect.asymmetric(
+        TransitionEffect.OPACITY.animation({ duration: 150, curve: Curve.EaseOut }),
+        TransitionEffect.OPACITY.animation({ duration: 100, curve: Curve.EaseIn })
+      ))
+      .onClick(() => {
+        this.scroller.scrollEdge(Edge.Top);
+      })
+    }
 
     // 右下角悬浮回复按钮:仅在帖子已加载、浮层未展开且全屏布局已还原时显示。
     // 必须一并绑定 composerFullScreen:关闭浮层时退全屏延迟 240ms,期间根 Stack 底边仍延伸到
@@ -608,6 +666,49 @@ export struct TopicDetailPage {
   private replyFabIcon(): FaIconDefinition {
     const def: FaIconDefinition | undefined = getFaIcon('reply');
     return def ? def : { id: 'reply', rawfilePath: 'fa_icons/reply.svg' };
+  }
+
+  private backToTopIcon(): FaIconDefinition {
+    const def: FaIconDefinition | undefined = getFaIcon('arrows-up-to-line');
+    return def ? def : { id: 'arrows-up-to-line', rawfilePath: 'fa_icons/arrows-up-to-line.svg' };
+  }
+
+  // 依据视口首/末项下标维护 scrubber 状态:可滚动性、钉底闩、当前楼号。
+  // 列表项布局:index 0 = 摘要卡,1..postCount = 楼层,postCount+1 = 底部加载态行(有楼层时恒存在)。
+  private updateScrubberFromScroll(start: number, end: number): void {
+    const lastIndex: number = this.postCount + 1;
+    // 摘要(index 0)与末尾项同时可见 = 整屏放得下、不可滚动 → 隐藏 scrubber。
+    this.listScrollable = !(start === 0 && end >= lastIndex);
+    // 末尾项滚出视口即离开底部,撤销钉底(短楼:滑块回落到首楼映射;长末楼:首楼本就是 max,无影响)。
+    if (this.atListEnd && end < lastIndex) {
+      this.atListEnd = false;
+    }
+    // 钉底优先 → 顶部(摘要可见)记 1 楼 → 否则取视口首楼楼号。
+    if (this.atListEnd) {
+      this.currentPostNumber = this.getHighestPostNumber();
+      return;
+    }
+    if (start === 0) {
+      this.currentPostNumber = 1;
+      return;
+    }
+    const firstPostIndex: number = start - 1;
+    if (firstPostIndex >= 0 && firstPostIndex < this.dataSource.totalCount()) {
+      this.currentPostNumber = this.dataSource.getData(firstPostIndex).postNumber;
+    }
+  }
+
+  // scrubber 上限:优先话题最高楼号;缺失时回退到已加载末楼 / 楼层数。
+  private getHighestPostNumber(): number {
+    const highest: number = this.detail?.highestPostNumber ?? 0;
+    if (highest > 0) {
+      return highest;
+    }
+    const posts: TopicPost[] = this.dataSource.getAll();
+    if (posts.length > 0) {
+      return posts[posts.length - 1].postNumber;
+    }
+    return this.postCount;
   }
 
   private openImageViewer(images: ViewerImage[], startIndex: number): void {
