@@ -109,7 +109,7 @@ export default function categoryIndexTest() {
       UserProfileCache.resetForTest();
 
       UserProfileCache.setDetail('alice', { id: 1, username: 'alice', trustLevel: 3 });
-      UserProfileCache.setActivity('alice', [{ actionType: 4, topicId: 100, title: '话题', tags: [] }]);
+      UserProfileCache.setActivity('alice', [{ actionType: 4, topicId: 100, title: '话题', excerpt: '', tags: [] }]);
 
       expect(UserProfileCache.getDetail('alice')?.trustLevel).assertEqual(3);
       expect(UserProfileCache.getActivity('alice')?.length).assertEqual(1);

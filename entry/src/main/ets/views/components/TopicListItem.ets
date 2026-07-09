@@ -25,13 +25,16 @@ export struct TopicListItem {
           // 未读徽标 / 小蓝点都作为内联 Span 追加在标题文本流末尾,始终贴在最后一行文字后面。
           // 二者互斥:有未读回复 → 蓝色数字药丸(左右加空格撑开背景);否则(全新主题)→ 小蓝点。
           // 用 baselineOffset 把标记从基线上抬,对齐 CJK 文字视觉重心。
+          // 药丸内部用不换行空格( )撑背景:普通空格是可断行点,标题换行时会从药丸左边的空格处
+          // 断开,导致半截蓝色背景留在上一行;换成   后药丸不可拆,断行只发生在它前面的引导空格,
+          // 整个药丸连背景一起下移到新行。
           Text() {
             Span(this.topic.title)
             if (this.hasUnreadBadge()) {
-              // 无背景空格作真正的间隔(药丸自带的引导空格被算进背景里,不产生外间距)。
+              // 无背景的普通空格作外间距兼唯一可断点:药丸整体在此换行,不会被拆。
               Span('  ')
                 .fontSize(12)
-              Span(` ${this.topic.unreadPosts} `)
+              Span(` ${this.topic.unreadPosts} `)
                 .fontSize(12)
                 .fontColor(Color.White)
                 .textBackgroundStyle({ color: '#66CCFF', radius: 9 })

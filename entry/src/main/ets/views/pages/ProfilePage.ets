@@ -58,6 +58,8 @@ export struct ProfilePage {
   onOpenTopic: (topicId: number, title: string, postNumber?: number) => void = () => {};
   // 书签已原生化:进原生书签页而非 Web。
   onOpenBookmarks: (username: string) => void = () => {};
+  // 用户动态列表(我的话题/回复/点赞/最近活动全部)已原生化:filter 见 UserActionType。
+  onOpenActivity: (username: string, filter: string, title: string) => void = () => {};
   @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
   @State private profileDetail?: UserProfileDetail = undefined;
   @State private summaryStats?: UserSummaryStats = undefined;
@@ -212,13 +214,16 @@ export struct ProfilePage {
       Row() {
         this.QuickEntry($r('sys.symbol.envelope'), '私信', this.getUnreadMessageCount(), true, false,
           `/u/${this.getUsername()}/messages`)
-        this.QuickEntryNative($r('sys.symbol.bookmark'), '书签', () => {
+        this.QuickEntryNative($r('sys.symbol.bookmark'), '书签', false, () => {
           if (this.getUsername().length > 0) {
             this.onOpenBookmarks(this.getUsername());
           }
         })
-        this.QuickEntry($r('sys.symbol.heart'), '我的点赞', 0, false, true,
-          `/u/${this.getUsername()}/activity/likes-given`)
+        this.QuickEntryNative($r('sys.symbol.heart'), '我的点赞', true, () => {
+          if (this.getUsername().length > 0) {
+            this.onOpenActivity(this.getUsername(), '1', '我的点赞');
+          }
+        })
         this.QuickEntry($r('sys.symbol.square_and_pencil'), '草稿', this.getDraftCount(), false, false,
           `/u/${this.getUsername()}/activity/drafts`)
       }
@@ -227,7 +232,9 @@ export struct ProfilePage {
 
       // 卡片 3:徽章
       Column() {
-        this.SectionHead(this.getBadgeHeadLabel(), '全部 ›', `/u/${this.getUsername()}/badges`)
+        this.SectionHead(this.getBadgeHeadLabel(), '全部 ›', () => {
+          this.openWebPath(`/u/${this.getUsername()}/badges`, '徽章');
+        })
         if (this.topBadges.length > 0) {
           // 摘要接口最多返回 6 枚,固定 3 列网格等分展示,不做横滑。
           Column() {
@@ -260,7 +267,11 @@ export struct ProfilePage {
 
       // 卡片 4:最近活动
       Column() {
-        this.SectionHead('最近活动', '全部 ›', `/u/${this.getUsername()}/activity`)
+        this.SectionHead('最近活动', '全部 ›', () => {
+          if (this.getUsername().length > 0) {
+            this.onOpenActivity(this.getUsername(), '4,5', '最近活动');
+          }
+        })
         if (this.recentActivity.length > 0) {
           ForEach(this.recentActivity, (item: UserActivityItem, index: number) => {
             Column() {
@@ -398,13 +409,13 @@ export struct ProfilePage {
     })
   }
 
-  // 无角标、走自定义点击的快捷入口(书签等已原生化的入口)。
+  // 无角标、走自定义点击的快捷入口(书签/点赞等已原生化的入口)。love=true 时图标用点赞粉。
   @Builder
-  private QuickEntryNative(symbol: Resource, label: string, onEntryClick: () => void) {
+  private QuickEntryNative(symbol: Resource, label: string, love: boolean, onEntryClick: () => void) {
     Column() {
       SymbolGlyph(symbol)
         .fontSize(24)
-        .fontColor([$r('app.color.text_primary')])
+        .fontColor([love ? $r('app.color.ld_love') : $r('app.color.text_primary')])
       Text(label)
         .fontSize(12)
         .fontColor($r('app.color.text_primary'))
@@ -514,7 +525,9 @@ export struct ProfilePage {
         .fontSize(13)
         .fontColor($r('app.color.ld_accent'))
         .onClick(() => {
-          this.openUserWebPage('/activity/topics', '我的话题');
+          if (this.getUsername().length > 0) {
+            this.onOpenActivity(this.getUsername(), '4', '我的话题');
+          }
         })
       Text('·')
         .fontSize(13)
@@ -524,7 +537,9 @@ export struct ProfilePage {
         .fontSize(13)
         .fontColor($r('app.color.ld_accent'))
         .onClick(() => {
-          this.openUserWebPage('/activity/replies', '我的回复');
+          if (this.getUsername().length > 0) {
+            this.onOpenActivity(this.getUsername(), '5', '我的回复');
+          }
         })
     }
     .width('100%')
@@ -798,7 +813,7 @@ export struct ProfilePage {
   }
 
   @Builder
-  private SectionHead(title: string, more: string, morePath: string) {
+  private SectionHead(title: string, more: string, onMore: () => void) {
     Row() {
       Text(title)
         .fontSize(15)
@@ -809,7 +824,7 @@ export struct ProfilePage {
         .fontSize(12)
         .fontColor($r('app.color.ld_accent'))
         .onClick(() => {
-          this.openWebPath(morePath, title);
+          onMore();
         })
     }
     .width('100%')

@@ -1,14 +1,18 @@
 import {
   UserActivityItem,
+  UserActivityPage,
   UserBadgeItem,
   UserProfileDetail,
   UserSummary,
   UserSummaryStats
 } from '../../models/UserProfile';
+import { HtmlText } from '../content/HtmlText';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
 
 // 个人中心「最近活动」默认取前几条(发布话题 + 回复)。
 const RECENT_ACTIVITY_LIMIT: number = 3;
+// user_actions 服务端每页固定条数(用于判断是否还有下一页)。
+const ACTIVITY_PAGE_SIZE: number = 30;
 // 徽章横滑条最多取的枚数,其余靠「全部」入口。
 const TOP_BADGE_LIMIT: number = 8;
 
@@ -69,6 +73,7 @@ interface DiscourseUserAction {
   topic_id?: number;
   post_number?: number;
   title?: string;
+  excerpt?: string;
   category_id?: number;
 }
 
@@ -176,21 +181,46 @@ export class UserProfileService {
     }
   }
 
+  // 个人中心「最近活动」预览:取发布话题+回复(filter=4,5)的前 limit 条。
   async getRecentActivity(username: string, limit: number = RECENT_ACTIVITY_LIMIT): Promise<NetworkResult<UserActivityItem[]>> {
-    const path: string = `/user_actions.json?offset=0&username=${encodeURIComponent(username)}&filter=4,5`;
+    const result: NetworkResult<UserActivityPage> = await this.getActivity(username, '4,5', 0);
+    if (!result.success || result.data === undefined) {
+      return {
+        success: false,
+        statusCode: result.statusCode,
+        challengeState: result.challengeState,
+        error: result.error
+      };
+    }
+    const items: UserActivityItem[] = result.data.items.length > limit
+      ? result.data.items.slice(0, limit)
+      : result.data.items;
+    return {
+      success: true,
+      statusCode: result.statusCode,
+      challengeState: result.challengeState,
+      data: items
+    };
+  }
+
+  // 通用用户动态分页:filter 见 UserActionType(4=话题 5=回复 1=点赞,可用逗号组合),
+  // offset 为已加载条数;hasMore 依据本页返回是否满一页判断。
+  async getActivity(username: string, filter: string, offset: number): Promise<NetworkResult<UserActivityPage>> {
+    const path: string =
+      `/user_actions.json?offset=${offset}&username=${encodeURIComponent(username)}&filter=${filter}`;
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<UserActivityItem[]>(response);
+      return this.forwardFailure<UserActivityPage>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<UserActivityItem[]>(response.statusCode, response.challengeState, 'Linux.do 用户活动响应为空。');
+      return this.unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, 'Linux.do 用户活动响应为空。');
     }
 
     try {
       const payload: DiscourseUserActionsResponse = JSON.parse(response.data) as DiscourseUserActionsResponse;
       const sourceActions: DiscourseUserAction[] = payload.user_actions ? payload.user_actions : [];
       const items: UserActivityItem[] = [];
-      for (let index: number = 0; index < sourceActions.length && items.length < limit; index++) {
+      for (let index: number = 0; index < sourceActions.length; index++) {
         const item: UserActivityItem | undefined = this.mapAction(sourceActions[index]);
         if (item) {
           items.push(item);
@@ -200,10 +230,13 @@ export class UserProfileService {
         success: true,
         statusCode: response.statusCode,
         challengeState: response.challengeState,
-        data: items
+        data: {
+          items: items,
+          hasMore: sourceActions.length >= ACTIVITY_PAGE_SIZE
+        }
       };
     } catch (error) {
-      return this.unexpectedResponse<UserActivityItem[]>(response.statusCode, response.challengeState, 'Linux.do 用户活动响应不是有效 JSON。');
+      return this.unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, 'Linux.do 用户活动响应不是有效 JSON。');
     }
   }
 
@@ -259,7 +292,8 @@ export class UserProfileService {
       actionType: sourceAction.action_type,
       topicId: sourceAction.topic_id,
       title: sourceAction.title,
-      // /user_actions.json 只返回 category_id,不含 tags 字段(实测),故最近活动仅显示分类,无标签。
+      excerpt: HtmlText.toPlainText(sourceAction.excerpt),
+      // /user_actions.json 只返回 category_id,不含 tags 字段(实测),故活动列表仅显示分类,无标签。
       tags: []
     };
     if (typeof sourceAction.post_number === 'number' && sourceAction.post_number > 1) {

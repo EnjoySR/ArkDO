@@ -1,6 +1,7 @@
 import { Bookmark, BookmarkPage } from '../../models/Bookmark';
 import { TopicTag } from '../../models/Topic';
 import { User } from '../../models/User';
+import { HtmlText } from '../content/HtmlText';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
 
 interface DiscourseBookmarkListResponse {
@@ -209,45 +210,13 @@ export class BookmarkService {
     return user;
   }
 
-  // excerpt 的 HTML → 纯文本:去标签、解码实体、折叠空白。
-  // 提及 <a class="mention">@x</a> 变成 @x;图片 <a class="lightbox">[image]</a> 变成 [image]。
+  // 委托共享工具(与用户动态列表共用),保留静态入口方便单测直接调用。
   static htmlToPlainText(html?: string): string {
-    if (!html || html.length === 0) {
-      return '';
-    }
-    // 去掉所有标签,再解码实体,最后把连续空白(含换行)折叠成单空格。
-    let text: string = html.replace(/<[^>]*>/g, '');
-    text = BookmarkService.decodeEntities(text);
-    text = text.replace(/\s+/g, ' ').trim();
-    return text;
+    return HtmlText.toPlainText(html);
   }
 
   static decodeEntities(input: string): string {
-    if (input.indexOf('&') < 0) {
-      return input;
-    }
-    let text: string = input
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&apos;/g, "'")
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&hellip;/g, '…')
-      .replace(/&mdash;/g, '—')
-      .replace(/&ndash;/g, '–');
-    // 数字实体 &#123; / &#x1F;
-    text = text.replace(/&#(\d+);/g, (_match: string, dec: string): string => {
-      const code: number = Number.parseInt(dec, 10);
-      return Number.isNaN(code) ? '' : String.fromCharCode(code);
-    });
-    text = text.replace(/&#[xX]([0-9a-fA-F]+);/g, (_match: string, hex: string): string => {
-      const code: number = Number.parseInt(hex, 16);
-      return Number.isNaN(code) ? '' : String.fromCharCode(code);
-    });
-    // &amp; 最后解,避免把上面已解出的实体二次误伤。
-    text = text.replace(/&amp;/g, '&');
-    return text;
+    return HtmlText.decodeEntities(input);
   }
 
   private forwardFailure(response: NetworkResult<string>): NetworkResult<BookmarkPage> {

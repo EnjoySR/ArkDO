@@ -148,6 +148,24 @@ export default function userProfileServiceTest() {
       expect(result.data?.[2].topicId).assertEqual(400);
     });
 
+    it('getActivityStripsExcerptHtmlAndReportsNoMoreOnShortPage', 0, async () => {
+      const payload: string = '{"user_actions":[' +
+        '{"action_type":1,"created_at":"2026-07-08T01:00:00.000Z","topic_id":100,"post_number":6,' +
+        '"title":"被点赞的帖","category_id":4,"excerpt":"看 <a class=\\"mention\\">@x</a> 说的 &amp; 对"}]}';
+      const bridge: FakeBridge = new FakeBridge(okResponse(payload));
+      const service: UserProfileService = new UserProfileService(bridge);
+
+      const result = await service.getActivity('linuxdo_user', '1', 20);
+
+      expect(bridge.requestedPath).assertEqual('/user_actions.json?offset=20&username=linuxdo_user&filter=1');
+      expect(result.success).assertTrue();
+      expect(result.data?.items.length).assertEqual(1);
+      expect(result.data?.items[0].excerpt).assertEqual('看 @x 说的 & 对');
+      expect(result.data?.items[0].postNumber).assertEqual(6);
+      // 本页不足一页(<30)→ 没有更多。
+      expect(result.data?.hasMore).assertFalse();
+    });
+
     it('logoutSendsDeleteToSessionEndpoint', 0, async () => {
       const bridge: FakeBridge = new FakeBridge(okResponse('{"success":"OK"}'));
       const service: AuthService = new AuthService(bridge);

@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { AppRouteName, BookmarksRouteParam, buildBookmarksRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BookmarksRouteParam, buildActivityRouteParam, buildBookmarksRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -23,6 +23,7 @@ import { LoginPage } from './LoginPage';
 import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
 import { BookmarksPage } from './BookmarksPage';
+import { ActivityListPage } from './ActivityListPage';
 import { TopicDetailPage } from './TopicDetailPage';
 import { WebViewPage } from './WebViewPage';
 
@@ -209,6 +210,26 @@ export struct RootTabPage {
           },
           onOpenBookmarks: (username: string) => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.BOOKMARKS, buildBookmarksRouteParam(username)));
+          },
+          onOpenActivity: (username: string, filter: string, title: string) => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.ACTIVITY, buildActivityRouteParam(username, filter, title)));
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else if (name === AppRouteName.ACTIVITY && isActivityRouteParam(param)) {
+      NavDestination() {
+        ActivityListPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as ActivityRouteParam).username,
+          filter: (param as ActivityRouteParam).filter,
+          pageTitle: (param as ActivityRouteParam).title,
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
+            this.openTopicDetailById(topicId, undefined, title, postNumber, postNumber !== undefined);
           }
         })
       }

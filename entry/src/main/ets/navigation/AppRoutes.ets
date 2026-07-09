@@ -3,7 +3,8 @@ export enum AppRouteName {
   PROFILE = 'profile',
   WEB = 'web',
   NOTIFICATIONS = 'notifications',
-  BOOKMARKS = 'bookmarks'
+  BOOKMARKS = 'bookmarks',
+  ACTIVITY = 'activity'
 }
 
 export interface TopicDetailRouteParam {
@@ -40,6 +41,31 @@ export function isBookmarksRouteParam(param: Object | undefined): boolean {
   }
   const candidate: BookmarksRouteParam = param as BookmarksRouteParam;
   return typeof candidate.username === 'string' && candidate.username.length > 0;
+}
+
+// 用户动态列表参数:filter 见 UserActionType(4=话题 5=回复 1=点赞,可逗号组合)。
+export interface ActivityRouteParam {
+  username: string;
+  filter: string;
+  title: string;
+}
+
+export function buildActivityRouteParam(username: string, filter: string, title: string): ActivityRouteParam {
+  return {
+    username: username,
+    filter: filter,
+    title: title
+  };
+}
+
+export function isActivityRouteParam(param: Object | undefined): boolean {
+  if (!param) {
+    return false;
+  }
+  const candidate: ActivityRouteParam = param as ActivityRouteParam;
+  return typeof candidate.username === 'string' && candidate.username.length > 0 &&
+    typeof candidate.filter === 'string' && candidate.filter.length > 0 &&
+    typeof candidate.title === 'string';
 }
 
 export function buildNotificationsRouteParam(source: string): NotificationsRouteParam {

@@ -57,7 +57,15 @@ export interface UserActivityItem {
   topicId: number;
   postNumber?: number;
   title: string;
+  // 该动作对应楼层的正文摘要(纯文本);列表页用,个人中心预览不显示。
+  excerpt: string;
   categoryId?: number;
   tags: TopicTag[];
   createdAt?: string;
+}
+
+// 一页用户动态 + 是否还有更多(user_actions 按 offset 翻页)。
+export interface UserActivityPage {
+  items: UserActivityItem[];
+  hasMore: boolean;
 }
