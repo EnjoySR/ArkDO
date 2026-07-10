@@ -39,6 +39,17 @@ export interface UserBadgeItem {
   imageUrl?: string;
   // 本用户获得该徽章的次数(可重复获得的徽章 >1 时展示 ×N)。
   grantCount?: number;
+  // 「全部徽章」页额外字段(summary 精简版不含):徽章说明与授予时间。
+  description?: string;
+  grantedAt?: string;
+}
+
+// 「全部徽章」页按等级(金/银/铜)分组。
+export interface UserBadgeGroup {
+  typeId: number;
+  // 分组标题:优先服务端 badge_types.name,否则金牌/银牌/铜牌兜底。
+  typeName: string;
+  badges: UserBadgeItem[];
 }
 
 export interface UserSummary {

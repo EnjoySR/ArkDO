@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { ActivityRouteParam, AppRouteName, BookmarksRouteParam, buildActivityRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -29,6 +29,7 @@ import { DohSettingsPage } from './DohSettingsPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { BookmarksPage } from './BookmarksPage';
 import { ActivityListPage } from './ActivityListPage';
+import { BadgesPage } from './BadgesPage';
 import { TopicDetailPage } from './TopicDetailPage';
 import { WebViewPage } from './WebViewPage';
 
@@ -228,6 +229,9 @@ export struct RootTabPage {
           onOpenActivity: (username: string, filter: string, title: string) => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.ACTIVITY, buildActivityRouteParam(username, filter, title)));
           },
+          onOpenBadges: (username: string, badgeCount: number) => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.BADGES, buildBadgesRouteParam(username, badgeCount)));
+          },
           onOpenSettings: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.SETTINGS, buildSettingsRouteParam('profile')));
           },
@@ -311,6 +315,19 @@ export struct RootTabPage {
           },
           onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
             this.openTopicDetailById(topicId, undefined, title, postNumber, postNumber !== undefined);
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else if (name === AppRouteName.BADGES && isBadgesRouteParam(param)) {
+      NavDestination() {
+        BadgesPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as BadgesRouteParam).username,
+          badgeCount: (param as BadgesRouteParam).badgeCount,
+          onBack: () => {
+            this.popNavigation();
           }
         })
       }

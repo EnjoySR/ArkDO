@@ -20,6 +20,7 @@ import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { UserProfileCache } from '../../services/user/UserProfileCache';
 import { UserProfileService } from '../../services/user/UserProfileService';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
+import { BadgeTile } from '../components/BadgeTile';
 import { UserAvatar } from '../components/UserAvatar';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
@@ -56,6 +57,8 @@ export struct ProfilePage {
   onOpenBookmarks: (username: string) => void = () => {};
   // 用户动态列表(我的话题/回复/点赞/最近活动全部)已原生化:filter 见 UserActionType。
   onOpenActivity: (username: string, filter: string, title: string) => void = () => {};
+  // 全部徽章页已原生化:数据取自 /user-badges/{username}.json。
+  onOpenBadges: (username: string, badgeCount: number) => void = () => {};
   // 设置与诊断日志已拆到独立设置页,右上角齿轮入口触发。
   onOpenSettings: () => void = () => {};
   // 点击信任等级标进入原生等级进度页(数据取自 connect.linux.do)。
@@ -276,7 +279,9 @@ export struct ProfilePage {
       // 卡片 3:徽章
       Column() {
         this.SectionHead(this.getBadgeHeadLabel(), '全部 ›', () => {
-          this.openWebPath(`/u/${this.getUsername()}/badges`, '徽章');
+          if (this.getUsername().length > 0) {
+            this.onOpenBadges(this.getUsername(), this.profileDetail?.badgeCount ?? 0);
+          }
         })
         if (this.topBadges.length > 0) {
           // 摘要接口最多返回 6 枚,固定 3 列网格等分展示,不做横滑。
@@ -284,7 +289,7 @@ export struct ProfilePage {
             ForEach(this.getBadgeRows(), (row: UserBadgeItem[], rowIndex: number) => {
               Row({ space: 8 }) {
                 ForEach(row, (badge: UserBadgeItem) => {
-                  this.BadgeTile(badge)
+                  BadgeTile(badge, (tapped: UserBadgeItem) => {})
                 }, (badge: UserBadgeItem) => badge.id.toString())
                 // 不满 3 枚的行用透明占位补齐,保持等分列宽。
                 ForEach(this.getBadgeRowFillers(row), (filler: number) => {
@@ -452,45 +457,6 @@ export struct ProfilePage {
     .onClick(() => {
       onEntryClick();
     })
-  }
-
-  // 徽章小卡片:图片徽章(image_url)原图展示;FA 图标徽章按金/银/铜等级色染色。
-  // 可重复获得的徽章在名字后缀 ×N。
-  @Builder
-  private BadgeTile(badge: UserBadgeItem) {
-    Column() {
-      Column() {
-        if (badge.imageUrl) {
-          Image(badge.imageUrl)
-            .width(32)
-            .height(32)
-            .objectFit(ImageFit.Contain)
-            .draggable(false)
-        } else {
-          FaIconView({
-            icon: this.faIcon(badge.icon && badge.icon.length > 0 ? badge.icon : 'certificate'),
-            iconSize: 26,
-            color: this.getBadgeTypeColor(badge.badgeTypeId)
-          })
-        }
-      }
-      .height(32)
-      .justifyContent(FlexAlign.Center)
-
-      Text(this.getBadgeTileLabel(badge))
-        .fontSize(11)
-        .fontColor($r('app.color.text_secondary'))
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%')
-        .textAlign(TextAlign.Center)
-        .margin({ top: 7 })
-    }
-    .layoutWeight(1)
-    .padding({ top: 12, bottom: 10, left: 6, right: 6 })
-    .borderRadius(12)
-    .backgroundColor($r('app.color.surface_band'))
-    .alignItems(HorizontalAlign.Center)
   }
 
   @Builder
@@ -921,12 +887,6 @@ export struct ProfilePage {
     return fillers;
   }
 
-  private getBadgeTileLabel(badge: UserBadgeItem): string {
-    return badge.grantCount !== undefined && badge.grantCount > 1
-      ? `${badge.name} ×${badge.grantCount}`
-      : badge.name;
-  }
-
   private getBadgeHeadLabel(): string {
     const badgeCount: number | undefined = this.profileDetail?.badgeCount;
     return badgeCount !== undefined && badgeCount > 0 ? `徽章 · ${badgeCount}` : '徽章';
@@ -957,16 +917,6 @@ export struct ProfilePage {
       return '真诚、友善、团结、专业，共建你我引以为荣之社区';
     }
     return '正在检查登录状态';
-  }
-
-  private getBadgeTypeColor(badgeTypeId: number): Resource {
-    if (badgeTypeId === 1) {
-      return $r('app.color.ld_gold');
-    }
-    if (badgeTypeId === 2) {
-      return $r('app.color.ld_silver');
-    }
-    return $r('app.color.ld_bronze');
   }
 
   private getCategoryFor(categoryId?: number): TopicCategory | undefined {

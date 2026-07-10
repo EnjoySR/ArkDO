@@ -7,7 +7,8 @@ export enum AppRouteName {
   WEB = 'web',
   NOTIFICATIONS = 'notifications',
   BOOKMARKS = 'bookmarks',
-  ACTIVITY = 'activity'
+  ACTIVITY = 'activity',
+  BADGES = 'badges'
 }
 
 export interface TopicDetailRouteParam {
@@ -73,6 +74,27 @@ export function isBookmarksRouteParam(param: Object | undefined): boolean {
     return false;
   }
   const candidate: BookmarksRouteParam = param as BookmarksRouteParam;
+  return typeof candidate.username === 'string' && candidate.username.length > 0;
+}
+
+// 全部徽章页参数:目标用户名 + 徽章总数(用于标题「徽章 · N」,0 表示未知)。
+export interface BadgesRouteParam {
+  username: string;
+  badgeCount: number;
+}
+
+export function buildBadgesRouteParam(username: string, badgeCount: number): BadgesRouteParam {
+  return {
+    username: username,
+    badgeCount: badgeCount
+  };
+}
+
+export function isBadgesRouteParam(param: Object | undefined): boolean {
+  if (!param) {
+    return false;
+  }
+  const candidate: BadgesRouteParam = param as BadgesRouteParam;
   return typeof candidate.username === 'string' && candidate.username.length > 0;
 }
 

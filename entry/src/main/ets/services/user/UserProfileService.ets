@@ -1,6 +1,7 @@
 import {
   UserActivityItem,
   UserActivityPage,
+  UserBadgeGroup,
   UserBadgeItem,
   UserProfileDetail,
   UserSummary,
@@ -55,6 +56,27 @@ interface DiscourseBadge {
   badge_type_id?: number;
   icon?: string | null;
   image_url?: string | null;
+  description?: string | null;
+}
+
+// /user-badges/{username}.json?grouped=true 响应:徽章定义 + 等级类型 + 本用户授予记录。
+interface DiscourseUserBadgesResponse {
+  badges?: DiscourseBadge[];
+  badge_types?: DiscourseBadgeType[];
+  user_badges?: DiscourseUserBadgeRecord[];
+}
+
+interface DiscourseBadgeType {
+  id?: number;
+  name?: string;
+}
+
+// grouped=true 时每枚徽章一条,count 为累计获得次数。
+interface DiscourseUserBadgeRecord {
+  id?: number;
+  badge_id?: number;
+  granted_at?: string;
+  count?: number;
 }
 
 // user_summary.badges:本用户的徽章授予记录,badge_id 对应顶层 badges 定义。
@@ -238,6 +260,137 @@ export class UserProfileService {
     } catch (error) {
       return this.unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, 'Linux.do 用户活动响应不是有效 JSON。');
     }
+  }
+
+  // 「全部徽章」页:/user-badges/{username}.json?grouped=true。与摘要接口同源,复用同一 bridge 过盾。
+  // 返回按等级(金/银/铜)分组、组内保持服务端顺序的徽章列表。
+  async getUserBadges(username: string): Promise<NetworkResult<UserBadgeGroup[]>> {
+    const path: string = `/user-badges/${encodeURIComponent(username)}.json?grouped=true`;
+    const response: NetworkResult<string> = await this.bridge.getJson(path);
+    if (!response.success) {
+      return this.forwardFailure<UserBadgeGroup[]>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, 'Linux.do 徽章响应为空。');
+    }
+
+    try {
+      const payload: DiscourseUserBadgesResponse = JSON.parse(response.data) as DiscourseUserBadgesResponse;
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: this.mapUserBadges(payload.badges, payload.badge_types, payload.user_badges)
+      };
+    } catch (error) {
+      return this.unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, 'Linux.do 徽章响应不是有效 JSON。');
+    }
+  }
+
+  private mapUserBadges(
+    sourceBadges?: DiscourseBadge[],
+    badgeTypes?: DiscourseBadgeType[],
+    userBadges?: DiscourseUserBadgeRecord[]): UserBadgeGroup[] {
+    const groups: UserBadgeGroup[] = [];
+    if (!userBadges || userBadges.length === 0) {
+      return groups;
+    }
+
+    // badge_id -> 定义。
+    const defById: Map<number, DiscourseBadge> = new Map();
+    if (sourceBadges) {
+      for (let index: number = 0; index < sourceBadges.length; index++) {
+        const badge: DiscourseBadge = sourceBadges[index];
+        if (typeof badge.id === 'number') {
+          defById.set(badge.id, badge);
+        }
+      }
+    }
+    // badge_type_id -> 服务端名称。
+    const typeNames: Map<number, string> = new Map();
+    if (badgeTypes) {
+      for (let index: number = 0; index < badgeTypes.length; index++) {
+        const type: DiscourseBadgeType = badgeTypes[index];
+        if (typeof type.id === 'number' && typeof type.name === 'string' && type.name.length > 0) {
+          typeNames.set(type.id, type.name);
+        }
+      }
+    }
+
+    // 按 user_badges 顺序遍历,按等级归桶;同一徽章去重(防未分组时重复)。
+    const bucketByType: Map<number, UserBadgeItem[]> = new Map();
+    const seenBadgeIds: Set<number> = new Set();
+    const typeOrder: number[] = [];
+
+    for (let index: number = 0; index < userBadges.length; index++) {
+      const record: DiscourseUserBadgeRecord = userBadges[index];
+      if (typeof record.badge_id !== 'number' || seenBadgeIds.has(record.badge_id)) {
+        continue;
+      }
+      const def: DiscourseBadge | undefined = defById.get(record.badge_id);
+      if (!def || typeof def.id !== 'number' || typeof def.name !== 'string' || def.name.length === 0) {
+        continue;
+      }
+      seenBadgeIds.add(record.badge_id);
+
+      const typeId: number = typeof def.badge_type_id === 'number' ? def.badge_type_id : 3;
+      const item: UserBadgeItem = {
+        id: def.id,
+        name: def.name,
+        badgeTypeId: typeId
+      };
+      if (def.image_url && def.image_url.length > 0) {
+        item.imageUrl = def.image_url;
+      } else if (def.icon && def.icon.length > 0) {
+        item.icon = def.icon;
+      }
+      if (def.description && def.description.length > 0) {
+        item.description = def.description;
+      }
+      if (typeof record.count === 'number' && record.count > 1) {
+        item.grantCount = record.count;
+      }
+      if (record.granted_at && record.granted_at.length > 0) {
+        item.grantedAt = record.granted_at;
+      }
+
+      let bucket: UserBadgeItem[] | undefined = bucketByType.get(typeId);
+      if (!bucket) {
+        bucket = [];
+        bucketByType.set(typeId, bucket);
+        typeOrder.push(typeId);
+      }
+      bucket.push(item);
+    }
+
+    // 组顺序:金(1)→银(2)→铜(3)。
+    typeOrder.sort((a: number, b: number) => a - b);
+    for (let index: number = 0; index < typeOrder.length; index++) {
+      const typeId: number = typeOrder[index];
+      const bucket: UserBadgeItem[] | undefined = bucketByType.get(typeId);
+      if (bucket && bucket.length > 0) {
+        groups.push({
+          typeId: typeId,
+          typeName: this.badgeTypeName(typeId, typeNames),
+          badges: bucket
+        });
+      }
+    }
+    return groups;
+  }
+
+  private badgeTypeName(typeId: number, typeNames: Map<number, string>): string {
+    const name: string | undefined = typeNames.get(typeId);
+    if (name && name.length > 0) {
+      return name;
+    }
+    if (typeId === 1) {
+      return '金牌';
+    }
+    if (typeId === 2) {
+      return '银牌';
+    }
+    return '铜牌';
   }
 
   private mapBadges(sourceBadges?: DiscourseBadge[], grants?: DiscourseUserBadgeGrant[]): UserBadgeItem[] {
