@@ -354,7 +354,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
     try {
       this.markHostReloading();
-      this.controller.loadUrl(AppConstants.BASE_URL);
+      this.controller.loadUrl(AppConstants.HOST_BOOTSTRAP_URL);
       return true;
     } catch (error) {
       // loadUrl 抛异常时不会有后续 onPageEnd,立即放行等待者以免请求悬住。

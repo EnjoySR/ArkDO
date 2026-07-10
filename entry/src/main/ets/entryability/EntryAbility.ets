@@ -18,6 +18,8 @@ export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     // 日志系统须最先初始化,后续经 Log 门面写入的日志才能落盘。
     FileLogger.init(this.context);
+    // 计时锚点①:应用启动。与首页帖子列表开始加载的日志配对,测量冷启动到首屏拉取的耗时。
+    Log.i(`[ArkDO][Startup] stage=appOnCreate ts=${Date.now()}`);
     this.registerCrashHandler();
     ThemeManager.init(this.context);
     this.loadIconAssets();

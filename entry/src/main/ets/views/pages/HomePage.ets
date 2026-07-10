@@ -346,6 +346,10 @@ export struct HomePage {
     this.listMessage = '正在加载最新帖子';
     this.footerMessage = '上拉加载更多';
 
+    if (isFirstLoad) {
+      // 计时锚点②:首页帖子列表开始拉取。与应用启动日志配对,测量冷启动到首屏拉取的耗时。
+      Log.i(`${LOG_TAG} stage=firstLatestFetchStart ts=${Date.now()}`);
+    }
     const result: NetworkResult<TopicPage> = await new TopicService(this.bridge).getLatestTopicsPage(0);
     this.isRefreshing = false;
     this.isInitialLoading = false;

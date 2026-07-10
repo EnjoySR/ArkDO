@@ -18,6 +18,8 @@ export struct ArkWebHost {
   private unsubscribeSessionChanged?: () => void = undefined;
 
   aboutToAppear(): void {
+    // 计时锚点③:宿主 webview 开始初始化并加载 BASE_URL。到 onPageEnd 就绪之间即为桥初始化耗时。
+    Log.i(`${LOG_TAG} stage=hostInitStart ts=${Date.now()}`);
     webview.WebviewController.initializeWebEngine();
     WebSessionManager.configureCookieAccess('ArkWebHost');
     if (!this.unsubscribeSessionChanged) {
@@ -35,7 +37,7 @@ export struct ArkWebHost {
   }
 
   build() {
-    Web({ src: AppConstants.BASE_URL, controller: this.controller })
+    Web({ src: AppConstants.HOST_BOOTSTRAP_URL, controller: this.controller })
       .javaScriptAccess(true)
       .domStorageAccess(true)
       .databaseAccess(true)
@@ -47,7 +49,17 @@ export struct ArkWebHost {
       .onControllerAttached(() => {
         WebSessionManager.applyUserAgent(this.controller, 'ArkWebHost');
       })
+      .onPageBegin(() => {
+        // 计时锚点③.5:导航已提交(DNS+CF+首字节完成,开始收正文)。切分建连阶段与页面渲染阶段。
+        if (!this.hasNotifiedReady) {
+          Log.i(`${LOG_TAG} stage=hostPageBegin ts=${Date.now()}`);
+        }
+      })
       .onPageEnd(() => {
+        // 计时锚点④:宿主 webview 首页加载完成,fetch 桥就绪(首次才通知 onReady)。
+        if (!this.hasNotifiedReady) {
+          Log.i(`${LOG_TAG} stage=hostPageEndReady ts=${Date.now()}`);
+        }
         this.isControllerReady = true;
         WebSessionManager.saveCookies('ArkWebHost');
         this.bridge.attachController(this.controller);
@@ -80,7 +92,7 @@ export struct ArkWebHost {
       Log.i(`${LOG_TAG} reload base url for session version=${version}`);
       // 重载开始前先关门:注入式 fetch 会排队等到重载后的 onPageEnd 再执行,避免落在被销毁的文档上。
       this.bridge.markHostReloading();
-      this.controller.loadUrl(AppConstants.BASE_URL);
+      this.controller.loadUrl(AppConstants.HOST_BOOTSTRAP_URL);
     } catch (error) {
       // loadUrl 抛异常时不会有后续 onPageEnd,需立即放行等待者以免请求悬住。
       this.bridge.markHostReady();
