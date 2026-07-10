@@ -79,6 +79,50 @@
     {
       "name": "text_faint",
       "value": "#909090"
+    },
+    {
+      "name": "connect_success",
+      "value": "#22C55E"
+    },
+    {
+      "name": "connect_danger",
+      "value": "#EF4444"
+    },
+    {
+      "name": "connect_warning",
+      "value": "#F59E0B"
+    },
+    {
+      "name": "connect_success_bg",
+      "value": "#F0FDF4"
+    },
+    {
+      "name": "connect_danger_bg",
+      "value": "#FEF2F2"
+    },
+    {
+      "name": "connect_track",
+      "value": "#EBEBEB"
+    },
+    {
+      "name": "connect_card",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "connect_border",
+      "value": "#E0E0E0"
+    },
+    {
+      "name": "connect_text_primary",
+      "value": "#111111"
+    },
+    {
+      "name": "connect_text_secondary",
+      "value": "#555555"
+    },
+    {
+      "name": "connect_text_tertiary",
+      "value": "#888888"
     }
   ]
 }

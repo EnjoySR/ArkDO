@@ -5,6 +5,8 @@ export class AppConstants {
   // 无需首页那套重型 SPA。改加载极小的 /session/csrf.json,把冷启动首屏就绪从 ~30s 砍到建连级。
   // 同源、必然存在、顺带预热 CSRF;CF 挡时照样返回挑战 HTML 跑 JS 种 cf_clearance,过盾逻辑不变。
   static readonly HOST_BOOTSTRAP_URL: string = 'https://linux.do/session/csrf.json';
+  // connect.linux.do:跨域(与 BASE_URL 不同源),经 SSO 复用 linux.do 会话自动登录。等级进度页专用。
+  static readonly CONNECT_URL: string = 'https://connect.linux.do/';
   static readonly LOGIN_PATH: string = '/login';
   static readonly LOGIN_URL: string = 'https://linux.do/login';
   static readonly CHALLENGE_PATH: string = '/challenge';
