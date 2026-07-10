@@ -1,6 +1,7 @@
 export enum AppRouteName {
   TOPIC_DETAIL = 'topicDetail',
   PROFILE = 'profile',
+  SETTINGS = 'settings',
   WEB = 'web',
   NOTIFICATIONS = 'notifications',
   BOOKMARKS = 'bookmarks',
@@ -19,6 +20,16 @@ export interface TopicDetailRouteParam {
 
 export interface ProfileRouteParam {
   source: string;
+}
+
+export interface SettingsRouteParam {
+  source: string;
+}
+
+export function buildSettingsRouteParam(source: string): SettingsRouteParam {
+  return {
+    source: source
+  };
 }
 
 export interface NotificationsRouteParam {

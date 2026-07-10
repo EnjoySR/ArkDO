@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { ActivityRouteParam, AppRouteName, BookmarksRouteParam, buildActivityRouteParam, buildBookmarksRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BookmarksRouteParam, buildActivityRouteParam, buildBookmarksRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -23,6 +23,7 @@ import { HomePage } from './HomePage';
 import { LoginPage } from './LoginPage';
 import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
+import { SettingsPage } from './SettingsPage';
 import { BookmarksPage } from './BookmarksPage';
 import { ActivityListPage } from './ActivityListPage';
 import { TopicDetailPage } from './TopicDetailPage';
@@ -221,6 +222,26 @@ export struct RootTabPage {
           },
           onOpenActivity: (username: string, filter: string, title: string) => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.ACTIVITY, buildActivityRouteParam(username, filter, title)));
+          },
+          onOpenSettings: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.SETTINGS, buildSettingsRouteParam('profile')));
+          },
+          onBack: () => {
+            this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else if (name === AppRouteName.SETTINGS) {
+      NavDestination() {
+        SettingsPage({
+          isLoggedIn: this.currentUser !== undefined,
+          username: this.currentUser?.username ?? '',
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenWeb: (url: string, title?: string) => {
+            this.openWebPage(url, title);
           }
         })
       }
