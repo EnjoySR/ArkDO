@@ -21,8 +21,9 @@ const ZOOM_EPSILON: number = 1.05;
 
 /**
  * 全屏图片浏览器：Swiper 管多图翻页，每页用三方库 @rv/image-preview 的 ImagePreview
- * 承载缩放/平移/双击。direction=Vertical：竖直平移被库夹在边界内（放大后不会把图拖出屏），
- * 水平手势到边界让给横向 Swiper 翻页——这是横向图集正确的轴向配置（用 Horizontal 会漏夹竖直、图能拖出屏外）。
+ * 承载缩放/平移/双击。direction=Horizontal：水平平移到边界让给横向 Swiper 翻页（多图切换的必需项）。
+ * 注意这是库的取舍——Horizontal 不夹竖直（放大后可把图拖出屏外），Vertical 虽夹竖直却会吃掉水平、翻页失效，
+ * 二者不可兼得；多图翻页优先，故用 Horizontal，竖直越界是库限制暂无法外部修正。
  * 需在页面级渲染（放页面根 Stack 顶层），不能塞进 bindContentCover——其内容不随状态刷新。
  */
 @ComponentV2
@@ -71,9 +72,9 @@ export struct ImageViewer {
               minScale: MIN_SCALE,
               maxScale: MAX_SCALE,
               doubleClickDefaultScale: DOUBLE_TAP_SCALE,
-              // Vertical：竖直平移夹紧在边界内（修复放大后可把图拖出屏外的越界 bug），
-              // 水平到边界让给横向 Swiper 翻页。
-              direction: PreviewDirection.Vertical,
+              // Horizontal：水平到边界让给横向 Swiper 翻页（多图切换必需）。
+              // 换 Vertical 会夹住竖直但吃掉水平、导致翻页失效，故保持 Horizontal。
+              direction: PreviewDirection.Horizontal,
               onClick: () => {
                 this.onClose();
               }
