@@ -15,20 +15,20 @@ export struct LoadStateView {
         LoadingProgress()
           .width(30)
           .height(30)
-          .color('#2563EB')
+          .color($r('app.color.brand'))
           .margin({ bottom: 12 })
       }
 
       Text(this.message)
         .fontSize(15)
-        .fontColor(this.requiresChallenge ? '#B45309' : '#6B7280')
+        .fontColor(this.requiresChallenge ? $r('app.color.warning') : $r('app.color.text_secondary'))
         .textAlign(TextAlign.Center)
 
       if (this.showRetry) {
         Button('重试')
           .fontSize(15)
-          .fontColor('#2563EB')
-          .backgroundColor('#F3F4F6')
+          .fontColor($r('app.color.brand'))
+          .backgroundColor($r('app.color.fill_subtle'))
           .height(38)
           .padding({ left: 18, right: 18 })
           .borderRadius(19)

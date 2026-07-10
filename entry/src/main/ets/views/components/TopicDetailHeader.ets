@@ -20,12 +20,12 @@ export struct TopicDetailHeader {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.chevron_left'))
           .fontSize(28)
-          .fontColor([Color.Black])
+          .fontColor([$r('app.color.icon_secondary')])
           .renderingStrategy(SymbolRenderingStrategy.SINGLE)
       }
       .width(40)
       .height(40)
-      .backgroundColor('#E6E8E9')
+      .backgroundColor($r('app.color.surface_muted'))
       .onClick(() => {
         this.onBack();
       })
@@ -78,10 +78,10 @@ export struct TopicDetailHeader {
     .justifyContent(FlexAlign.Start)
     .height(60)
     .padding({ left: 16, right: 16 })
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.page_bg'))
     .border({
       width: { bottom: 1 },
-      color: '#E5E7EB'
+      color: $r('app.color.border')
     })
   }
 }

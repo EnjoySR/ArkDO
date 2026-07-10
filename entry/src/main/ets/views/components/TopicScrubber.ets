@@ -73,11 +73,11 @@ export struct TopicScrubber {
           // 滑块换成竖向圆角长条(timeline 手柄感),而非默认小圆。
           .blockStyle({ type: SliderBlockType.SHAPE, shape: new Rect({ width: 6, height: 28, radius: 3 }) })
           .blockSize({ width: 6, height: 28 })
-          // 长条手柄用未读小蓝点同色(#66CCFF,见 TopicListItem 未读徽标/蓝点)。
+          // 长条手柄用未读小蓝点同色(#66CCFF,见 TopicListItem 未读徽标/蓝点)。语义强调色,明暗通用,保留字面量。
           .blockColor('#66CCFF')
-          .trackColor(this.isActive() ? '#C7CED8' : '#D1D5DB')
+          .trackColor(this.isActive() ? $r('app.color.border') : $r('app.color.border'))
           // 已填充段(顶→当前)与未填充段同色:整条轨道统一,不显进度深浅,只有长条手柄在动。
-          .selectedColor(this.isActive() ? '#C7CED8' : '#D1D5DB')
+          .selectedColor(this.isActive() ? $r('app.color.border') : $r('app.color.border'))
           .trackThickness(this.isActive() ? 5 : 3)
           .showTips(false)
           .opacity(this.isActive() ? 1 : 0.55)
@@ -114,7 +114,7 @@ export struct TopicScrubber {
           }
           // 盒子已够宽,气泡按内容自然撑开、单行不换行(不再估算宽度)。
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-          .backgroundColor('#2563EB')
+          .backgroundColor($r('app.color.brand'))
           .borderRadius(16)
           .shadow({ radius: 8, color: '#33000000', offsetX: 0, offsetY: 2 })
           // 气泡右-中锚点落在 Slider 左侧一点、手柄中心高度处 → 气泡整体浮在手柄左边、与之等高。

@@ -37,6 +37,7 @@ export struct TopicListItem {
               Span(` ${this.topic.unreadPosts} `)
                 .fontSize(12)
                 .fontColor(Color.White)
+                // 未读标记蓝:语义强调色,明暗底都成立,保留字面量(勿映射 ld_accent,白天会变深蓝)。
                 .textBackgroundStyle({ color: '#66CCFF', radius: 9 })
                 .baselineOffset(LengthMetrics.vp(2))
             } else if (this.topic.unseen === true) {

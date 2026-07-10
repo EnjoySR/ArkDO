@@ -1,15 +1,8 @@
 import { Poll, PollOption, PollVoteResult } from '../../models/TopicDetail';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 
-const CARD_BORDER: string = '#E5E7EB';
-const TITLE_COLOR: string = '#111827';
-const OPTION_COLOR: string = '#111827';
-const INFO_COLOR: string = '#6B7280';
-const BUTTON_BORDER: string = '#D1D5DB';
-const BUTTON_TEXT: string = '#374151';
-const BAR_TRACK: string = '#EEF0F3';
+// 已投项进度条填充:品牌蓝(强调色,明暗一致),保留字面量。
 const BAR_FILL_CHOSEN: string = '#2563EB';
-const BAR_FILL_OTHER: string = '#9CA3AF';
 // 卡片与按钮圆角(调小,不要太圆润)。
 const CARD_RADIUS: number = 4;
 const BUTTON_RADIUS: number = 4;
@@ -55,28 +48,28 @@ export struct PollView {
         Text(this.poll.title)
           .fontSize(16)
           .fontWeight(FontWeight.Normal)
-          .fontColor(TITLE_COLOR)
+          .fontColor($r('app.color.text_primary'))
           .width('100%')
         Divider()
           .strokeWidth(1)
-          .color(CARD_BORDER)
+          .color($r('app.color.border'))
           .margin({ top: 12 })
       }
 
       if (this.showResults) {
         this.ResultsList()
-        Divider().strokeWidth(1).color(CARD_BORDER).margin({ top: 4 })
+        Divider().strokeWidth(1).color($r('app.color.border')).margin({ top: 4 })
         this.ResultsFooter()
       } else {
         this.OptionsList()
-        Divider().strokeWidth(1).color(CARD_BORDER).margin({ top: 4 })
+        Divider().strokeWidth(1).color($r('app.color.border')).margin({ top: 4 })
         this.InfoRow()
         this.ButtonsRow()
       }
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 14, bottom: 14 })
-    .border({ width: 1, color: CARD_BORDER })
+    .border({ width: 1, color: $r('app.color.border') })
     .borderRadius(CARD_RADIUS)
     .alignItems(HorizontalAlign.Start)
   }
@@ -90,7 +83,7 @@ export struct PollView {
           this.OptionCircle(option.id)
           Text(option.label)
             .fontSize(16)
-            .fontColor(OPTION_COLOR)
+            .fontColor($r('app.color.text_primary'))
             .layoutWeight(1)
             .margin({ left: 12 })
         }
@@ -113,15 +106,15 @@ export struct PollView {
       Circle()
         .width(22)
         .height(22)
-        .fill(OPTION_COLOR)
-        .stroke(OPTION_COLOR)
+        .fill($r('app.color.text_primary'))
+        .stroke($r('app.color.text_primary'))
         .strokeWidth(1.5)
     } else {
       Circle()
         .width(22)
         .height(22)
         .fill(Color.Transparent)
-        .stroke(OPTION_COLOR)
+        .stroke($r('app.color.text_primary'))
         .strokeWidth(1.5)
     }
   }
@@ -135,25 +128,25 @@ export struct PollView {
           Row() {
             Text(option.label)
               .fontSize(15)
-              .fontColor(TITLE_COLOR)
+              .fontColor($r('app.color.text_primary'))
               .fontWeight(this.isChosen(option.id) ? FontWeight.Medium : FontWeight.Normal)
               .layoutWeight(1)
             Text(`${this.percentAt(index)}%`)
               .fontSize(14)
-              .fontColor(INFO_COLOR)
+              .fontColor($r('app.color.text_secondary'))
             Text(` · ${this.votesAt(index)} 票`)
               .fontSize(13)
-              .fontColor(INFO_COLOR)
+              .fontColor($r('app.color.text_secondary'))
           }
           .width('100%')
 
           // 进度条:灰底 + 按占比宽度的填充(已投项高亮蓝)。
           Stack({ alignContent: Alignment.Start }) {
-            Row().width('100%').height(8).backgroundColor(BAR_TRACK).borderRadius(4)
+            Row().width('100%').height(8).backgroundColor($r('app.color.fill_subtle')).borderRadius(4)
             Row()
               .width(`${this.percentAt(index)}%`)
               .height(8)
-              .backgroundColor(this.isChosen(option.id) ? BAR_FILL_CHOSEN : BAR_FILL_OTHER)
+              .backgroundColor(this.isChosen(option.id) ? BAR_FILL_CHOSEN : $r('app.color.text_tertiary'))
               .borderRadius(4)
           }
           .width('100%')
@@ -174,11 +167,11 @@ export struct PollView {
   private InfoRow() {
     Row() {
       Row() {
-        FaIconView({ icon: this.faIcon('eye'), color: INFO_COLOR, iconSize: 15 })
+        FaIconView({ icon: this.faIcon('eye'), color: $r('app.color.text_secondary'), iconSize: 15 })
           .margin({ right: 6 })
         Text(this.poll.isPublic ? '投票为公开。' : '投票为保密。')
           .fontSize(14)
-          .fontColor(INFO_COLOR)
+          .fontColor($r('app.color.text_secondary'))
       }
       .layoutWeight(1)
       .alignItems(VerticalAlign.Center)
@@ -186,12 +179,12 @@ export struct PollView {
       Divider()
         .vertical(true)
         .height(16)
-        .color(CARD_BORDER)
+        .color($r('app.color.border'))
         .margin({ left: 8, right: 8 })
 
       Text(`${this.voters} 投票人`)
         .fontSize(14)
-        .fontColor(INFO_COLOR)
+        .fontColor($r('app.color.text_secondary'))
         .layoutWeight(1)
     }
     .width('100%')
@@ -232,14 +225,14 @@ export struct PollView {
   private ResultsFooter() {
     Row() {
       Row() {
-        FaIconView({ icon: this.faIcon('angle-left'), color: BUTTON_TEXT, iconSize: 16 })
+        FaIconView({ icon: this.faIcon('angle-left'), color: $r('app.color.text_secondary'), iconSize: 16 })
           .margin({ right: 6 })
         Text('返回')
           .fontSize(14)
-          .fontColor(BUTTON_TEXT)
+          .fontColor($r('app.color.text_secondary'))
       }
       .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-      .border({ width: 1, color: BUTTON_BORDER })
+      .border({ width: 1, color: $r('app.color.border') })
       .borderRadius(BUTTON_RADIUS)
       .onClick(() => {
         this.showResults = false;
@@ -249,7 +242,7 @@ export struct PollView {
 
       Text(`${this.voters} 投票人`)
         .fontSize(14)
-        .fontColor(INFO_COLOR)
+        .fontColor($r('app.color.text_secondary'))
     }
     .width('100%')
     .margin({ top: 12 })
@@ -259,16 +252,16 @@ export struct PollView {
   @Builder
   private PollButton(iconId: string, label: string, flexible: boolean, action: () => void) {
     Row() {
-      FaIconView({ icon: this.faIcon(iconId), color: BUTTON_TEXT, iconSize: 15 })
+      FaIconView({ icon: this.faIcon(iconId), color: $r('app.color.text_secondary'), iconSize: 15 })
         .margin({ right: 6 })
       Text(label)
         .fontSize(14)
-        .fontColor(BUTTON_TEXT)
+        .fontColor($r('app.color.text_secondary'))
     }
     .justifyContent(FlexAlign.Center)
     .layoutWeight(flexible ? 1 : 0)
     .padding({ left: 16, right: 16, top: 9, bottom: 9 })
-    .border({ width: 1, color: BUTTON_BORDER })
+    .border({ width: 1, color: $r('app.color.border') })
     .borderRadius(BUTTON_RADIUS)
     .onClick(action)
   }

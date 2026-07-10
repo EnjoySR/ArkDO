@@ -81,6 +81,30 @@
       "value": "#909090"
     },
     {
+      "name": "text_tertiary",
+      "value": "#9CA3AF"
+    },
+    {
+      "name": "icon_secondary",
+      "value": "#4B5563"
+    },
+    {
+      "name": "icon_muted",
+      "value": "#BDBDBD"
+    },
+    {
+      "name": "fill_subtle",
+      "value": "#F3F4F6"
+    },
+    {
+      "name": "warn_soft_bg",
+      "value": "#FEF3C7"
+    },
+    {
+      "name": "info_soft_bg",
+      "value": "#E8F1FE"
+    },
+    {
       "name": "connect_success",
       "value": "#22C55E"
     },

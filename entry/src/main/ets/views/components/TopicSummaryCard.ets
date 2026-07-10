@@ -16,7 +16,7 @@ export struct TopicSummaryCard {
       Text(this.title)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
-        .fontColor('#111827')
+        .fontColor($r('app.color.text_primary'))
         .width('100%')
 
       if (this.hasBadges()) {
@@ -31,14 +31,14 @@ export struct TopicSummaryCard {
 
       Text(this.metaText)
         .fontSize(12)
-        .fontColor('#6B7280')
+        .fontColor($r('app.color.text_secondary'))
         .margin({ top: 8 })
     }
     .width('100%')
     .padding({ left: 10, right: 10, top: 20, bottom: 16 })
     .border({
       width: { bottom: 1 },
-      color: '#E5E7EB'
+      color: $r('app.color.border')
     })
     .alignItems(HorizontalAlign.Start)
   }

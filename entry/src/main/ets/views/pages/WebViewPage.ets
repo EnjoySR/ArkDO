@@ -28,8 +28,8 @@ export struct WebViewPage {
 
       if (this.isLoading && this.progress < 100) {
         Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
-          .color('#2563EB')
-          .backgroundColor('#E5E7EB')
+          .color($r('app.color.brand'))
+          .backgroundColor($r('app.color.border'))
           .width('100%')
           .height(2)
       }
@@ -66,7 +66,7 @@ export struct WebViewPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -76,12 +76,12 @@ export struct WebViewPage {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.chevron_left'))
           .fontSize(26)
-          .fontColor([Color.Black])
+          .fontColor([$r('app.color.text_primary')])
           .renderingStrategy(SymbolRenderingStrategy.SINGLE)
       }
       .width(38)
       .height(38)
-      .backgroundColor('#E6E8E9')
+      .backgroundColor($r('app.color.surface_muted'))
       .onClick(() => {
         this.handleBack();
       })
@@ -90,13 +90,13 @@ export struct WebViewPage {
         Text(this.displayTitle)
           .fontSize(16)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#111827')
+          .fontColor($r('app.color.text_primary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
         Text(this.hostOf(this.url))
           .fontSize(12)
-          .fontColor('#9CA3AF')
+          .fontColor($r('app.color.text_tertiary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
@@ -109,8 +109,8 @@ export struct WebViewPage {
     .height(52)
     .padding({ left: 12, right: 12 })
     .alignItems(VerticalAlign.Center)
-    .backgroundColor('#FFFFFF')
-    .border({ width: { bottom: 0.5 }, color: '#E5E7EB' })
+    .backgroundColor($r('app.color.page_bg'))
+    .border({ width: { bottom: 0.5 }, color: $r('app.color.border') })
   }
 
   // 系统/侧滑返回优先在网页内回退一级;无历史时才退出本页。

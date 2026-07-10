@@ -33,16 +33,16 @@ export struct LoginPage {
         Text('登录')
           .fontSize(20)
           .fontWeight(FontWeight.Medium)
-          .fontColor('#111827')
+          .fontColor($r('app.color.text_primary'))
         Blank()
       }
       .width('100%')
       .height(60)
       .padding({ left: 16, right: 16 })
-      .backgroundColor('#FFFFFF')
+      .backgroundColor($r('app.color.page_bg'))
       .border({
         width: { bottom: 1 },
-        color: '#E5E7EB'
+        color: $r('app.color.border')
       })
 
       Web({ src: AppConstants.LOGIN_URL, controller: this.controller })
@@ -81,7 +81,7 @@ export struct LoginPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.page_bg'))
   }
 
   private isChallengeRelatedHttpError(url: string, statusCode: number): boolean {

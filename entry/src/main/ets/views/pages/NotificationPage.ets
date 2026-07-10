@@ -40,12 +40,12 @@ export struct NotificationPage {
         Button({ type: ButtonType.Circle, stateEffect: true }) {
           SymbolGlyph($r('sys.symbol.chevron_left'))
             .fontSize(28)
-            .fontColor([Color.Black])
+            .fontColor([$r('app.color.text_primary')])
             .renderingStrategy(SymbolRenderingStrategy.SINGLE)
         }
         .width(40)
         .height(40)
-        .backgroundColor('#E6E8E9')
+        .backgroundColor($r('app.color.border'))
         .onClick(() => {
           this.onBack();
         })

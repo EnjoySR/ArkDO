@@ -53,13 +53,13 @@ export struct CfChallengePage {
         Text('Cloudflare 验证')
           .fontSize(20)
           .fontWeight(FontWeight.Medium)
-          .fontColor('#111827')
+          .fontColor($r('app.color.text_primary'))
 
         Row() {
           Button('关闭')
             .fontSize(15)
-            .fontColor('#2563EB')
-            .backgroundColor('#F3F4F6')
+            .fontColor($r('app.color.brand'))
+            .backgroundColor($r('app.color.fill_subtle'))
             .height(36)
             .padding({ left: 16, right: 16 })
             .borderRadius(18)
@@ -73,10 +73,10 @@ export struct CfChallengePage {
       .width('100%')
       .height(60)
       .padding({ left: 16, right: 16 })
-      .backgroundColor('#FFFFFF')
+      .backgroundColor($r('app.color.page_bg'))
       .border({
         width: { bottom: 1 },
-        color: '#E5E7EB'
+        color: $r('app.color.border')
       })
 
       Web({ src: AppConstants.CHALLENGE_URL, controller: this.controller })
@@ -125,7 +125,7 @@ export struct CfChallengePage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.page_bg'))
   }
 
   private startChallengeCookiePolling(): void {

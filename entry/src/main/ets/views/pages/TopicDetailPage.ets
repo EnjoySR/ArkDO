@@ -239,13 +239,13 @@ export struct TopicDetailPage {
               LoadingProgress()
                 .width(18)
                 .height(18)
-                .color('#2563EB')
+                .color($r('app.color.brand'))
                 .margin({ right: 8 })
             }
 
             Text(this.loadMoreMessage)
               .fontSize(13)
-              .fontColor('#9CA3AF')
+              .fontColor($r('app.color.text_tertiary'))
           }
           .width('100%')
           .height(54)
@@ -330,7 +330,7 @@ export struct TopicDetailPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.page_bg'))
     // 全屏时(composerFullScreen)主内容会整体上移一个状态栏高度;补等高顶部内边距抵消,背后视觉不动。
     // 绑 composerFullScreen 而非 showComposer:关闭时全屏延后落下,补偿也随之延后,避免关闭途中背景跳。
     .padding({ top: this.composerFullScreen ? this.composerWindowGuard.statusBarHeight : 0 })
@@ -354,14 +354,14 @@ export struct TopicDetailPage {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         FaIconView({
           icon: this.backToTopIcon(),
-          color: '#4B5563',
+          color: $r('app.color.icon_secondary'),
           iconSize: 18
         })
       }
       .width(40)
       .height(40)
-      .backgroundColor('#FFFFFF')
-      .border({ width: 0.5, color: '#E5E7EB' })
+      .backgroundColor($r('app.color.surface_card'))
+      .border({ width: 0.5, color: $r('app.color.border') })
       .shadow({ radius: 6, color: '#22000000', offsetX: 0, offsetY: 1 })
       // 与 52 的回复 FAB 中线对齐(16 + (52-40)/2),竖直叠在其上方 8px。
       .margin({ right: 22, bottom: 84 })
@@ -408,14 +408,14 @@ export struct TopicDetailPage {
         LoadingProgress()
           .width(14)
           .height(14)
-          .color('#2563EB')
+          .color($r('app.color.brand'))
           .margin({ right: 6 })
         Text(this.isRewindowing ? '正在定位楼层' : '正在加载更早的回复')
           .fontSize(12)
-          .fontColor('#6B7280')
+          .fontColor($r('app.color.text_secondary'))
       }
       .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-      .backgroundColor('#F3F4F6')
+      .backgroundColor($r('app.color.surface_card'))
       .borderRadius(15)
       .shadow({ radius: 6, color: '#22000000', offsetX: 0, offsetY: 1 })
       .position({ x: '50%', y: 72 })

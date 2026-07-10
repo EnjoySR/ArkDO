@@ -159,8 +159,8 @@ export struct CommentInputBar {
             // 行高 24 + 上下 padding 各 10 = 44，正好等于 minHeight：
             // 单行时自然高度撑满最小高度，文字垂直居中（否则被 minHeight 拉高后文字贴顶）。
             .lineHeight(24)
-            .fontColor('#111827')
-            .placeholderColor('#9CA3AF')
+            .fontColor($r('app.color.text_primary'))
+            .placeholderColor($r('app.color.text_tertiary'))
             .defaultFocus(true)
             .enterKeyType(EnterKeyType.NEW_LINE)
             .constraintSize({ minHeight: INPUT_MIN_HEIGHT, maxHeight: INPUT_MAX_HEIGHT })
@@ -171,7 +171,7 @@ export struct CommentInputBar {
             })
         }
         .layoutWeight(1)
-        .backgroundColor('#F3F4F6')
+        .backgroundColor($r('app.color.fill_subtle'))
         .borderRadius(8)
         .clip(false)
 
@@ -203,10 +203,10 @@ export struct CommentInputBar {
       .alignItems(VerticalAlign.Bottom)
       // 键盘弹起：底部内边距只留 8（安全区被键盘遮住）；键盘收起：叠加底部安全区贴 Home 条之上。
       .padding({ left: 12, right: 12, top: 8, bottom: this.keyboardHeight > 0 ? 8 : 8 + this.bottomInset })
-      .backgroundColor('#FFFFFF')
+      .backgroundColor($r('app.color.surface_card'))
       .border({
         width: { top: 1 },
-        color: '#E5E7EB'
+        color: $r('app.color.border')
       })
       // 键盘弹起：整条上移键盘高度，正好贴到键盘上沿；键盘收起：回落到底部。
       // 上移动画由 onAvoidAreaChange 里的 animateTo 驱动（此处不挂 .animation，避免影响图标渲染）。

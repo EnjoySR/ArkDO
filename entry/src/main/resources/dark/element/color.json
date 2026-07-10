@@ -2,7 +2,7 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#000000"
+      "value": "#17191D"
     },
     {
       "name": "page_bg",
@@ -79,6 +79,30 @@
     {
       "name": "text_faint",
       "value": "#7C828B"
+    },
+    {
+      "name": "text_tertiary",
+      "value": "#8A9099"
+    },
+    {
+      "name": "icon_secondary",
+      "value": "#C2C7CF"
+    },
+    {
+      "name": "icon_muted",
+      "value": "#5C626B"
+    },
+    {
+      "name": "fill_subtle",
+      "value": "#23262C"
+    },
+    {
+      "name": "warn_soft_bg",
+      "value": "#3A2F14"
+    },
+    {
+      "name": "info_soft_bg",
+      "value": "#16283C"
     },
     {
       "name": "connect_success",

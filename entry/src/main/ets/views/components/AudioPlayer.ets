@@ -97,7 +97,7 @@ export struct AudioPlayer {
           step: 0.1
         })
           .width('100%')
-          .trackColor('#E5E7EB')
+          .trackColor($r('app.color.border'))
           .selectedColor('#0088CC')
           .blockColor('#0088CC')
           .trackThickness(3)
@@ -109,11 +109,11 @@ export struct AudioPlayer {
         Row() {
           Text(this.formatTime(this.currentMs))
             .fontSize(11)
-            .fontColor('#6B7280')
+            .fontColor($r('app.color.text_secondary'))
           Blank()
           Text(this.durationMs > 0 ? this.formatTime(this.durationMs) : '--:--')
             .fontSize(11)
-            .fontColor('#6B7280')
+            .fontColor($r('app.color.text_secondary'))
         }
         .width('100%')
       }
@@ -122,8 +122,8 @@ export struct AudioPlayer {
     }
     .width('100%')
     .padding({ left: 10, right: 14, top: 8, bottom: 8 })
-    .backgroundColor('#F8FAFC')
-    .border({ width: 1, color: '#E5E7EB' })
+    .backgroundColor($r('app.color.page_bg_gray'))
+    .border({ width: 1, color: $r('app.color.border') })
     .borderRadius(8)
     .alignItems(VerticalAlign.Center)
   }

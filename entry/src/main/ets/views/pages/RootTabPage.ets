@@ -141,7 +141,7 @@ export struct RootTabPage {
       // CF 验证弹窗自带「关闭」按钮,隐藏原生右上角 X 避免出现两个关闭入口;其余 sheet 保留原生 X。
       showClose: this.activeSheet !== RootSheet.CHALLENGE,
       maskColor: '#33000000',
-      backgroundColor: '#FFFFFF',
+      backgroundColor: $r('app.color.surface_card'),
       preferType: SheetType.BOTTOM,
       enableOutsideInteractive: false,
       onDisappear: () => {
@@ -180,6 +180,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.WEB && isWebRouteParam(param)) {
       NavDestination() {
         WebViewPage({
@@ -191,6 +194,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.NOTIFICATIONS) {
       NavDestination() {
         NotificationPage({
@@ -205,6 +211,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.PROFILE) {
       NavDestination() {
         ProfilePage({
@@ -245,6 +254,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.LEVEL_PROGRESS) {
       NavDestination() {
         LevelProgressPage({
@@ -258,6 +270,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.SETTINGS) {
       NavDestination() {
         SettingsPage({
@@ -279,6 +294,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.DOH_SETTINGS) {
       NavDestination() {
         DohSettingsPage({
@@ -291,6 +309,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.ACTIVITY && isActivityRouteParam(param)) {
       NavDestination() {
         ActivityListPage({
@@ -308,6 +329,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.BOOKMARKS && isBookmarksRouteParam(param)) {
       NavDestination() {
         BookmarksPage({
@@ -323,6 +347,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.BADGES && isBadgesRouteParam(param)) {
       NavDestination() {
         BadgesPage({
@@ -336,12 +363,15 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     } else {
       NavDestination() {
         Column() {
           Text('页面不存在')
             .fontSize(18)
-            .fontColor('#111827')
+            .fontColor($r('app.color.text_primary'))
           Button('返回')
             .margin({ top: 16 })
             .onClick(() => {
@@ -351,9 +381,12 @@ export struct RootTabPage {
         .width('100%')
         .height('100%')
         .justifyContent(FlexAlign.Center)
-        .backgroundColor('#FFFFFF')
+        .backgroundColor($r('app.color.page_bg'))
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
     }
   }
 

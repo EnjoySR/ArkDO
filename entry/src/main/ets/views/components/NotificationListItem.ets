@@ -4,8 +4,6 @@ import { RelativeTime } from '../../common/utils/RelativeTime';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { UserAvatar } from './UserAvatar';
 
-const UNREAD_BG: string = '#EAF3FF';
-const UNREAD_DOT: string = '#2E90FA';
 const AVATAR_SIZE: number = 42;
 
 // 通知列表单行:有发起人 → 头像 + 右下角类型角标;系统类 → 纯色类型图标圈。
@@ -57,7 +55,7 @@ export struct NotificationListItem {
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
         if (!this.item.read) {
-          Circle({ width: 9, height: 9 }).fill(UNREAD_DOT)
+          Circle({ width: 9, height: 9 }).fill($r('app.color.brand'))
         }
       }
       .alignItems(HorizontalAlign.End)
@@ -65,7 +63,7 @@ export struct NotificationListItem {
     .width('100%')
     .alignItems(VerticalAlign.Top)
     .padding({ left: 16, right: 16, top: 13, bottom: 13 })
-    .backgroundColor(this.item.read ? Color.White : UNREAD_BG)
+    .backgroundColor(this.item.read ? $r('app.color.page_bg') : $r('app.color.info_soft_bg'))
     .onClick(() => {
       this.onItemClick(this.item);
     })
@@ -87,7 +85,7 @@ export struct NotificationListItem {
         .height(20)
         .borderRadius(10)
         .backgroundColor(this.item.iconColor)
-        .border({ width: 2.5, color: this.item.read ? Color.White : UNREAD_BG })
+        .border({ width: 2.5, color: this.item.read ? $r('app.color.page_bg') : $r('app.color.info_soft_bg') })
         .alignContent(Alignment.Center)
         .margin({ right: -3, bottom: -3 })
       } else {

@@ -9,9 +9,9 @@ import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { PostRichContent } from './PostRichContent';
 import { ViewerImage } from './ImageViewer';
 import { UserAvatar } from './UserAvatar';
+import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 
 const LIKE_RED: string = '#EF4444';
-const LIKE_GRAY: string = '#BDBDBD';
 
 // 拷贝链接成功后按钮右下角"画勾"动画,对齐 Discourse post-action-feedback:
 // 复制成功后按钮右下角"画勾"反馈。strokeDashOffset 在本环境不吃 animateTo,改用「左→右揭示」实现描边过程:
@@ -52,6 +52,8 @@ export struct TopicPostItem {
   // @Prop+@Watch 而非一次性布尔:楼内跳转的目标楼往往已在组件树上,aboutToAppear 不会再触发,
   // 只能靠监听变化就地起播;新建楼(窗口式进入/重开窗口)则走 aboutToAppear 分支。
   @Prop @Watch('onFlashTargetChanged') flashTargetPostId: number = 0;
+  // 当前是否深色渲染(ThemeManager 维护):落地高亮色是烘进的字面量、非资源色,须按明暗手动切换。
+  @StorageProp(APP_IS_DARK_STORAGE_KEY) private appIsDark: boolean = false;
   // 图片浏览器在页面级渲染，这里把 PostRichContent 的「打开」请求继续上抛给页面
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击继续上抛给页面(由页面经 LinkRouter 判断跳原生详情或通用 WebView)。
@@ -145,12 +147,13 @@ export struct TopicPostItem {
       .padding({ left: 10, right: 10, top: 12, bottom: 12 })
       .border({
         width: { bottom: 1 },
-        color: '#E5E7EB'
+        color: $r('app.color.border')
       })
       .alignItems(HorizontalAlign.Start)
-      // 渐隐终点必须是同色系零透明度(#00+淡蓝):Color.Transparent 是透明黑,
+      // 渐隐终点必须是同色系零透明度(#00+同色):Color.Transparent 是透明黑,
       // RGBA 逐通道插值时中间帧会过路半透明灰(蓝→灰→消失的成因)。
-      .backgroundColor(this.flashActive ? '#E8F1FE' : '#00E8F1FE')
+      // 深色主题用深蓝高亮 #16283C(浅蓝在深底上刺眼),终点同为其零透明度变体。
+      .backgroundColor(this.flashBg())
       .animation({ duration: 600, curve: Curve.EaseOut })
     }
   }
@@ -187,21 +190,21 @@ export struct TopicPostItem {
         Text(this.getAuthorName())
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
-          .fontColor('#111827')
+          .fontColor($r('app.color.text_primary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
 
         Row() {
           Text(this.getUsername())
             .fontSize(13)
-            .fontColor('#9CA3AF')
+            .fontColor($r('app.color.text_tertiary'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
 
           if (this.hasUserTitle()) {
             Text(this.getUserTitle())
               .fontSize(13)
-              .fontColor('#9CA3AF')
+              .fontColor($r('app.color.text_tertiary'))
               .margin({ left: this.getUsername().length > 0 ? 6 : 0 })
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -216,7 +219,7 @@ export struct TopicPostItem {
       // 点击整块 → 滚动定位到被回复的楼层。
       if (this.hasReplyTo()) {
         Row({ space: 4 }) {
-          FaIconView({ icon: this.faIcon('share'), color: '#9CA3AF', iconSize: 16 })
+          FaIconView({ icon: this.faIcon('share'), color: $r('app.color.text_tertiary'), iconSize: 16 })
           UserAvatar({ user: this.post.replyToUser, avatarSize: 20 })
         }
         .alignItems(VerticalAlign.Center)
@@ -233,13 +236,14 @@ export struct TopicPostItem {
       Row() {
         Text(this.getRelativeTime())
           .fontSize(13)
-          .fontColor('#9CA3AF')
+          .fontColor($r('app.color.text_tertiary'))
 
         // 蓝点常驻占位:读后 opacity 1→0 渐隐(~1.2s),槽位保留,左侧时间不位移。
         // 上报进行中:尺寸不变,opacity 在 1↔0.35 间来回("呼吸"=颜色变浅再变回),由 breatheDim 定时器驱动。
         Circle()
           .width(8)
           .height(8)
+          // 未读蓝点:语义强调色,明暗底都成立,保留字面量(勿映射 ld_accent,白天会变深蓝)。
           .fill('#66CCFF')
           .margin({ left: 2 })
           .opacity(this.isPostRead() ? 0 : (this.breatheDim ? 0.35 : 1))
@@ -272,7 +276,7 @@ export struct TopicPostItem {
 
               Text(`${this.post.reactionUsersCount}`)
                 .fontSize(16)
-                .fontColor('#BDBDBD')
+                .fontColor($r('app.color.icon_muted'))
                 .margin({ left: 8 })
             }
             .alignItems(VerticalAlign.Center)
@@ -283,7 +287,7 @@ export struct TopicPostItem {
             Row({ space: 4 }) {
               Text(`${this.post.replyCount}`)
                 .fontSize(16)
-                .fontColor('#BDBDBD')
+                .fontColor($r('app.color.icon_muted'))
               // 加载中在按钮上就地转圈(替换 chevron);加载成功后才展开列表。
               // chevron 用结构化 if/else 分别渲染:ArkUI 对子组件对象类型属性的 diff 更新不可靠,
               // 若复用同一 FaIconView 只换 icon 属性,收起时箭头不会翻回向下(见 objectlink-state-source)。
@@ -291,17 +295,17 @@ export struct TopicPostItem {
                 LoadingProgress()
                   .width(14)
                   .height(14)
-                  .color('#BDBDBD')
+                  .color($r('app.color.icon_muted'))
               } else if (this.repliesExpanded) {
-                FaIconView({ icon: this.faIcon('chevron-up'), color: '#BDBDBD', iconSize: 14 })
+                FaIconView({ icon: this.faIcon('chevron-up'), color: $r('app.color.icon_muted'), iconSize: 14 })
               } else {
-                FaIconView({ icon: this.faIcon('chevron-down'), color: '#BDBDBD', iconSize: 14 })
+                FaIconView({ icon: this.faIcon('chevron-down'), color: $r('app.color.icon_muted'), iconSize: 14 })
               }
             }
             .alignItems(VerticalAlign.Center)
             .padding({ left: 8, right: 8, top: 4, bottom: 4 })
             // 展开时用更深的 #E9E9E9 作为"已激活"态,收起时用较浅的 #F3F4F6。
-            .backgroundColor(this.repliesExpanded ? '#E9E9E9' : '#F3F4F6')
+            .backgroundColor(this.repliesExpanded ? $r('app.color.surface_muted') : $r('app.color.fill_subtle'))
             .borderRadius(4)
             .onClick(() => {
               this.toggleReplies();
@@ -362,14 +366,14 @@ export struct TopicPostItem {
                     Text(this.replyAuthorName(reply))
                       .fontSize(15)
                       .fontWeight(FontWeight.Medium)
-                      .fontColor('#111827')
+                      .fontColor($r('app.color.text_primary'))
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
 
                     if (this.replyUsername(reply).length > 0) {
                       Text(this.replyUsername(reply))
                         .fontSize(13)
-                        .fontColor('#9CA3AF')
+                        .fontColor($r('app.color.text_tertiary'))
                         .maxLines(1)
                         .textOverflow({ overflow: TextOverflow.Ellipsis })
                     }
@@ -419,14 +423,14 @@ export struct TopicPostItem {
   @Builder
   private CollapseButton() {
     Button({ type: ButtonType.Normal, stateEffect: true }) {
-      FaIconView({ icon: this.faIcon('chevron-up'), color: '#646464', iconSize: 14 })
+      FaIconView({ icon: this.faIcon('chevron-up'), color: $r('app.color.text_secondary'), iconSize: 14 })
     }
     .width(32)
     .height(32)
     .padding(0)
     .margin({ left: 4, right: 16 })
-    .backgroundColor('#FFFFFF')
-    .border({ width: 1, color: '#E5E7EB' })
+    .backgroundColor($r('app.color.surface_card'))
+    .border({ width: 1, color: $r('app.color.border') })
     .borderRadius(4)
     .onClick(() => {
       this.repliesExpanded = false;
@@ -441,13 +445,13 @@ export struct TopicPostItem {
         LoadingProgress()
           .width(12)
           .height(12)
-          .color('#9CA3AF')
+          .color($r('app.color.text_tertiary'))
       } else {
-        FaIconView({ icon: this.faIcon('arrow-down'), color: '#9CA3AF', iconSize: 12 })
+        FaIconView({ icon: this.faIcon('arrow-down'), color: $r('app.color.text_tertiary'), iconSize: 12 })
       }
       Text('跳到帖子')
         .fontSize(13)
-        .fontColor('#9CA3AF')
+        .fontColor($r('app.color.text_tertiary'))
     }
     .alignItems(VerticalAlign.Center)
     .onClick(() => {
@@ -471,7 +475,7 @@ export struct TopicPostItem {
     Column()
       .width(1)
       .height('100%')
-      .backgroundColor('#E9E9E9')
+      .backgroundColor($r('app.color.surface_muted'))
       .margin({ left: 19.5 })
   }
 
@@ -518,7 +522,7 @@ export struct TopicPostItem {
   @Builder
   private ReplyButton() {
     Button({ type: ButtonType.Normal, stateEffect: true }) {
-      FaIconView({ icon: this.faIcon('reply'), color: '#646464', iconSize: 16 })
+      FaIconView({ icon: this.faIcon('reply'), color: $r('app.color.text_secondary'), iconSize: 16 })
     }
     .width(38)
     .height(38)
@@ -555,13 +559,13 @@ export struct TopicPostItem {
             }, (token: RichInlineNode, tokenIndex: number) => `${tokenIndex}-${token.type}-${token.text}`)
           }
           .fontSize(13)
-          .fontColor('#646464')
+          .fontColor($r('app.color.text_secondary'))
           .margin({ left: 6 })
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .padding({ left: 4, right: 10, top: 4, bottom: 4 })
-        .backgroundColor('#F2F2F2')
+        .backgroundColor($r('app.color.surface_muted'))
         .borderRadius(16)
         .constraintSize({ maxWidth: '72%' })
         .margin({ right: 8, top: 6 })
@@ -580,7 +584,7 @@ export struct TopicPostItem {
   @Builder
   private RocketButton(size: number, topMargin: number) {
     Button({ type: ButtonType.Normal, stateEffect: true }) {
-      FaIconView({ icon: this.faIcon('rocket'), color: '#BDBDBD', iconSize: 16 })
+      FaIconView({ icon: this.faIcon('rocket'), color: $r('app.color.icon_muted'), iconSize: 16 })
     }
     .width(size)
     .height(size)
@@ -608,7 +612,7 @@ export struct TopicPostItem {
   @Builder
   private MoreButton() {
     Button({ type: ButtonType.Normal, stateEffect: true }) {
-      FaIconView({ icon: this.faIcon('ellipsis'), color: '#BDBDBD', iconSize: 16 })
+      FaIconView({ icon: this.faIcon('ellipsis'), color: $r('app.color.icon_muted'), iconSize: 16 })
     }
     .width(38)
     .height(38)
@@ -631,7 +635,7 @@ export struct TopicPostItem {
       Stack() {
         // link 图标居中:用满尺寸 Column 承载并居中。
         Column() {
-          FaIconView({ icon: this.faIcon('link'), color: '#BDBDBD', iconSize: 16 })
+          FaIconView({ icon: this.faIcon('link'), color: $r('app.color.icon_muted'), iconSize: 16 })
         }
         .width(38)
         .height(38)
@@ -720,11 +724,11 @@ export struct TopicPostItem {
         LoadingProgress()
           .width(18)
           .height(18)
-          .color('#9CA3AF')
+          .color($r('app.color.text_tertiary'))
       } else if (this.bookmarkedLocal) {
-        FaIconView({ icon: this.faIcon('bookmark'), color: '#0088CC', iconSize: 16 })
+        FaIconView({ icon: this.faIcon('bookmark'), color: $r('app.color.ld_accent'), iconSize: 16 })
       } else {
-        FaIconView({ icon: this.faIcon('far-bookmark'), color: '#BDBDBD', iconSize: 16 })
+        FaIconView({ icon: this.faIcon('far-bookmark'), color: $r('app.color.icon_muted'), iconSize: 16 })
       }
     }
     .width(38)
@@ -772,7 +776,7 @@ export struct TopicPostItem {
       LoadingProgress()
         .width(16)
         .height(16)
-        .color(LIKE_GRAY)
+        .color($r('app.color.icon_muted'))
     } else if (this.post.currentUserReaction === 'heart') {
       FaIconView({ icon: this.faIcon('heart'), color: LIKE_RED, iconSize: 16 })
     } else if (this.hasEmojiReaction()) {
@@ -782,7 +786,7 @@ export struct TopicPostItem {
         .objectFit(ImageFit.Contain)
         .draggable(false)
     } else {
-      FaIconView({ icon: this.faIcon('far-heart'), color: LIKE_GRAY, iconSize: 16 })
+      FaIconView({ icon: this.faIcon('far-heart'), color: $r('app.color.icon_muted'), iconSize: 16 })
     }
   }
 
@@ -908,6 +912,15 @@ export struct TopicPostItem {
     if (this.flashTargetPostId === this.post.id) {
       this.startTargetFlash();
     }
+  }
+
+  // 落地高亮底色:高亮态用同色系不透明,渐隐终点用同色系零透明度(避免过路灰)。
+  // 深色主题换深蓝 #16283C(浅蓝在深底刺眼),明色沿用 #E8F1FE。
+  private flashBg(): string {
+    if (this.appIsDark) {
+      return this.flashActive ? '#16283C' : '#0016283C';
+    }
+    return this.flashActive ? '#E8F1FE' : '#00E8F1FE';
   }
 
   // 起播目标楼高亮:置为高亮底色,停留片刻后翻回触发渐隐(backgroundColor 上的隐式动画)。
