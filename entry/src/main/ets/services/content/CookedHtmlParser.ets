@@ -24,6 +24,9 @@ export enum RichBlockType {
   // 直接喂给 AVPlayer / Video 组件流式播放。
   AUDIO = 'audio',
   VIDEO = 'video',
+  // discourse-math 块级公式(<div class="math">):text 存裸 LaTeX(displayMode=true),
+  // 渲染层交离屏 KaTeX 引擎出图后居中显示。
+  MATH = 'math',
   UNSUPPORTED = 'unsupported'
 }
 
@@ -32,6 +35,9 @@ export enum RichInlineType {
   LINK = 'link',
   CODE = 'code',
   IMAGE = 'image',
+  // discourse-math 行内公式(<span class="math">):text 存裸 LaTeX(displayMode=false),
+  // 渲染层出图后以 ImageSpan 基线内联,保证周围文字仍走原生 Text、字体字号与全帖一致。
+  MATH = 'math',
   LINE_BREAK = 'line_break'
 }
 
@@ -322,6 +328,12 @@ export class CookedHtmlParser {
       if (imageBlocks.length > 0) {
         return imageBlocks;
       }
+      // Discourse 会把 <audio>/<video> 裹进 <p>(内部还带一个降级 <a> 链接)。这里先把内嵌媒体
+      // 提升为播放块,否则会落到 mixedBlocks/行内解析,只剩那条降级链接被当正文渲染成裸链接。
+      const mediaBlocks: RichBlock[] | undefined = CookedHtmlParser.mediaParagraphBlocks(innerHtml);
+      if (mediaBlocks) {
+        return mediaBlocks;
+      }
       return CookedHtmlParser.mixedBlocks(innerHtml);
     }
 
@@ -397,6 +409,13 @@ export class CookedHtmlParser {
       if (mediaBlock) {
         return [mediaBlock];
       }
+    }
+
+    // discourse-math 块级公式:<div class="math">裸 LaTeX</div>。API 只给源码,排版交渲染层的
+    // 离屏引擎;这里只抽出 LaTeX 存进 MATH 块的 text。须在 detectUnsupportedKind 之前拦截。
+    if (CookedHtmlParser.hasClass(openTag, 'math')) {
+      const latex: string = CookedHtmlParser.toPlainText(innerHtml);
+      return latex.length > 0 ? [{ type: RichBlockType.MATH, text: latex }] : [];
     }
 
     const unsupportedKind: string = CookedHtmlParser.detectUnsupportedKind(tagName, openTag, innerHtml);
@@ -650,6 +669,21 @@ export class CookedHtmlParser {
         flush();
         state.code = Math.max(0, state.code + (closing ? -1 : 1));
       } else if (tagName === 'span') {
+        // discourse-math 行内公式:<span class="math">裸 LaTeX</span>。整体抽成一个 MATH token,
+        // 里面的 LaTeX 不再当纯文本泄进正文流(否则会显示 \frac{...} 之类源码)。
+        if (!closing && !selfClosing && CookedHtmlParser.hasClass(tag, 'math')) {
+          flush();
+          const mathClose: number = CookedHtmlParser.findClosingTag(html, tagEnd + 1, 'span');
+          if (mathClose > tagEnd) {
+            const latex: string = CookedHtmlParser.toPlainText(html.substring(tagEnd + 1, mathClose));
+            if (latex.length > 0) {
+              out.push({ type: RichInlineType.MATH, text: latex });
+            }
+            const mathCloseEnd: number = CookedHtmlParser.findTagEnd(html, mathClose);
+            index = mathCloseEnd >= 0 ? mathCloseEnd + 1 : mathClose;
+            continue;
+          }
+        }
         flush();
         if (closing) {
           state.spanSpoilerStack.pop();
@@ -1177,6 +1211,63 @@ export class CookedHtmlParser {
     return block;
   }
 
+  // 从段落 HTML 中切出内嵌的 <audio>/<video>,提升为媒体块;媒体前后残留的文字各自成段。媒体元素
+  // 内部的 <source> 与降级 <a> 链接连同整个媒体标签一并被切走,不会再作为正文链接重复渲染。
+  // 未命中任何媒体则返回 undefined,交回上层走 mixedBlocks。
+  private static mediaParagraphBlocks(innerHtml: string): RichBlock[] | undefined {
+    const result: RichBlock[] = [];
+    let rest: string = innerHtml;
+    let found: boolean = false;
+    let guard: number = 0;
+    while (guard < 50) {
+      guard++;
+      const lower: string = rest.toLowerCase();
+      const audioAt: number = lower.indexOf('<audio');
+      const videoAt: number = lower.indexOf('<video');
+      let tagStart: number = -1;
+      let mediaTag: string = '';
+      if (audioAt >= 0 && (videoAt < 0 || audioAt < videoAt)) {
+        tagStart = audioAt;
+        mediaTag = 'audio';
+      } else if (videoAt >= 0) {
+        tagStart = videoAt;
+        mediaTag = 'video';
+      }
+      if (tagStart < 0) {
+        break;
+      }
+      const tagEnd: number = CookedHtmlParser.findTagEnd(rest, tagStart);
+      if (tagEnd < 0) {
+        break;
+      }
+      const openTag: string = rest.substring(tagStart, tagEnd + 1);
+      const closeStart: number = CookedHtmlParser.findClosingTag(rest, tagEnd + 1, mediaTag);
+      if (closeStart < 0) {
+        break;
+      }
+      const closeEnd: number = CookedHtmlParser.findTagEnd(rest, closeStart);
+      const mediaInner: string = rest.substring(tagEnd + 1, closeStart);
+      const mediaBlock: RichBlock | undefined = CookedHtmlParser.mediaBlockFromElement(mediaTag, openTag, mediaInner);
+      if (!mediaBlock) {
+        break;
+      }
+      const before: string = rest.substring(0, tagStart);
+      if (CookedHtmlParser.toPlainText(before).length > 0) {
+        result.push(...CookedHtmlParser.paragraphBlocks(before));
+      }
+      result.push(mediaBlock);
+      found = true;
+      rest = closeEnd >= 0 ? rest.substring(closeEnd + 1) : '';
+    }
+    if (!found) {
+      return undefined;
+    }
+    if (CookedHtmlParser.toPlainText(rest).length > 0) {
+      result.push(...CookedHtmlParser.paragraphBlocks(rest));
+    }
+    return result;
+  }
+
   // <audio>/<video> → 媒体块。源优先取内部首个 <source src>(其 type 作 MIME),缺失时回退标签自身 src。
   // <video> 额外带 width/height 供渲染定尺寸。无有效 src 则返回 undefined,交回上层走「不支持」降级。
   private static mediaBlockFromElement(tagName: string, openTag: string, innerHtml: string): RichBlock | undefined {
@@ -1405,7 +1496,7 @@ export class CookedHtmlParser {
     if (block.type === RichBlockType.QUOTE) {
       return !!block.blocks && block.blocks.length > 0;
     }
-    if (block.type === RichBlockType.CODE) {
+    if (block.type === RichBlockType.CODE || block.type === RichBlockType.MATH) {
       return !!block.text && block.text.length > 0;
     }
     if (block.type === RichBlockType.UNSUPPORTED) {

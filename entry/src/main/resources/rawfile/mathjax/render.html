@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}</style>
+<script>
+// 离屏 MathJax:只做「LaTeX -> 自包含矢量 SVG -> PNG(base64)」,不排版整页。
+// fontCache:'none' 让每个 SVG 内联自己的字形 path,脱离文档也能光栅化(不依赖共享 <defs>)。
+window.MathJax = {
+  loader: { load: ['[tex]/ams', '[tex]/boldsymbol', '[tex]/color', '[tex]/mhchem'] },
+  tex: { packages: { '[+]': ['ams', 'boldsymbol', 'color', 'mhchem'] } },
+  svg: { fontCache: 'none' },
+  startup: { typeset: false }
+};
+</script>
+<script src="tex-svg-full.js"></script>
+<script>
+// 每 ex 的 CSS 像素基准。MathJax 以 ex 给尺寸;这里换算成像素,原生按此显示。可按真机观感微调。
+var EX_PX = 8.0;
+
+function reportError(id, msg) {
+  if (window.ArkDOMath && window.ArkDOMath.onError) {
+    window.ArkDOMath.onError(id, String(msg));
+  }
+}
+function reportResult(id, png, w, h, depth) {
+  if (window.ArkDOMath && window.ArkDOMath.onResult) {
+    window.ArkDOMath.onResult(id, png, Math.round(w), Math.round(h), Math.round(depth));
+  }
+}
+
+// id: 请求标识; latex: 源码; display: true=块级/false=行内; scale: 设备像素比(出图清晰度)。
+function renderMath(id, latex, display, scale) {
+  Promise.resolve(window.MathJax && MathJax.startup ? MathJax.startup.promise : Promise.reject('MathJax 未加载'))
+    .then(function () {
+      var wrapper = MathJax.tex2svg(latex, { display: !!display });
+      var svg = wrapper.querySelector('svg');
+      if (!svg) { reportError(id, 'no svg'); return; }
+
+      var wEx = parseFloat(svg.getAttribute('width')) || 0;
+      var hEx = parseFloat(svg.getAttribute('height')) || 0;
+      var style = svg.getAttribute('style') || '';
+      var vMatch = style.match(/vertical-align:\s*(-?[\d.]+)ex/);
+      var depthEx = vMatch ? Math.abs(parseFloat(vMatch[1])) : 0;
+
+      var cssW = Math.max(1, wEx * EX_PX);
+      var cssH = Math.max(1, hEx * EX_PX);
+      var depthPx = depthEx * EX_PX;
+
+      // 显式像素尺寸 + 黑色字形(原生用 colorFilter 染成主题色)。
+      svg.setAttribute('width', cssW + 'px');
+      svg.setAttribute('height', cssH + 'px');
+      svg.style.color = '#000000';
+
+      var xml = new XMLSerializer().serializeToString(svg);
+      var svg64 = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)));
+
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(cssW * scale));
+          canvas.height = Math.max(1, Math.round(cssH * scale));
+          var ctx = canvas.getContext('2d');
+          ctx.setTransform(scale, 0, 0, scale, 0, 0);
+          ctx.drawImage(img, 0, 0, cssW, cssH);
+          var png = canvas.toDataURL('image/png');
+          var comma = png.indexOf(',');
+          reportResult(id, comma >= 0 ? png.substring(comma + 1) : png, cssW, cssH, depthPx);
+        } catch (e) {
+          reportError(id, e && e.message ? e.message : e);
+        }
+      };
+      img.onerror = function () { reportError(id, 'svg image load failed'); };
+      img.src = svg64;
+    })
+    .catch(function (e) { reportError(id, e && e.message ? e.message : e); });
+}
+</script>
+</head>
+<body></body>
+</html>

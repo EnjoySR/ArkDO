@@ -14,6 +14,7 @@ import { FaIconView, getFaIcon, FaIconDefinition } from './FaIcon';
 import { Poll, PollVoteResult } from '../../models/TopicDetail';
 import { PollView } from './PollView';
 import { pasteboard } from '@kit.BasicServicesKit';
+import { MathRenderService, MathImage } from '../../services/content/MathRenderService';
 
 const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
@@ -23,6 +24,20 @@ const SMALL_IMAGE_MAX: number = 48;
 const SPOILER_REDACT_CHAR: string = '▒';
 // 打码字符与图片占位块的颜色,接近正文字色。
 const SPOILER_REDACT_COLOR: string = '#374151';
+// 公式位图染色矩阵(4×5):黑色字形按 alpha 覆盖度染成正文色 #374151(55,65,81)。
+// 输入 rgb=0,只用 alpha 通道推出目标色,alpha 原样保留。深色主题改这三个分量即可。
+const MATH_TINT_MATRIX: number[] = [
+  0, 0, 0, 0.216, 0,
+  0, 0, 0, 0.255, 0,
+  0, 0, 0, 0.318, 0,
+  0, 0, 0, 1, 0
+];
+
+// 收集待渲染公式用的轻量结构。
+interface MathNode {
+  latex: string;
+  display: boolean;
+}
 
 @Component
 export struct PostRichContent {
@@ -49,16 +64,117 @@ export struct PostRichContent {
   // 被用户点过(即"从默认折叠态翻转")的 callout 路径。展开态 = defaultExpanded XOR (path ∈ 此表),
   // 这样无需在 aboutToAppear 预知动态 path 即可支持每个 callout 各自的默认展开/折叠。
   @State private toggledCallouts: string[] = [];
+  // 已渲染好的公式位图,key = mathLocalKey(latex, display)。异步出图后整体重赋触发重渲染;
+  // 未就绪的公式先以裸 LaTeX 占位,出图后原地替换。
+  @State private mathImages: Map<string, MathImage> = new Map();
+  // 已发起渲染的公式 key,避免重复请求。
+  private mathRequested: Set<string> = new Set();
+  // 本帖是否已 retain 公式引擎(有公式才 retain,离开时 release)。
+  private mathRetained: boolean = false;
 
   aboutToAppear(): void {
     this.renderablePolls = this.polls;
+    this.prepareMath();
+  }
+
+  aboutToDisappear(): void {
+    if (this.mathRetained) {
+      this.mathRetained = false;
+      MathRenderService.getInstance().release();
+    }
+  }
+
+  // 扫描全部块收集数学公式;有则 retain 引擎并逐条请求出图。无公式则完全不碰引擎(零成本)。
+  private prepareMath(): void {
+    const nodes: MathNode[] = [];
+    this.collectMath(this.getRenderableBlocks(), nodes);
+    if (nodes.length === 0) {
+      return;
+    }
+    const service: MathRenderService = MathRenderService.getInstance();
+    service.retain();
+    this.mathRetained = true;
+    for (let i: number = 0; i < nodes.length; i++) {
+      this.requestMath(nodes[i].latex, nodes[i].display);
+    }
+  }
+
+  private requestMath(latex: string, display: boolean): void {
+    const key: string = this.mathLocalKey(latex, display);
+    if (this.mathRequested.has(key)) {
+      return;
+    }
+    this.mathRequested.add(key);
+    MathRenderService.getInstance().render(latex, display)
+      .then((img: MathImage) => {
+        const next: Map<string, MathImage> = new Map(this.mathImages);
+        next.set(key, img);
+        this.mathImages = next;
+      })
+      .catch(() => {
+        // 失败保持占位(裸 LaTeX),不阻断其余公式。
+      });
+  }
+
+  private mathLocalKey(latex: string, display: boolean): string {
+    return `${display ? 'd' : 'i'}|${latex}`;
+  }
+
+  // 取已就绪的公式位图。调用方须先用 mathImages.has(...) 守卫,故此处必为已存在项。
+  private mathImageOf(latex: string, display: boolean): MathImage {
+    return this.mathImages.get(this.mathLocalKey(latex, display)) as MathImage;
+  }
+
+  // 行内 ForEach 的 key。对 MATH token 追加就绪标记:位图到位后 key 变化,强制 ForEach 重建该项、
+  // 从裸 LaTeX 占位切到 ImageSpan(否则 key 不变,异步出图不会触发重渲染)。
+  private inlineKey(token: RichInlineNode, index: number): string {
+    const ready: string = token.type === RichInlineType.MATH && this.mathImages.has(this.mathLocalKey(token.text, false)) ? 'r' : 'p';
+    return `${index}-${token.type}-${token.text}-${ready}`;
+  }
+
+  // 块级 ForEach 的 key。同理:MATH 块位图到位后翻转就绪标记,强制重建以切到 Image。
+  private blockKey(block: RichBlock, index: number): string {
+    const ready: string = block.type === RichBlockType.MATH && !!block.text && this.mathImages.has(this.mathLocalKey(block.text, true)) ? 'r' : 'p';
+    return `${index}-${block.type}-${ready}`;
+  }
+
+  // 递归收集 inlines / items / titleInlines / 子块 里的行内公式,以及 MATH 块本身。
+  private collectMath(blocks: RichBlock[], out: MathNode[]): void {
+    for (let i: number = 0; i < blocks.length; i++) {
+      const block: RichBlock = blocks[i];
+      if (block.type === RichBlockType.MATH && block.text && block.text.length > 0) {
+        out.push({ latex: block.text, display: true });
+      }
+      this.collectInlineMath(block.inlines, out);
+      this.collectInlineMath(block.titleInlines, out);
+      if (block.items) {
+        for (let j: number = 0; j < block.items.length; j++) {
+          this.collectInlineMath(block.items[j].inlines, out);
+        }
+      }
+      if (block.blocks && block.blocks.length > 0) {
+        this.collectMath(block.blocks, out);
+      }
+    }
+  }
+
+  private collectInlineMath(inlines: RichInlineNode[] | undefined, out: MathNode[]): void {
+    if (!inlines) {
+      return;
+    }
+    for (let i: number = 0; i < inlines.length; i++) {
+      const token: RichInlineNode = inlines[i];
+      if (token.type === RichInlineType.MATH && token.text.length > 0) {
+        out.push({ latex: token.text, display: false });
+      }
+    }
   }
 
   build() {
     Column() {
       ForEach(this.getRenderableBlocks(), (block: RichBlock, index: number) => {
         this.BlockView(block, index, `${index}`)
-      }, (block: RichBlock, index: number) => `${index}-${block.type}`)
+      }, (block: RichBlock, index: number) => this.blockKey(block, index))
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -97,6 +213,8 @@ export struct PostRichContent {
       this.AudioBlock(block, index > 0 ? 12 : 0)
     } else if (block.type === RichBlockType.VIDEO) {
       this.VideoBlock(block, index > 0 ? 12 : 0)
+    } else if (block.type === RichBlockType.MATH) {
+      this.MathBlock(block, index > 0 ? 12 : 0)
     } else {
       this.UnsupportedBlock(block, index > 0 ? 10 : 0)
     }
@@ -129,7 +247,7 @@ export struct PostRichContent {
     Text() {
       ForEach(inlines, (token: RichInlineNode, index: number) => {
         this.InlineToken(token, path)
-      }, (token: RichInlineNode, index: number) => `${index}-${token.type}-${token.text}`)
+      }, (token: RichInlineNode, index: number) => this.inlineKey(token, index))
     }
     .fontSize(15)
     .lineHeight(22)
@@ -161,6 +279,22 @@ export struct PostRichContent {
           .onClick(() => {
             this.toggleSpoiler(path);
           })
+      }
+    } else if (token.type === RichInlineType.MATH) {
+      // 行内公式:出图后以 ImageSpan 基线内联(周围文字仍是原生 Text,字体字号与全帖一致);
+      // 未就绪时用等宽裸 LaTeX 占位,出图后原地替换。PNG 位图,colorFilter 染成正文色。
+      if (this.mathImages.has(this.mathLocalKey(token.text, false))) {
+        ImageSpan(this.mathImageOf(token.text, false).pixelMap)
+          .width(this.mathImageOf(token.text, false).cssWidth)
+          .height(this.mathImageOf(token.text, false).cssHeight)
+          .margin({ left: 1, right: 1 })
+          .verticalAlign(ImageSpanAlignment.BASELINE)
+          .colorFilter(MATH_TINT_MATRIX)
+      } else {
+        Span(token.text)
+          .fontSize(14)
+          .fontFamily('monospace')
+          .fontColor('#6B7280')
       }
     } else if (token.type === RichInlineType.IMAGE && token.src && token.src.length > 0) {
       ImageSpan(token.src)
@@ -236,7 +370,7 @@ export struct PostRichContent {
     Text() {
       ForEach(this.safeInlines(block), (token: RichInlineNode, index: number) => {
         this.InlineToken(token, path)
-      }, (token: RichInlineNode, index: number) => `${index}-${token.type}-${token.text}`)
+      }, (token: RichInlineNode, index: number) => this.inlineKey(token, index))
     }
     .fontSize(this.getHeadingFontSize(block.level ? block.level : 2))
     .lineHeight(this.getHeadingLineHeight(block.level ? block.level : 2))
@@ -252,7 +386,7 @@ export struct PostRichContent {
       Column() {
         ForEach(this.safeBlocks(block), (inner: RichBlock, index: number) => {
           this.BlockView(inner, index, `${path}-q${index}`)
-        }, (inner: RichBlock, index: number) => `${index}-${inner.type}`)
+        }, (inner: RichBlock, index: number) => this.blockKey(inner, index))
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
@@ -320,7 +454,7 @@ export struct PostRichContent {
         Text() {
           ForEach(this.calloutTitle(block), (token: RichInlineNode, tokenIndex: number) => {
             this.CalloutTitleToken(token, `${path}-ct`, this.calloutColor(block))
-          }, (token: RichInlineNode, tokenIndex: number) => `${tokenIndex}-${token.type}-${token.text}`)
+          }, (token: RichInlineNode, tokenIndex: number) => this.inlineKey(token, tokenIndex))
         }
         .fontSize(15)
         .lineHeight(22)
@@ -350,7 +484,7 @@ export struct PostRichContent {
         Column() {
           ForEach(this.safeBlocks(block), (inner: RichBlock, childIndex: number) => {
             this.BlockView(inner, childIndex, `${path}-c${childIndex}`)
-          }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+          }, (inner: RichBlock, childIndex: number) => this.blockKey(inner, childIndex))
         }
         .width('100%')
         .margin({ top: 8 })
@@ -605,6 +739,37 @@ export struct PostRichContent {
   }
 
   @Builder
+  private MathBlock(block: RichBlock, marginTop: number) {
+    // 块级公式:居中显示,超宽则横向滚动(不撑破栏宽)。未就绪先以裸 LaTeX 占位。
+    Column() {
+      if (block.text && this.mathImages.has(this.mathLocalKey(block.text, true))) {
+        Scroll() {
+          Image(this.mathImageOf(block.text, true).pixelMap)
+            .width(this.mathImageOf(block.text, true).cssWidth)
+            .height(this.mathImageOf(block.text, true).cssHeight)
+            .objectFit(ImageFit.Contain)
+            .colorFilter(MATH_TINT_MATRIX)
+            .draggable(false)
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .align(Alignment.Center)
+        .width('100%')
+      } else {
+        Text(block.text ? block.text : '')
+          .fontSize(14)
+          .fontFamily('monospace')
+          .fontColor('#6B7280')
+          .width('100%')
+          .textAlign(TextAlign.Center)
+      }
+    }
+    .width('100%')
+    .margin({ top: marginTop })
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  @Builder
   private UnsupportedBlock(block: RichBlock, marginTop: number) {
     Column() {
       Text(`待实现：${this.getUnsupportedLabel(block)}`)
@@ -662,7 +827,7 @@ export struct PostRichContent {
         Column() {
           ForEach(this.safeBlocks(block), (inner: RichBlock, childIndex: number) => {
             this.BlockView(inner, childIndex, `${path}-d${childIndex}`)
-          }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+          }, (inner: RichBlock, childIndex: number) => this.blockKey(inner, childIndex))
         }
         .width('100%')
         .padding({ left: 28, right: 0, bottom: 12 })
@@ -686,7 +851,7 @@ export struct PostRichContent {
         Column() {
           ForEach(this.safeBlocks(block), (inner: RichBlock, childIndex: number) => {
             this.BlockView(inner, childIndex, `${path}-s${childIndex}`)
-          }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+          }, (inner: RichBlock, childIndex: number) => this.blockKey(inner, childIndex))
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
@@ -720,7 +885,7 @@ export struct PostRichContent {
       Column() {
         ForEach(this.safeBlocks(block), (inner: RichBlock, childIndex: number) => {
           this.RedactedBlockView(inner, childIndex)
-        }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+        }, (inner: RichBlock, childIndex: number) => this.blockKey(inner, childIndex))
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
@@ -747,7 +912,7 @@ export struct PostRichContent {
       // 引用/折叠等容器:拍平递归打码,不保留容器样式(样式本身也可能剧透)。
       ForEach(block.blocks, (inner: RichBlock, childIndex: number) => {
         this.RedactedBlockView(inner, index + childIndex)
-      }, (inner: RichBlock, childIndex: number) => `${childIndex}-${inner.type}`)
+      }, (inner: RichBlock, childIndex: number) => this.blockKey(inner, childIndex))
     } else {
       Text(this.redactChars(this.redactedBlockText(block)))
         .fontSize(15)

@@ -15,6 +15,7 @@ import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge'
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { ArkWebHost } from '../components/ArkWebHost';
+import { MathRenderHost } from '../components/MathRenderHost';
 import { ensureFaIconsLoaded } from '../components/FaIcon';
 import { ensureTagIconsLoaded } from '../components/TagIconRegistry';
 import { CfChallengePage } from './CfChallengePage';
@@ -41,6 +42,8 @@ export struct RootTabPage {
   // 单一 bindSheet:同一组件链多个 bindSheet 只有最后一个生效,会导致登录 sheet 不显示。
   @State private isSheetVisible: boolean = false;
   @State private activeSheet: RootSheet = RootSheet.NONE;
+  // 公式离屏引擎挂载门控:由 MathRenderService.retain/release 经 AppStorage 翻转。
+  @StorageProp('mathHostActive') private mathHostActive: boolean = false;
   @State private isArkWebReady: boolean = false;
   @State private currentUser?: User = undefined;
   @State private isCheckingSession: boolean = false;
@@ -115,6 +118,10 @@ export struct RootTabPage {
           this.handleArkWebReady();
         }
       })
+      // 公式离屏引擎:仅在有含数学公式的帖子打开时(refCount>0)才挂载,离开后空闲销毁。
+      if (this.mathHostActive) {
+        MathRenderHost()
+      }
       this.RootNavigation()
     }
     .width('100%')
