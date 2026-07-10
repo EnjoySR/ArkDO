@@ -271,6 +271,10 @@ export struct RootTabPage {
           },
           onOpenDoh: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DOH_SETTINGS, buildDohSettingsRouteParam('settings')));
+          },
+          onActiveChallenge: () => {
+            // 主动过盾:直接打开交互式 CF 验证 sheet(绕过协调器静默阶段),过盾后刷新会话。
+            this.openChallengeSheet();
           }
         })
       }
@@ -640,5 +644,7 @@ export struct RootTabPage {
     // 先进冷却再关窗:onDisappear 的 notifySheetDismissed 在冷却态下即为空操作。
     this.challengeRecovery?.notifySheetResolved();
     this.closeChallengePage();
+    // 反馈:已过盾时验证页会秒关(源站 404 即通过),给个 toast 免得用户以为闪退/没反应。
+    this.showToast('已通过 Cloudflare 验证');
   }
 }

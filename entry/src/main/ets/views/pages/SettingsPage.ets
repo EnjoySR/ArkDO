@@ -23,6 +23,8 @@ export struct SettingsPage {
   onBack: () => void = () => {};
   onOpenWeb: (url: string, title?: string) => void = () => {};
   onOpenDoh: () => void = () => {};
+  // 主动过盾:通知 RootTabPage 打开交互式 Cloudflare 验证页(唯一能真正拿到新 cf_clearance 的路径)。
+  onActiveChallenge: () => void = () => {};
   @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
   @State private dohSummary: string = '';
   @State private appVersion: string = '';
@@ -89,6 +91,11 @@ export struct SettingsPage {
               this.HairlineInset()
               this.SettingCell($r('sys.symbol.security_shield'), 'DoH 配置', this.dohSummary, () => {
                 this.onOpenDoh();
+              })
+              this.HairlineInset()
+              // 主动过盾:打开交互式 CF 验证页(https://linux.do/challenge)手动过 Cloudflare。
+              this.SettingCell($r('sys.symbol.checkmark_shield'), '刷新 Cloudflare 通行证', '', () => {
+                this.onActiveChallenge();
               })
               if (this.isLoggedIn) {
                 this.HairlineInset()
