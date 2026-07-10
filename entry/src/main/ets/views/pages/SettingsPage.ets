@@ -5,11 +5,14 @@ import { DownloadService } from '../../services/content/DownloadService';
 import { FileLogger } from '../../services/logging/FileLogger';
 import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import { DohManager } from '../../services/network/DohManager';
+import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
 
 // 与个人中心同款鸿蒙设置页式卡片分组:灰底 + 无描边圆角卡片。
 const PAGE_MARGIN: number = 12;
+// 内容入口配置行高(启用区拖动排序 List 需按项数定高,避免与外层 Scroll 抢滚动)。
+const FEED_ROW_H: number = 52;
 const CARD_RADIUS: number = 16;
 const CARD_PADDING: number = 16;
 const CARD_GAP: number = 12;
@@ -32,12 +35,15 @@ export struct SettingsPage {
   @State private logSizeLabel: string = '';
   @State private verboseLog: boolean = false;
   @State private isExportingLog: boolean = false;
+  // 首页内容入口:启用且有序的可选入口 key(不含恒在的最新)。
+  @State private enabledFeeds: string[] = [];
 
   aboutToAppear(): void {
     this.readAppVersion();
     this.verboseLog = FileLogger.isVerbose();
     this.refreshLogSize();
     this.refreshDohSummary();
+    this.enabledFeeds = FeedPrefs.getEnabledKeys(getContext(this));
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -108,6 +114,8 @@ export struct SettingsPage {
             }
             .cardStyle()
             .margin({ top: 0 })
+
+            this.FeedGroup()
 
             this.LogGroup()
 
@@ -293,6 +301,134 @@ export struct SettingsPage {
     .margin({ top: 0 })
   }
 
+  // 首页内容入口:最新恒在(默认、不可关不可拖);可选入口勾选启用,启用项可拖动排序。
+  @Builder
+  private FeedGroup() {
+    this.GroupLabel('首页内容入口')
+    Column() {
+      // 最新:默认入口,常驻不可配。
+      Row() {
+        Text('最新')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .layoutWeight(1)
+        Text('默认')
+          .fontSize(13)
+          .fontColor($r('app.color.text_faint'))
+      }
+      .width('100%')
+      .height(FEED_ROW_H)
+      .padding({ left: CARD_PADDING, right: CARD_PADDING })
+
+      // 启用区:长按拖动排序(只有启用项参与排序)。
+      if (this.enabledFeeds.length > 0) {
+        this.HairlineInset()
+        List() {
+          ForEach(this.enabledFeeds, (key: string) => {
+            ListItem() {
+              this.EnabledFeedRow(key)
+            }
+          }, (key: string) => key)
+        }
+        .width('100%')
+        .height(this.enabledFeeds.length * FEED_ROW_H)
+        .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.None)
+        .onItemDragStart((event: ItemDragInfo, itemIndex: number) => {
+          return this.FeedDragPreview(this.enabledFeeds[itemIndex]);
+        })
+        .onItemDrop((event: ItemDragInfo, itemIndex: number, insertIndex: number, isSuccess: boolean) => {
+          this.reorderFeed(itemIndex, insertIndex, isSuccess);
+        })
+      }
+
+      // 未启用区:关闭态,勾选即启用(移入启用区末尾)。
+      if (this.disabledFeeds().length > 0) {
+        this.HairlineInset()
+        ForEach(this.disabledFeeds(), (feed: FeedDef) => {
+          this.DisabledFeedRow(feed)
+        }, (feed: FeedDef) => feed.key)
+      }
+    }
+    .cardStyle()
+    .clip(true)
+    .margin({ top: 0 })
+  }
+
+  @Builder
+  private EnabledFeedRow(key: string) {
+    Row() {
+      this.DragHandle()
+      Text(this.feedLabel(key))
+        .fontSize(15)
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+        .margin({ left: 12 })
+      Toggle({ type: ToggleType.Switch, isOn: true })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          if (!isOn) {
+            this.disableFeed(key);
+          }
+        })
+    }
+    .width('100%')
+    .height(FEED_ROW_H)
+    .padding({ left: CARD_PADDING, right: CARD_PADDING })
+    .backgroundColor($r('app.color.surface_card'))
+  }
+
+  @Builder
+  private DisabledFeedRow(feed: FeedDef) {
+    Row() {
+      Text(feed.label)
+        .fontSize(15)
+        .fontColor($r('app.color.text_primary'))
+      if (feed.requiresLogin) {
+        Text('需登录')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .margin({ left: 8 })
+      }
+      Blank()
+      Toggle({ type: ToggleType.Switch, isOn: false })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          if (isOn) {
+            this.enableFeed(feed.key);
+          }
+        })
+    }
+    .width('100%')
+    .height(FEED_ROW_H)
+    .padding({ left: CARD_PADDING, right: CARD_PADDING })
+  }
+
+  // 拖动手柄:三条短发丝线,提示可拖(实际拖动靠长按整行)。
+  @Builder
+  private DragHandle() {
+    Column({ space: 3 }) {
+      Divider().width(14).strokeWidth(1.5).color($r('app.color.text_faint'))
+      Divider().width(14).strokeWidth(1.5).color($r('app.color.text_faint'))
+      Divider().width(14).strokeWidth(1.5).color($r('app.color.text_faint'))
+    }
+    .justifyContent(FlexAlign.Center)
+    .width(16)
+  }
+
+  // 拖动时的浮层预览:显示被拖入口的标签。
+  @Builder
+  private FeedDragPreview(key: string) {
+    Row() {
+      Text(this.feedLabel(key))
+        .fontSize(15)
+        .fontColor($r('app.color.text_primary'))
+    }
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
+    .backgroundColor($r('app.color.surface_muted'))
+    .borderRadius(10)
+  }
+
   @Builder
   private HairlineInset() {
     Divider()
@@ -403,6 +539,63 @@ export struct SettingsPage {
         }
       }
     });
+  }
+
+  // ==================== 首页内容入口 ====================
+
+  private feedLabel(key: string): string {
+    const def: FeedDef | undefined = FeedPrefs.feedDef(key);
+    return def ? def.label : key;
+  }
+
+  // 未启用的可选入口(保持 optionalFeeds 原始顺序)。
+  private disabledFeeds(): FeedDef[] {
+    const all: FeedDef[] = FeedPrefs.optionalFeeds();
+    const result: FeedDef[] = [];
+    for (let index: number = 0; index < all.length; index++) {
+      if (this.enabledFeeds.indexOf(all[index].key) < 0) {
+        result.push(all[index]);
+      }
+    }
+    return result;
+  }
+
+  private enableFeed(key: string): void {
+    if (this.enabledFeeds.indexOf(key) >= 0) {
+      return;
+    }
+    const next: string[] = this.enabledFeeds.slice();
+    next.push(key);
+    this.persistFeeds(next);
+  }
+
+  private disableFeed(key: string): void {
+    const next: string[] = this.enabledFeeds.slice();
+    const index: number = next.indexOf(key);
+    if (index < 0) {
+      return;
+    }
+    next.splice(index, 1);
+    this.persistFeeds(next);
+  }
+
+  private reorderFeed(fromIndex: number, insertIndex: number, isSuccess: boolean): void {
+    if (!isSuccess || fromIndex < 0 || insertIndex < 0 || fromIndex === insertIndex) {
+      return;
+    }
+    const next: string[] = this.enabledFeeds.slice();
+    if (fromIndex >= next.length) {
+      return;
+    }
+    const moved: string[] = next.splice(fromIndex, 1);
+    const target: number = insertIndex > next.length ? next.length : insertIndex;
+    next.splice(target, 0, moved[0]);
+    this.persistFeeds(next);
+  }
+
+  private persistFeeds(keys: string[]): void {
+    this.enabledFeeds = keys;
+    FeedPrefs.setEnabledKeys(getContext(this), keys);
   }
 
   // ==================== 辅助 ====================

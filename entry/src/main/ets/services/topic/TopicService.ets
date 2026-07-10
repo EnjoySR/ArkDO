@@ -1,9 +1,10 @@
-import { Topic, TopicTag } from '../../models/Topic';
+import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
 import { Poll, PollOption, PollVoteResult, PostBoost, PostReaction, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
 import { AppConstants } from '../../common/constants/AppConstants';
+import { FeedKey } from '../site/FeedPrefs';
 
 interface DiscourseLatestResponse {
   topic_list?: DiscourseTopicList;
@@ -231,19 +232,33 @@ export class TopicService {
   }
 
   async getLatestTopicsPage(page: number): Promise<NetworkResult<TopicPage>> {
-    const response: NetworkResult<string> = await this.bridge.getJson(this.getLatestPath(page));
+    return this.getFeedPage(FeedKey.LATEST, page);
+  }
+
+  // 全站内置入口(最新/热门/未读/新主题)分页:响应体均为 topic_list.topics 结构,共用解析。
+  async getFeedPage(feedKey: string, page: number): Promise<NetworkResult<TopicPage>> {
+    return this.getTopicListPage(this.getFeedPath(feedKey, page), page);
+  }
+
+  // 某版块分页:/c/{slug}/{id}/l/latest.json,同为 topic_list.topics 结构。
+  async getCategoryTopicsPage(category: TopicCategory, page: number): Promise<NetworkResult<TopicPage>> {
+    return this.getTopicListPage(this.getCategoryPath(category, page), page);
+  }
+
+  private async getTopicListPage(path: string, page: number): Promise<NetworkResult<TopicPage>> {
+    const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
       return this.forwardFailure<TopicPage>(response);
     }
 
     if (response.data === undefined) {
-      return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应为空。');
+      return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, 'Linux.do 帖子列表响应为空。');
     }
 
     try {
       const payload: DiscourseLatestResponse = JSON.parse(response.data) as DiscourseLatestResponse;
       if (!payload.topic_list || !payload.topic_list.topics) {
-        return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应缺少 topic_list.topics。');
+        return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, 'Linux.do 帖子列表响应缺少 topic_list.topics。');
       }
 
       return {
@@ -257,7 +272,7 @@ export class TopicService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, 'Linux.do 最新帖子响应不是有效 JSON。');
+      return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, 'Linux.do 帖子列表响应不是有效 JSON。');
     }
   }
 
@@ -578,11 +593,26 @@ export class TopicService {
     });
   }
 
-  private getLatestPath(page: number): string {
-    if (page <= 0) {
-      return '/latest.json';
+  private getFeedPath(feedKey: string, page: number): string {
+    const suffix: string = page > 0 ? `?page=${page}` : '';
+    switch (feedKey) {
+      case FeedKey.TOP:
+        return `/top.json${suffix}`;
+      case FeedKey.UNREAD:
+        return `/unread.json${suffix}`;
+      case FeedKey.NEW:
+        return `/new.json${suffix}`;
+      default:
+        return `/latest.json${suffix}`;
     }
-    return `/latest.json?page=${page}`;
+  }
+
+  private getCategoryPath(category: TopicCategory, page: number): string {
+    const suffix: string = page > 0 ? `?page=${page}` : '';
+    if (category.slug && category.slug.length > 0) {
+      return `/c/${encodeURIComponent(category.slug)}/${category.id}/l/latest.json${suffix}`;
+    }
+    return `/c/${category.id}/l/latest.json${suffix}`;
   }
 
   private getTopicDetailPath(topicId: number, slug?: string, postNumber?: number): string {

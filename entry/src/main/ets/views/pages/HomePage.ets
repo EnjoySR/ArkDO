@@ -13,9 +13,13 @@ import { TopicReadState, TopicReadStateEventBus } from '../../services/session/T
 import { NotificationEventBus, NotificationSnapshot } from '../../services/notification/NotificationEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
+import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
+import { CategoryDrawer } from '../components/CategoryDrawer';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
+// 侧边抽屉宽度(关闭时向左平移此距离移出屏幕)。
+const DRAWER_WIDTH: number = 288;
 
 @Component
 export struct HomePage {
@@ -30,6 +34,15 @@ export struct HomePage {
   @State private requiresChallenge: boolean = false;
   @State private loadFailed: boolean = false;
   @State private categories: TopicCategory[] = [];
+  // 侧边版块抽屉开关。
+  @State private showSideBar: boolean = false;
+  // 抽屉横向拖拽偏移(向左拖为负,跟手);松手过阈值关闭、否则弹回 0。
+  @State private drawerDragX: number = 0;
+  // 当前内容源:selectedCategory 有值=看某版块;否则看内置入口 selectedFeedKey。
+  @State private selectedCategory?: TopicCategory = undefined;
+  @State private selectedFeedKey: string = FeedKey.LATEST;
+  // 设置页启用且有序的可选入口 key(打开抽屉时刷新)。
+  @State private enabledFeedKeys: string[] = [];
   // 头像铃铛未读数:由 NotificationEventBus 广播驱动(NotificationService 前台轮询产出)。
   @State private unreadNotifications: number = 0;
   private unsubscribeNotifications?: () => void = undefined;
@@ -83,6 +96,7 @@ export struct HomePage {
         this.unreadNotifications = snapshot.unread;
       });
     }
+    this.enabledFeedKeys = FeedPrefs.getEnabledKeys(getContext(this));
     this.syncSessionVersion();
     if (this.isArkWebReady && this.topics.length === 0) {
       this.loadSiteMetadataIfNeeded();
@@ -106,14 +120,21 @@ export struct HomePage {
   }
 
   build() {
-    Column() {
-      Row() {
-        Text(AppConstants.APP_NAME)
-          .fontSize(28)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
+    // 自绘抽屉:Stack 底层为主体,上层为遮罩 + 侧边抽屉(靠 translate 滑入/滑出)。
+    // 不用 SideBarContainer——其 overlay 遮罩不拦截点击、内滚也不灵。
+    Stack({ alignContent: Alignment.TopStart }) {
+      // 主体:顶栏 + 帖子列表
+      Column() {
+        Row() {
+          this.MenuButton()
 
-        Blank()
+          Text(this.currentFeedTitle())
+            .fontSize(28)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
 
         this.JumpButton()
 
@@ -249,6 +270,78 @@ export struct HomePage {
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .alignItems(HorizontalAlign.Start)
+
+      // 遮罩:抽屉打开时铺满,拦截并点击关闭,防止点穿到帖子列表。
+      if (this.showSideBar) {
+        Column()
+          .width('100%')
+          .height('100%')
+          .backgroundColor('#33000000')
+          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+          .onClick(() => {
+            this.closeDrawer();
+          })
+      }
+
+      // 侧边抽屉:常驻渲染,靠 translate 滑入/滑出;关闭时移出屏幕左侧不可点。
+      CategoryDrawer({
+        categories: this.categories,
+        isLoggedIn: this.isLoggedIn,
+        enabledFeedKeys: this.enabledFeedKeys,
+        selectedFeedKey: this.selectedCategory ? '' : this.selectedFeedKey,
+        selectedCategoryId: this.selectedCategory ? this.selectedCategory.id : 0,
+        onSelectFeed: (feedKey: string) => {
+          this.handleSelectFeed(feedKey);
+        },
+        onSelectCategory: (category: TopicCategory) => {
+          this.handleSelectCategory(category);
+        },
+        onRequireLogin: () => {
+          this.handleDrawerRequireLogin();
+        }
+      })
+        .width(DRAWER_WIDTH)
+        .height('100%')
+        // 打开时叠加拖拽偏移跟手;关闭时整体移出屏幕左侧。
+        .translate({ x: this.showSideBar ? this.drawerDragX : -DRAWER_WIDTH })
+        .gesture(
+          // 横向拖:向左拖动抽屉,过 1/3 宽即关闭,否则弹回。仅横向,不干扰内部竖向滚动。
+          PanGesture({ direction: PanDirection.Horizontal })
+            .onActionUpdate((event: GestureEvent) => {
+              if (this.showSideBar) {
+                this.drawerDragX = Math.min(0, event.offsetX);
+              }
+            })
+            .onActionEnd((event: GestureEvent) => {
+              this.handleDrawerPanEnd();
+            })
+        )
+    }
+    .width('100%')
+    .height('100%')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  // 左上角汉堡入口:打开版块抽屉(三条发丝线,无需依赖 sys.symbol 资源)。
+  @Builder
+  private MenuButton() {
+    Button() {
+      Column({ space: 4 }) {
+        Divider().width(18).strokeWidth(2).color($r('app.color.text_primary'))
+        Divider().width(18).strokeWidth(2).color($r('app.color.text_primary'))
+        Divider().width(18).strokeWidth(2).color($r('app.color.text_primary'))
+      }
+      .justifyContent(FlexAlign.Center)
+    }
+    .width(42)
+    .height(42)
+    .borderRadius(21)
+    .backgroundColor($r('app.color.surface_muted'))
+    .padding(0)
+    .margin({ right: 10 })
+    .onClick(() => {
+      this.openDrawer();
+    })
   }
 
   // 调试按钮:点击弹出输入框,填帖子 ID 直接跳转详情。
@@ -324,6 +417,103 @@ export struct HomePage {
     }
   }
 
+  // 打开抽屉前刷新一次启用入口(设置页可能刚改过),带滑入动画。
+  private openDrawer(): void {
+    this.enabledFeedKeys = FeedPrefs.getEnabledKeys(getContext(this));
+    this.drawerDragX = 0;
+    this.animateDrawer(true);
+  }
+
+  private closeDrawer(): void {
+    this.animateDrawer(false);
+  }
+
+  // 抽屉开合动画:在 animateTo 里翻转 showSideBar,遮罩淡入/淡出、抽屉平移滑动;同时归零拖拽偏移。
+  private animateDrawer(show: boolean): void {
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+      this.showSideBar = show;
+      this.drawerDragX = 0;
+    });
+  }
+
+  // 抽屉横向拖拽松手:向左拖过 1/3 宽则关闭,否则弹回原位。
+  private handleDrawerPanEnd(): void {
+    if (!this.showSideBar) {
+      return;
+    }
+    if (-this.drawerDragX > DRAWER_WIDTH / 3) {
+      this.closeDrawer();
+      return;
+    }
+    this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+      this.drawerDragX = 0;
+    });
+  }
+
+  // 抽屉里选了内置入口:切源并重载列表(与当前源相同则仅关抽屉)。
+  private handleSelectFeed(feedKey: string): void {
+    this.closeDrawer();
+    if (this.selectedCategory === undefined && this.selectedFeedKey === feedKey) {
+      return;
+    }
+    this.selectedCategory = undefined;
+    this.selectedFeedKey = feedKey;
+    this.resetAndReload();
+  }
+
+  // 抽屉里选了某版块:切源并重载列表。
+  private handleSelectCategory(category: TopicCategory): void {
+    this.closeDrawer();
+    if (this.selectedCategory !== undefined && this.selectedCategory.id === category.id) {
+      return;
+    }
+    this.selectedCategory = category;
+    this.resetAndReload();
+  }
+
+  // 点了受限版块/需登录入口:关抽屉并提示登录(账号入口在右上角头像)。
+  private handleDrawerRequireLogin(): void {
+    this.closeDrawer();
+    this.showToast('登录后可查看该版块');
+  }
+
+  private resetAndReload(): void {
+    this.topics = [];
+    this.currentPage = 0;
+    this.hasMore = true;
+    this.loadFailed = false;
+    this.refreshLatestTopics();
+  }
+
+  // 按当前内容源取一页:选中版块走分类接口,否则走内置入口接口。
+  private fetchTopicPage(page: number): Promise<NetworkResult<TopicPage>> {
+    const service: TopicService = new TopicService(this.bridge);
+    if (this.selectedCategory !== undefined) {
+      return service.getCategoryTopicsPage(this.selectedCategory, page);
+    }
+    return service.getFeedPage(this.selectedFeedKey, page);
+  }
+
+  // 当前内容源的标题:选中版块=版块名;热门/未读等入口=入口名;默认「最新」显示应用名 ArkDO。
+  private currentFeedTitle(): string {
+    if (this.selectedCategory !== undefined) {
+      return this.selectedCategory.name;
+    }
+    if (this.selectedFeedKey === FeedKey.LATEST) {
+      return AppConstants.APP_NAME;
+    }
+    const def: FeedDef | undefined = FeedPrefs.feedDef(this.selectedFeedKey);
+    return def ? def.label : AppConstants.APP_NAME;
+  }
+
+  private showToast(message: string): void {
+    try {
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
+    } catch (err) {
+      Log.i(`${LOG_TAG} toast failed: ${message}`);
+    }
+  }
+
   private async refreshLatestTopics(): Promise<void> {
     if (!this.isArkWebReady) {
       this.listMessage = '正在准备 ArkWeb 请求环境';
@@ -343,14 +533,14 @@ export struct HomePage {
     this.isRefreshing = !isFirstLoad;
     this.requiresChallenge = false;
     this.loadFailed = false;
-    this.listMessage = '正在加载最新帖子';
+    this.listMessage = `正在加载${this.currentFeedTitle()}`;
     this.footerMessage = '上拉加载更多';
 
     if (isFirstLoad) {
       // 计时锚点②:首页帖子列表开始拉取。与应用启动日志配对,测量冷启动到首屏拉取的耗时。
       Log.i(`${LOG_TAG} stage=firstLatestFetchStart ts=${Date.now()}`);
     }
-    const result: NetworkResult<TopicPage> = await new TopicService(this.bridge).getLatestTopicsPage(0);
+    const result: NetworkResult<TopicPage> = await this.fetchTopicPage(0);
     this.isRefreshing = false;
     this.isInitialLoading = false;
 
@@ -396,7 +586,7 @@ export struct HomePage {
     this.footerMessage = '正在加载更多';
 
     const nextPage: number = this.currentPage + 1;
-    const result: NetworkResult<TopicPage> = await new TopicService(this.bridge).getLatestTopicsPage(nextPage);
+    const result: NetworkResult<TopicPage> = await this.fetchTopicPage(nextPage);
     this.isLoadingMore = false;
 
     if (result.success && result.data) {
