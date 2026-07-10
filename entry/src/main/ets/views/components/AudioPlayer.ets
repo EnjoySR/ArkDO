@@ -3,13 +3,21 @@ import { media } from '@kit.MediaKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { MediaPlaybackCoordinator } from '../../services/content/MediaPlaybackCoordinator';
+import { MediaSource } from '../../services/content/MediaSource';
+import { AppConstants } from '../../common/constants/AppConstants';
 
 const LOG_TAG: string = '[ArkDO][AudioPlayer]';
 
+// 直连外站媒体时补的浏览器请求头:第三方文件床常按 UA/Referer 防盗链挡非浏览器客户端(浏览器里能放、
+// 原生 AVPlayer 默认 UA/无 Referer 就被 403)。补上浏览器 UA + linux.do Referer 以过盾。
+const REMOTE_MEDIA_UA: string =
+  'Mozilla/5.0 (Linux; Android 13; HarmonyOS) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
 // 帖子内联音频播放条。首次点播放时才惰性创建 AVPlayer(一个长帖可能有很多条音频,不提前占资源)。
-// 媒体源是 /uploads/short-url/*.xz:服务端 302 到跨源 CDN 且 CF 挡非浏览器客户端,AVPlayer/http/fetch 都拿不到,
-// 唯有 host webview(Chromium)下载委托能过盾。故先经 onResolveMedia(→ bridge.downloadMedia)下到沙箱,
-// 再用 fdSrc 播本地文件。组件销毁时释放 player 并关闭文件句柄。
+// 媒体源分两类:linux.do 自家上传件(/uploads/short-url/*.xz,302 到跨源 CDN 且 CF 挡非浏览器,AVPlayer/http/fetch
+// 都拿不到)须先经 onResolveMedia(→ bridge.downloadMedia via host webview 下载委托)下到沙箱、再用 fdSrc 播本地;
+// 外站公开直链(第三方文件床等)是普通 mp3,直接 avPlayer.url 流式播放,不走下载委托(见 MediaSource)。
+// 组件销毁时释放 player 并关闭文件句柄(仅本地播放路径持有)。
 @Component
 export struct AudioPlayer {
   src: string = '';
@@ -141,17 +149,47 @@ export struct AudioPlayer {
     this.startPlayback();
   }
 
-  // 先下载到沙箱(http 带 cookie 跟 302),再创建 AVPlayer、用 fdSrc 播本地文件。
-  // fdSrc 设置后走 initialized→prepared→playing 状态机。
+  // linux.do 上传件:先下载到沙箱(http 带 cookie 跟 302 过 CF)再用 fdSrc 播本地;外站直链:直接 avPlayer.url
+  // 流式播放。两条路都进 bindEvents 的 initialized→prepared→playing 状态机。
   private startPlayback(): void {
     if (this.src.length === 0) {
       return;
     }
     this.status = 'loading';
+    const direct: boolean = !MediaSource.needsDownloadBridge(this.src);
+    Log.i(`${LOG_TAG} startPlayback direct=${direct} src=${this.src}`);
+    if (direct) {
+      this.playRemoteUrl(this.src);
+      return;
+    }
     this.onResolveMedia(this.src).then((path: string) => {
       this.playLocalFile(path);
     }).catch((error: Object) => {
       this.handleError('download failed', error);
+    });
+  }
+
+  // 外站公开直链:AVPlayer 直接流式播放,无沙箱文件句柄。用 createMediaSourceWithUrl 带浏览器 UA + Referer,
+  // 以过第三方文件床的防盗链;setMediaSource 成功后走 bindEvents 的 initialized→prepared→playing 状态机。
+  private playRemoteUrl(url: string): void {
+    media.createAVPlayer().then((avPlayer: media.AVPlayer) => {
+      this.player = avPlayer;
+      this.bindEvents(avPlayer);
+      try {
+        const headers: Record<string, string> = {
+          'User-Agent': REMOTE_MEDIA_UA,
+          'Referer': AppConstants.BASE_URL
+        };
+        const source: media.MediaSource = media.createMediaSourceWithUrl(url, headers);
+        Log.i(`${LOG_TAG} setMediaSource url=${url}`);
+        // setMediaSource 同步设源(返回 void,不能链 .catch),成功后状态机推进到 initialized;
+        // 后续失败经 bindEvents 的 prepare().catch 与 on('error') 上报。
+        avPlayer.setMediaSource(source);
+      } catch (error) {
+        this.handleError('build media source failed', error);
+      }
+    }).catch((error: BusinessError) => {
+      this.handleError('createAVPlayer failed', error);
     });
   }
 
@@ -179,6 +217,7 @@ export struct AudioPlayer {
 
   private bindEvents(avPlayer: media.AVPlayer): void {
     avPlayer.on('stateChange', (state: string) => {
+      Log.i(`${LOG_TAG} stateChange ${state}`);
       switch (state) {
         case 'initialized':
           avPlayer.prepare().catch((error: BusinessError) => {

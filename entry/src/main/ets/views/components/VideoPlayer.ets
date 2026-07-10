@@ -1,12 +1,13 @@
 import { Log } from '../../services/logging/Log';
 import { fileUri } from '@kit.CoreFileKit';
 import { MediaPlaybackCoordinator } from '../../services/content/MediaPlaybackCoordinator';
+import { MediaSource } from '../../services/content/MediaSource';
 
 const LOG_TAG: string = '[ArkDO][VideoPlayer]';
 
-// 帖子内联视频。媒体源同音频(/uploads/short-url/*.xz,302 到跨源 CDN、CF 挡非浏览器客户端),
-// 故先经 onResolveMedia(→ host webview 下载委托过盾)下到沙箱,再用原生 Video 组件播本地文件。
-// 首帧显示黑底 + 播放按钮,点击后下载并自动播放;参与全局播放协调器(播它时停其它)。
+// 帖子内联视频。媒体源分两类:linux.do 上传件(/uploads/short-url/*.xz,302 到跨源 CDN、CF 挡非浏览器)须先经
+// onResolveMedia(→ host webview 下载委托过盾)下到沙箱再用 Video 播本地;外站公开直链直接把网络地址喂给 Video
+// 组件流式播放,不走下载委托(见 MediaSource)。首帧显示黑底 + 播放按钮,点击后加载并自动播放;参与全局播放协调器。
 @Component
 export struct VideoPlayer {
   src: string = '';
@@ -109,6 +110,13 @@ export struct VideoPlayer {
     this.status = 'loading';
     // 点击加载即抢占播放:先让其它播放器停下。
     MediaPlaybackCoordinator.notifyStarted(this.coordinatorId);
+    // 外站公开直链:Video 组件直接播网络地址,不经下载委托。
+    if (!MediaSource.needsDownloadBridge(this.src)) {
+      this.autoPlay = MediaPlaybackCoordinator.isActive(this.coordinatorId);
+      this.localUri = this.src;
+      this.status = 'ready';
+      return;
+    }
     this.onResolveMedia(this.src).then((path: string) => {
       // 下载竞态:加载期间若已被别的播放器抢占,则不自动播,停在首帧等用户点。
       this.autoPlay = MediaPlaybackCoordinator.isActive(this.coordinatorId);
