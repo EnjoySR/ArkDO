@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { ActivityRouteParam, AppRouteName, BookmarksRouteParam, buildActivityRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BookmarksRouteParam, buildActivityRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -26,6 +26,7 @@ import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
 import { SettingsPage } from './SettingsPage';
 import { DohSettingsPage } from './DohSettingsPage';
+import { LevelProgressPage } from './LevelProgressPage';
 import { BookmarksPage } from './BookmarksPage';
 import { ActivityListPage } from './ActivityListPage';
 import { TopicDetailPage } from './TopicDetailPage';
@@ -131,8 +132,8 @@ export struct RootTabPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#FFFFFF')
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .backgroundColor($r('app.color.page_bg'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .bindSheet($$this.isSheetVisible, this.RootSheetBuilder, {
       height: '90%',
       dragBar: true,
@@ -230,8 +231,25 @@ export struct RootTabPage {
           onOpenSettings: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.SETTINGS, buildSettingsRouteParam('profile')));
           },
+          onOpenLevelProgress: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.LEVEL_PROGRESS,
+              buildLevelProgressRouteParam(this.currentUser !== undefined)));
+          },
           onBack: () => {
             this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else if (name === AppRouteName.LEVEL_PROGRESS) {
+      NavDestination() {
+        LevelProgressPage({
+          isLoggedIn: (param as LevelProgressRouteParam).isLoggedIn,
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenWeb: (url: string, title?: string) => {
+            this.openWebPage(url, title);
           }
         })
       }

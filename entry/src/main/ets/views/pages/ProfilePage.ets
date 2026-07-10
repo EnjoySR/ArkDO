@@ -58,6 +58,8 @@ export struct ProfilePage {
   onOpenActivity: (username: string, filter: string, title: string) => void = () => {};
   // 设置与诊断日志已拆到独立设置页,右上角齿轮入口触发。
   onOpenSettings: () => void = () => {};
+  // 点击信任等级标进入原生等级进度页(数据取自 connect.linux.do)。
+  onOpenLevelProgress: () => void = () => {};
   // 本页是从首页头像 push 进来的二级页,返回栏走标准返回按钮。
   onBack: () => void = () => {};
   @State private profileDetail?: UserProfileDetail = undefined;
@@ -166,8 +168,13 @@ export struct ProfilePage {
     Column() {
       // 卡片 1:身份 + 论坛数据
       Column() {
+        // 外层 Row 不挂 onClick:头像/名字/箭头各自跳网页版资料,信任标独立跳等级进度页。
+        // 这样信任标的祖先都无 onClick,不会与「打开资料」冒泡冲突(本 SDK 无 stopPropagation)。
         Row() {
           UserAvatar({ user: this.accountUser, avatarSize: 56 })
+            .onClick(() => {
+              this.openUserWebPage('', this.getDisplayName());
+            })
           Column() {
             Text(this.getDisplayName())
               .fontSize(19)
@@ -175,6 +182,9 @@ export struct ProfilePage {
               .fontColor($r('app.color.text_primary'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .onClick(() => {
+                this.openUserWebPage('', this.getDisplayName());
+              })
             Row() {
               Text(this.getUsernameLabel())
                 .fontSize(13)
@@ -183,10 +193,23 @@ export struct ProfilePage {
                 Text(' · ')
                   .fontSize(13)
                   .fontColor($r('app.color.text_secondary'))
-                Text(this.getTrustLabel())
-                  .fontSize(13)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor($r('app.color.ld_accent'))
+                // 信任等级标做成可点药丸:tap 进等级进度页。
+                Row() {
+                  Text(this.getTrustLabel())
+                    .fontSize(13)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.ld_accent'))
+                  SymbolGlyph($r('sys.symbol.chevron_right'))
+                    .fontSize(11)
+                    .fontColor([$r('app.color.ld_accent')])
+                    .margin({ left: 1 })
+                }
+                .padding({ left: 8, right: 6, top: 2, bottom: 2 })
+                .backgroundColor($r('app.color.surface_muted'))
+                .borderRadius(10)
+                .onClick(() => {
+                  this.onOpenLevelProgress();
+                })
               }
             }
             .margin({ top: 3 })
@@ -198,9 +221,6 @@ export struct ProfilePage {
         }
         .width('100%')
         .padding({ left: CARD_PADDING, right: CARD_PADDING, top: CARD_PADDING, bottom: 6 })
-        .onClick(() => {
-          this.openUserWebPage('', this.getDisplayName());
-        })
 
         // meta 行固定高度:资料回来前后卡片不跳动。
         Text(this.getUserMetaLine())

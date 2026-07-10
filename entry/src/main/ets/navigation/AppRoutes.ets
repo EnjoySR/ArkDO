@@ -3,6 +3,7 @@ export enum AppRouteName {
   PROFILE = 'profile',
   SETTINGS = 'settings',
   DOH_SETTINGS = 'dohSettings',
+  LEVEL_PROGRESS = 'levelProgress',
   WEB = 'web',
   NOTIFICATIONS = 'notifications',
   BOOKMARKS = 'bookmarks',
@@ -40,6 +41,16 @@ export interface DohSettingsRouteParam {
 export function buildDohSettingsRouteParam(source: string): DohSettingsRouteParam {
   return {
     source: source
+  };
+}
+
+export interface LevelProgressRouteParam {
+  isLoggedIn: boolean;
+}
+
+export function buildLevelProgressRouteParam(isLoggedIn: boolean): LevelProgressRouteParam {
+  return {
+    isLoggedIn: isLoggedIn
   };
 }
 
