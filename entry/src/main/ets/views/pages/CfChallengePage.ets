@@ -49,23 +49,26 @@ export struct CfChallengePage {
 
   build() {
     Column() {
-      Row() {
-        Button('关闭')
-          .fontSize(15)
-          .fontColor('#2563EB')
-          .backgroundColor('#F3F4F6')
-          .height(36)
-          .padding({ left: 16, right: 16 })
-          .borderRadius(18)
-          .onClick(() => {
-            this.onClose();
-          })
-
+      Stack({ alignContent: Alignment.Center }) {
         Text('Cloudflare 验证')
           .fontSize(20)
           .fontWeight(FontWeight.Medium)
           .fontColor('#111827')
-          .margin({ left: 16 })
+
+        Row() {
+          Button('关闭')
+            .fontSize(15)
+            .fontColor('#2563EB')
+            .backgroundColor('#F3F4F6')
+            .height(36)
+            .padding({ left: 16, right: 16 })
+            .borderRadius(18)
+            .onClick(() => {
+              this.onClose();
+            })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Start)
       }
       .width('100%')
       .height(60)

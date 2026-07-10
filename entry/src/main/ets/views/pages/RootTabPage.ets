@@ -124,7 +124,8 @@ export struct RootTabPage {
     .bindSheet($$this.isSheetVisible, this.RootSheetBuilder, {
       height: '90%',
       dragBar: true,
-      showClose: true,
+      // CF 验证弹窗自带「关闭」按钮,隐藏原生右上角 X 避免出现两个关闭入口;其余 sheet 保留原生 X。
+      showClose: this.activeSheet !== RootSheet.CHALLENGE,
       maskColor: '#33000000',
       backgroundColor: '#FFFFFF',
       preferType: SheetType.BOTTOM,
