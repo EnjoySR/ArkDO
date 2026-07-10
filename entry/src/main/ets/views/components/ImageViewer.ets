@@ -14,9 +14,15 @@ const MIN_SCALE: number = 1;
 const MAX_SCALE: number = 4;
 const DOUBLE_TAP_SCALE: number = 2.5;
 
+// 拖动关闭：竖直位移绝对值超过该阈值即关闭，否则回弹（上/下拖同等）
+const DISMISS_THRESHOLD: number = 120;
+// 缩放估计值高于该值即视为「已放大」，此时禁用拖动关闭（让位给库的图片平移）
+const ZOOM_EPSILON: number = 1.05;
+
 /**
  * 全屏图片浏览器：Swiper 管多图翻页，每页用三方库 @rv/image-preview 的 ImagePreview
- * 承载缩放/平移/双击（direction=Horizontal 与横向 Swiper 协同，放大吃横滑、到边界让给 Swiper）。
+ * 承载缩放/平移/双击。direction=Vertical：竖直平移被库夹在边界内（放大后不会把图拖出屏），
+ * 水平手势到边界让给横向 Swiper 翻页——这是横向图集正确的轴向配置（用 Horizontal 会漏夹竖直、图能拖出屏外）。
  * 需在页面级渲染（放页面根 Stack 顶层），不能塞进 bindContentCover——其内容不随状态刷新。
  */
 @ComponentV2
@@ -27,8 +33,16 @@ export struct ImageViewer {
 
   @Local currentIndex: number = 0;
   @Local failedIndexes: number[] = [];
+  // 高清原图已加载完成的页下标（隐藏该页 loading 指示）
+  @Local loadedIndexes: number[] = [];
   // 顶部状态栏高度，用于让关闭按钮避让状态栏
   @Local topInset: number = 0;
+  // 拖动关闭的实时竖直位移（>0 向下、<0 向上拖动中）
+  @Local dragOffsetY: number = 0;
+  // 缩放估计值：库不暴露真实 scale，靠并行的双击/双指手势自维护，仅用于判断「是否已放大」。
+  // 未放大(≈1)才放行拖动关闭；放大后禁用，把竖直拖动让给库的图片平移。
+  @Local scaleGuess: number = 1;
+  private pinchBase: number = 1;
 
   aboutToAppear(): void {
     this.currentIndex = this.clampIndex(this.startIndex);
@@ -57,7 +71,9 @@ export struct ImageViewer {
               minScale: MIN_SCALE,
               maxScale: MAX_SCALE,
               doubleClickDefaultScale: DOUBLE_TAP_SCALE,
-              direction: PreviewDirection.Horizontal,
+              // Vertical：竖直平移夹紧在边界内（修复放大后可把图拖出屏外的越界 bug），
+              // 水平到边界让给横向 Swiper 翻页。
+              direction: PreviewDirection.Vertical,
               onClick: () => {
                 this.onClose();
               }
@@ -77,8 +93,13 @@ export struct ImageViewer {
                 .width('100%')
                 .height('100%')
                 .draggable(false)
+                .onComplete(() => {
+                  this.markLoaded(ri.index);
+                })
                 .onError(() => {
                   this.markFailed(ri.index);
+                  // 回退到优化图后也算「已就绪」，隐藏 loading
+                  this.markLoaded(ri.index);
                 })
             }
             .width('100%')
@@ -93,9 +114,28 @@ export struct ImageViewer {
       .height('100%')
       // 让图片视口也扩展到状态栏/导航条区域，放大后能铺满全屏
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+      // 拖动关闭时整页内容随手指上/下移
+      .translate({ y: this.dragOffsetY })
       .onChange((index: number) => {
         this.currentIndex = index;
+        // 翻页后库会重置该页缩放，同步重置估计值，让新页可下滑关闭
+        this.scaleGuess = 1;
+        this.dragOffsetY = 0;
       })
+
+      // 高清原图加载中的转圈（当前页未就绪且未失败时显示；优化图已垫底，仅提示高清在路上）
+      if (!this.isLoaded(this.currentIndex) && this.failedIndexes.indexOf(this.currentIndex) < 0) {
+        Column() {
+          LoadingProgress()
+            .width(44)
+            .height(44)
+            .color('#FFFFFF')
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .hitTestBehavior(HitTestMode.None)
+      }
 
       // 页码指示（多图时显示），透传点击不拦截手势
       if (this.images.length > 1) {
@@ -130,9 +170,68 @@ export struct ImageViewer {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#000000')
+    // 黑底：下滑关闭时随位移渐透，露出身后页面（iOS 风格拖拽消隐）
+    .backgroundColor(this.backdropColor())
     // 铺满顶部状态栏 + 底部导航条安全区，黑底沉浸式，避免露白
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    // 并行手势：与库内手势共存。双击/双指仅用于自维护缩放估计；竖直 Pan 做「未放大时上/下拖关闭」。
+    .parallelGesture(
+      GestureGroup(GestureMode.Parallel,
+        TapGesture({ count: 2 })
+          .onAction(() => {
+            this.scaleGuess = this.scaleGuess > ZOOM_EPSILON ? MIN_SCALE : DOUBLE_TAP_SCALE;
+          }),
+        PinchGesture()
+          .onActionStart(() => {
+            this.pinchBase = this.scaleGuess;
+          })
+          .onActionUpdate((event: GestureEvent) => {
+            const next: number = this.pinchBase * event.scale;
+            this.scaleGuess = next < MIN_SCALE ? MIN_SCALE : (next > MAX_SCALE ? MAX_SCALE : next);
+          }),
+        PanGesture({ direction: PanDirection.Vertical })
+          .onActionUpdate((event: GestureEvent) => {
+            // 已放大 → 让位给库的图片平移；未放大时上/下拖均可关闭
+            if (this.scaleGuess > ZOOM_EPSILON) {
+              this.dragOffsetY = 0;
+              return;
+            }
+            this.dragOffsetY = event.offsetY;
+          })
+          .onActionEnd(() => {
+            if (this.scaleGuess > ZOOM_EPSILON) {
+              return;
+            }
+            if (Math.abs(this.dragOffsetY) > DISMISS_THRESHOLD) {
+              this.onClose();
+              return;
+            }
+            this.springBack();
+          })
+          .onActionCancel(() => {
+            this.springBack();
+          })
+      )
+    )
+  }
+
+  // 回弹到原位（拖动未过阈值）
+  private springBack(): void {
+    this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+      this.dragOffsetY = 0;
+    });
+  }
+
+  // 黑底透明度随拖动位移（上/下同等）递减，最低留 25% 黑（保证内容仍可辨）
+  private backdropColor(): string {
+    const fade: number = Math.abs(this.dragOffsetY) / 300;
+    const clamped: number = fade > 0.75 ? 0.75 : fade;
+    const alpha: number = Math.round((1 - clamped) * 255);
+    let hex: string = alpha.toString(16);
+    if (hex.length < 2) {
+      hex = `0${hex}`;
+    }
+    return `#${hex}000000`;
   }
 
   // 占位图：优先用优化图（帖子内联同源、多已缓存，秒显）；没有则退回高清图本身
@@ -154,6 +253,17 @@ export struct ImageViewer {
       return item.url;
     }
     return item.fallbackUrl;
+  }
+
+  private isLoaded(index: number): boolean {
+    return this.loadedIndexes.indexOf(index) >= 0;
+  }
+
+  private markLoaded(index: number): void {
+    if (this.loadedIndexes.indexOf(index) >= 0) {
+      return;
+    }
+    this.loadedIndexes = this.loadedIndexes.concat([index]);
   }
 
   private markFailed(index: number): void {

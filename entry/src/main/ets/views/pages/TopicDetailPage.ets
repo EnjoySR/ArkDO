@@ -428,9 +428,13 @@ export struct TopicDetailPage {
         images: this.viewerImages,
         startIndex: this.viewerStartIndex,
         onClose: () => {
-          this.showImageViewer = false;
+          this.closeImageViewer();
         }
       })
+        // 入场/退场：纯淡入淡出（不缩放，黑底不变小，只是颜色渐显/渐隐）；由 open/close 的 animateTo 驱动
+        .transition(
+          TransitionEffect.OPACITY.animation({ duration: 220, curve: Curve.EaseOut })
+        )
     }
 
     // 评论输入浮层:内联挂在根 Stack 顶层(而非 contentCover),这样组件 getLastWindow 拿到主窗口、
@@ -714,7 +718,16 @@ export struct TopicDetailPage {
   private openImageViewer(images: ViewerImage[], startIndex: number): void {
     this.viewerImages = images;
     this.viewerStartIndex = startIndex;
-    this.showImageViewer = true;
+    // animateTo 驱动 .transition 播放淡入入场
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+      this.showImageViewer = true;
+    });
+  }
+
+  private closeImageViewer(): void {
+    this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
+      this.showImageViewer = false;
+    });
   }
 
   private async loadTopicDetail(): Promise<void> {
