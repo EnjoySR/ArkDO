@@ -1,6 +1,7 @@
-import { Log } from '../../services/logging/Log';
+import { image } from '@kit.ImageKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
+import { AvatarImageCache } from '../../services/network/AvatarImageCache';
 
 @Component
 export struct UserAvatar {
@@ -10,23 +11,22 @@ export struct UserAvatar {
   private readonly avatarBorderColor: string = '#4D00AEFF';
   // 当前使用的头像候选下标:动图(0)加载失败 → 静态(1)→ 都失败(>=候选数)回退首字母。
   @State private avatarSourceIndex: number = 0;
+  // 经 host webview 取回并解码的头像。原生 Image 走系统栈会被 SNI 封锁,只能喂 PixelMap。
+  @State private avatarPixelMap: image.PixelMap | undefined = undefined;
+
+  aboutToAppear(): void {
+    this.loadCurrent();
+  }
 
   build() {
     Stack() {
-      if (this.currentAvatarUrl().length > 0) {
-        Image(this.currentAvatarUrl())
+      if (this.avatarPixelMap) {
+        Image(this.avatarPixelMap)
           .width(this.avatarSize)
           .height(this.avatarSize)
           .borderRadius(this.avatarBorderRadius())
           .objectFit(ImageFit.Cover)
           .backgroundColor($r('app.color.surface_muted'))
-          .onError((event: ImageError) => {
-            // 当前候选(如 CDN 动图)加载失败 → 切下一个候选(静态头像),都失败则显示首字母。
-            Log.i(`[ArkDO][Avatar] load failed url=${this.currentAvatarUrl()} user=${this.user?.username} msg=${event.message}`);
-            if (this.avatarSourceIndex < this.avatarCandidates().length) {
-              this.avatarSourceIndex += 1;
-            }
-          })
       } else {
         Text(this.getInitial())
           .fontSize(Math.max(12, Math.floor(this.avatarSize * 0.4)))
@@ -43,6 +43,32 @@ export struct UserAvatar {
     })
     .backgroundColor($r('app.color.surface_muted'))
     .alignContent(Alignment.Center)
+  }
+
+  // 取当前候选头像:命中缓存直接显示;否则异步经 host webview 取。当前候选失败则退到下一候选,
+  // 全部候选失败则维持首字母占位。
+  private async loadCurrent(): Promise<void> {
+    const url: string = this.currentAvatarUrl();
+    if (url.length === 0) {
+      this.avatarPixelMap = undefined;
+      return;
+    }
+    const cache: AvatarImageCache = AvatarImageCache.getInstance();
+    const cached: image.PixelMap | undefined = cache.getCached(url);
+    if (cached) {
+      this.avatarPixelMap = cached;
+      return;
+    }
+    const pixelMap: image.PixelMap | undefined = await cache.load(url);
+    if (pixelMap) {
+      this.avatarPixelMap = pixelMap;
+      return;
+    }
+    // 当前候选取不到 → 尝试下一候选(动图失败退静态);无更多候选则保持首字母。
+    if (this.avatarSourceIndex + 1 < this.avatarCandidates().length) {
+      this.avatarSourceIndex += 1;
+      await this.loadCurrent();
+    }
   }
 
   // ID=1 的用户使用方形圆角(10%),其余用户使用圆形头像(50%)。

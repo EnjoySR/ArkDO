@@ -3,7 +3,9 @@ import { AbilityConstant, errorManager, UIAbility, Want } from '@kit.AbilityKit'
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { webview } from '@kit.ArkWeb';
 import { ThemeManager } from '../common/theme/ThemeManager';
+import { DohManager } from '../services/network/DohManager';
 import { FileLogger } from '../services/logging/FileLogger';
 import { AppStateEventBus } from '../services/session/AppStateEventBus';
 import { LINUXDO_FA_SYMBOLS_RAWFILE, loadFaIconsFromRawContent } from '../views/components/FaIcon';
@@ -22,6 +24,15 @@ export default class EntryAbility extends UIAbility {
     Log.i(`[ArkDO][Startup] stage=appOnCreate ts=${Date.now()}`);
     this.registerCrashHandler();
     ThemeManager.init(this.context);
+    // setHttpDns 只有在 Web 引擎初始化之后才生效(引擎网络服务需先就绪),故须先显式
+    // initializeWebEngine 再下发 DoH;且早于任何页面,确保宿主 webview 首次解析
+    // linux.do 就走 DoH,规避被污染的系统 DNS。否则请求会以 useHttpDns:0 走系统 DNS 超时。
+    try {
+      webview.WebviewController.initializeWebEngine();
+    } catch (err) {
+      Log.e(`[ArkDO][EntryAbility] initializeWebEngine failed: ${JSON.stringify(err)}`);
+    }
+    DohManager.init(this.context);
     this.loadIconAssets();
     // 冷启动清空音视频缓存目录,避免下载文件无限堆积占存储。
     ArkWebNetworkBridge.clearMediaCacheDir(this.context);

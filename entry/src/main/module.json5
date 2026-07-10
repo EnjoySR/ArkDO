@@ -13,6 +13,11 @@
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        // ArkWeb 的 Chromium 网络栈需读取网络状态注册 NetConnCallback;缺此权限会 ret=201
+        // 被判离线(NQE Offline),导致 DoH(setHttpDns)在 AUTO 模式下不启用、退回污染系统 DNS。
+        "name": "ohos.permission.GET_NETWORK_INFO"
       }
     ],
     "abilities": [

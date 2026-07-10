@@ -4,6 +4,7 @@ import { AppConstants } from '../../common/constants/AppConstants';
 import { DownloadService } from '../../services/content/DownloadService';
 import { FileLogger } from '../../services/logging/FileLogger';
 import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
+import { DohManager } from '../../services/network/DohManager';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
 
@@ -21,7 +22,9 @@ export struct SettingsPage {
   username: string = '';
   onBack: () => void = () => {};
   onOpenWeb: (url: string, title?: string) => void = () => {};
+  onOpenDoh: () => void = () => {};
   @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
+  @State private dohSummary: string = '';
   @State private appVersion: string = '';
   // 日志工具:大小标签实时展示,详细日志开关持久化,导出时防重复点击。
   @State private logSizeLabel: string = '';
@@ -32,6 +35,7 @@ export struct SettingsPage {
     this.readAppVersion();
     this.verboseLog = FileLogger.isVerbose();
     this.refreshLogSize();
+    this.refreshDohSummary();
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -79,9 +83,13 @@ export struct SettingsPage {
 
         Scroll() {
           Column() {
-            // 卡片:外观 / 账号与安全 / 关于
+            // 卡片:外观 / DoH / 账号与安全 / 关于
             Column() {
               this.AppearanceCell()
+              this.HairlineInset()
+              this.SettingCell($r('sys.symbol.security_shield'), 'DoH 配置', this.dohSummary, () => {
+                this.onOpenDoh();
+              })
               if (this.isLoggedIn) {
                 this.HairlineInset()
                 this.SettingCell($r('sys.symbol.security_shield'), '账号与安全', '', () => {
@@ -306,6 +314,15 @@ export struct SettingsPage {
 
   private setThemeMode(mode: ThemeMode): void {
     ThemeManager.setMode(getContext(this), mode);
+  }
+
+  private refreshDohSummary(): void {
+    const context: common.Context = getContext(this);
+    if (!DohManager.isEnabled(context)) {
+      this.dohSummary = '已关闭';
+      return;
+    }
+    this.dohSummary = DohManager.getActiveServer(context).name;
   }
 
   private getThemeModeLabel(): string {

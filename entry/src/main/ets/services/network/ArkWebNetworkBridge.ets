@@ -154,6 +154,13 @@ class WebviewJsonExecutor implements ArkWebJsonExecutor, ArkWebResultReceiver {
   }
 }
 
+/** 经 host webview 取到的二进制资源(头像等):base64 是原始字节的 base64,失败时 ok=false。 */
+export interface ImageFetchResult {
+  ok: boolean;
+  base64: string;
+  contentType: string;
+}
+
 export class ArkWebNetworkBridge implements JsonNetworkClient {
   private executor?: ArkWebJsonExecutor;
   private webviewExecutor?: WebviewJsonExecutor;
@@ -448,6 +455,30 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
+  /**
+   * 经 host webview 取二进制资源(头像)并回传 base64。原生 Image/DownloadManager 走系统 netstack,
+   * TLS 握手时明文 SNi=linux.do 被 RST 封锁(只有 webview 能用 ECH 藏 SNI 过盾),故头像必须走这条路。
+   * 在 host 文档内 fetch → arrayBuffer → base64,复用 onJsonResult 回调通道。失败返回 ok=false。
+   */
+  async getImageBase64(target: string): Promise<ImageFetchResult> {
+    if (!this.executor) {
+      return { ok: false, base64: '', contentType: '' };
+    }
+    await this.whenHostReady();
+    try {
+      const rawResult: string = await this.executor.run(this.createImageFetchScript(target));
+      const envelope: WebFetchEnvelope = JSON.parse(rawResult) as WebFetchEnvelope;
+      const status: number = envelope.statusCode ? envelope.statusCode : 0;
+      const body: string = envelope.body ? envelope.body : '';
+      if (status >= 200 && status < 300 && body.length > 0) {
+        return { ok: true, base64: body, contentType: envelope.contentType ? envelope.contentType : '' };
+      }
+      return { ok: false, base64: '', contentType: '' };
+    } catch (error) {
+      return { ok: false, base64: '', contentType: '' };
+    }
+  }
+
   async postForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
     logNetwork(`POST ${requestPath} start bodyLength=${body.length}`);
@@ -655,6 +686,44 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
           errorMessage: String(error)
         }));
       });
+      return requestId;
+    })();`;
+  }
+
+  // 二进制取图脚本:fetch 头像 → arrayBuffer → base64(分块 fromCharCode 避免大数组爆栈)。
+  // 支持跨源:CDN(cdn/s3.ldstatic.com)回 ACAO=linux.do 具体源且无 Allow-Credentials,故跨源必须
+  // credentials:'omit'(带 cookie 会被 CORS 拒),同源仍 include。cache:'default' 命中 webview HTTP 缓存。
+  private createImageFetchScript(target: string): string {
+    const encodedTarget: string = JSON.stringify(target);
+
+    return `(() => {
+      const requestId = '${REQUEST_ID_TOKEN}';
+      const requestUrl = new URL(${encodedTarget}, window.location.origin);
+      const sameOrigin = requestUrl.origin === window.location.origin;
+      const fail = (error) => {
+        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+          statusCode: 0, contentType: '', body: '', errorMessage: String(error)
+        }));
+      };
+      fetch(requestUrl.toString(), {
+        credentials: sameOrigin ? 'include' : 'omit',
+        cache: 'default',
+        headers: { 'Accept': 'image/*' }
+      }).then((response) => {
+        response.arrayBuffer().then((buf) => {
+          const bytes = new Uint8Array(buf);
+          let binary = '';
+          const chunk = 8192;
+          for (let i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+          }
+          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+            statusCode: response.status,
+            contentType: response.headers.get('content-type') || '',
+            body: btoa(binary)
+          }));
+        }).catch(fail);
+      }).catch(fail);
       return requestId;
     })();`;
   }

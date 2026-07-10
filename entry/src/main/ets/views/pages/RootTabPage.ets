@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { ActivityRouteParam, AppRouteName, BookmarksRouteParam, buildActivityRouteParam, buildBookmarksRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BookmarksRouteParam, buildActivityRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -12,6 +12,7 @@ import { AuthService } from '../../services/auth/AuthService';
 import { NotificationService } from '../../services/notification/NotificationService';
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
+import { AvatarImageCache } from '../../services/network/AvatarImageCache';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { ArkWebHost } from '../components/ArkWebHost';
@@ -24,6 +25,7 @@ import { LoginPage } from './LoginPage';
 import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
 import { SettingsPage } from './SettingsPage';
+import { DohSettingsPage } from './DohSettingsPage';
 import { BookmarksPage } from './BookmarksPage';
 import { ActivityListPage } from './ActivityListPage';
 import { TopicDetailPage } from './TopicDetailPage';
@@ -65,6 +67,8 @@ export struct RootTabPage {
 
   aboutToAppear(): void {
     this.ensureIconSymbolsLoaded();
+    // 头像缓存单例注入 host bridge:UserAvatar 深层嵌套拿不到 bridge,统一经它取图(过 SNI 封锁)。
+    AvatarImageCache.getInstance().attachBridge(this.bridge);
     if (!this.challengeRecovery) {
       this.challengeRecovery = new ChallengeRecoveryCoordinator(
         this.bridge,
@@ -242,6 +246,21 @@ export struct RootTabPage {
           },
           onOpenWeb: (url: string, title?: string) => {
             this.openWebPage(url, title);
+          },
+          onOpenDoh: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DOH_SETTINGS, buildDohSettingsRouteParam('settings')));
+          }
+        })
+      }
+      .hideTitleBar(true)
+    } else if (name === AppRouteName.DOH_SETTINGS) {
+      NavDestination() {
+        DohSettingsPage({
+          onBack: () => {
+            this.popNavigation();
+          },
+          onDohApplied: () => {
+            this.reloadHostForDoh();
           }
         })
       }
@@ -474,12 +493,17 @@ export struct RootTabPage {
     this.closeLoginPage();
   }
 
+  // DoH 变更(切换/开关/删除当前项)后重载宿主 webview,让新 DNS 立即用于解析。
+  // 复用会话变更的重载门闩:先关就绪门闩,让并发 fetch 排队到重载完成。
+  private reloadHostForDoh(): void {
+    this.bridge.markHostReloading();
+    SessionEventBus.notifySessionChanged();
+  }
+
   private handleAccountClick(): void {
-    if (this.currentUser) {
-      this.openProfilePage();
-      return;
-    }
-    this.openLoginPage();
+    // 登录与否都进个人中心:未登录时该页仍有齿轮(设置→DoH)和登录入口,
+    // 避免网络不通时点右上角直接弹登录、够不到 DoH 配置而被卡在门外。
+    this.openProfilePage();
   }
 
   private openProfilePage(): void {

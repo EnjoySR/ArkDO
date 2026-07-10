@@ -2,6 +2,7 @@ export enum AppRouteName {
   TOPIC_DETAIL = 'topicDetail',
   PROFILE = 'profile',
   SETTINGS = 'settings',
+  DOH_SETTINGS = 'dohSettings',
   WEB = 'web',
   NOTIFICATIONS = 'notifications',
   BOOKMARKS = 'bookmarks',
@@ -27,6 +28,16 @@ export interface SettingsRouteParam {
 }
 
 export function buildSettingsRouteParam(source: string): SettingsRouteParam {
+  return {
+    source: source
+  };
+}
+
+export interface DohSettingsRouteParam {
+  source: string;
+}
+
+export function buildDohSettingsRouteParam(source: string): DohSettingsRouteParam {
   return {
     source: source
   };
