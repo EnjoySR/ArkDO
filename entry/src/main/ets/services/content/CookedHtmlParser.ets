@@ -58,6 +58,9 @@ export interface RichInlineNode {
 
 export interface RichListItem {
   inlines: RichInlineNode[];
+  // 列表项内含块级图(lightbox/大图)时改用 blocks:文字成段落、图片各自成块级 IMAGE,
+  // 避免大图退化成 18px 行内小图。纯文字项仍只用 inlines(blocks 缺省)。
+  blocks?: RichBlock[];
 }
 
 export interface RichBlock {
@@ -832,9 +835,18 @@ export class CookedHtmlParser {
       }
       const closeEnd: number = CookedHtmlParser.findTagEnd(innerHtml, closeStart);
       const itemHtml: string = innerHtml.substring(openEnd + 1, closeStart);
-      items.push({
-        inlines: CookedHtmlParser.parseInlines(itemHtml)
-      });
+      // 列表项里裹了块级图(lightbox/大图)时,走 mixedBlocks 把文字与图片拆成块级序列;
+      // 纯文字/行内(含 emoji)项保持原有的行内快路径。findImageUnit 只认块级图,emoji 不触发。
+      if (CookedHtmlParser.findImageUnit(itemHtml) !== undefined) {
+        items.push({
+          inlines: [],
+          blocks: CookedHtmlParser.mixedBlocks(itemHtml)
+        });
+      } else {
+        items.push({
+          inlines: CookedHtmlParser.parseInlines(itemHtml)
+        });
+      }
       index = closeEnd >= 0 ? closeEnd + 1 : closeStart + 5;
     }
 

@@ -150,6 +150,10 @@ export struct PostRichContent {
       if (block.items) {
         for (let j: number = 0; j < block.items.length; j++) {
           this.collectInlineMath(block.items[j].inlines, out);
+          const itemBlocks: RichBlock[] | undefined = block.items[j].blocks;
+          if (itemBlocks && itemBlocks.length > 0) {
+            this.collectMath(itemBlocks, out);
+          }
         }
       }
       if (block.blocks && block.blocks.length > 0) {
@@ -625,7 +629,14 @@ export struct PostRichContent {
             .width(24)
 
           Column() {
-            this.InlineTextBlock(item.inlines, 0, `${path}-i${index}`)
+            if (item.blocks && item.blocks.length > 0) {
+              // 含块级图的列表项:文字段落 + 全宽图片按序渲染(复用统一的块渲染)。
+              ForEach(item.blocks, (child: RichBlock, childIndex: number) => {
+                this.BlockView(child, childIndex, `${path}-i${index}-b${childIndex}`)
+              }, (child: RichBlock, childIndex: number) => this.blockKey(child, childIndex))
+            } else {
+              this.InlineTextBlock(item.inlines, 0, `${path}-i${index}`)
+            }
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
@@ -1192,6 +1203,15 @@ export struct PostRichContent {
           // 兜底用优化图 src（与帖子内联同源、多已缓存），原图加载失败时回退
           const optimized: string = block.src && block.src !== primary ? block.src : '';
           result.push({ url: primary, fallbackUrl: optimized });
+        }
+      }
+      // 列表项内的块级图(item.blocks)也要进浏览器,否则点开只有它自己、无法左右翻页。
+      if (block.type === RichBlockType.LIST && block.items) {
+        for (let j: number = 0; j < block.items.length; j++) {
+          const itemBlocks: RichBlock[] | undefined = block.items[j].blocks;
+          if (itemBlocks && itemBlocks.length > 0) {
+            this.collectImagesFrom(itemBlocks, result, `${path}-i${j}-b`);
+          }
         }
       }
       if (block.blocks && block.blocks.length > 0) {
