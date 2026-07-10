@@ -15,6 +15,7 @@ import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 
 const LOG_TAG: string = '[ArkDO][Home]';
+const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
 
 @Component
 export struct HomePage {
@@ -365,6 +366,10 @@ export struct HomePage {
     if (this.topics.length === 0) {
       this.loadFailed = true;
       this.listMessage = friendlyMessage;
+      // 诊断:这块全屏"访问验证/加载失败"提示在什么情形下弹出。它只在列表为空时出现,
+      // 关键要靠时间戳配合前后的既有日志(冷启动标志/前后台切换/上一笔 latest.json 是否返回空列表)还原
+      // "使用中列表怎么变空的"。这里记本次失败的指纹:是 CF 拦截还是普通网络失败、状态码、错误信息。
+      Log.i(`${DIAG_TAG} stage=homeEmptyPromptShown requiresChallenge=${this.requiresChallenge} status=${result.statusCode} isLoggedIn=${this.isLoggedIn} errCode=${result.error?.code ?? ''} errMsg=${result.error?.message ?? ''}`);
     } else {
       this.footerMessage = '刷新失败,请重试';
     }
