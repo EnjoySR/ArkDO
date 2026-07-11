@@ -7,6 +7,7 @@ import { ReactionMutation } from '../../services/topic/ReactionMutation';
 import { getReactionEmoji, REACTION_ORDER } from './EmojiRegistry';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { getEmojiUrl } from './EmojiUrlRegistry';
+import { HolographicText } from './HolographicText';
 import { PostRichContent } from './PostRichContent';
 import { ViewerImage } from './ImageViewer';
 import { UserAvatar } from './UserAvatar';
@@ -15,6 +16,9 @@ import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 const LIKE_RED: string = '#EF4444';
 // 昵称后徽章图标(FontAwesome 单色)统一染金色,明暗底皆成立;与站点徽章展示一致。
 const BADGE_GOLD: string = '#E5A50A';
+// 走全息闪动的称号白名单:对应站点 CSS `span.user-title--{premium,种子用户,破界者}`(按称号文字命中,含徽章当称号)。
+// 接口不返回这份归属,只能手维护;站点新增会闪的称号时往这里补。
+const HOLOGRAPHIC_TITLES: Set<string> = new Set<string>(['Premium', '种子用户', '破界者']);
 
 // 拷贝链接成功后按钮右下角"画勾"动画,对齐 Discourse post-action-feedback:
 // 复制成功后按钮右下角"画勾"反馈。strokeDashOffset 在本环境不吃 animateTo,改用「左→右揭示」实现描边过程:
@@ -238,12 +242,18 @@ export struct TopicPostItem {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
 
           if (this.hasUserTitle()) {
-            Text(this.getUserTitle())
-              .fontSize(13)
-              .fontColor($r('app.color.text_tertiary'))
-              .margin({ left: this.getUsername().length > 0 ? 6 : 0 })
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            if (this.isHolographicTitle()) {
+              // Premium 称号:全息闪动渐变文字(还原站点 holographic 效果)。
+              HolographicText({ text: this.getUserTitle(), fontSize: 13 })
+                .margin({ left: this.getUsername().length > 0 ? 6 : 0 })
+            } else {
+              Text(this.getUserTitle())
+                .fontSize(13)
+                .fontColor($r('app.color.text_tertiary'))
+                .margin({ left: this.getUsername().length > 0 ? 6 : 0 })
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
           }
         }
         .margin({ top: 3 })
@@ -1075,6 +1085,11 @@ export struct TopicPostItem {
 
   private hasUserTitle(): boolean {
     return this.getUserTitle().length > 0;
+  }
+
+  // 称号在全息白名单里才闪(按称号文字匹配,对应站点 user-title--xxx 选择器);其余普通灰字。
+  private isHolographicTitle(): boolean {
+    return HOLOGRAPHIC_TITLES.has(this.getUserTitle());
   }
 
   private getRelativeTime(): string {
