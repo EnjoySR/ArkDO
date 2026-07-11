@@ -1,4 +1,5 @@
 import { AppConstants } from '../../common/constants/AppConstants';
+import { TopicCategory } from '../../models/Topic';
 
 // 行内小图(emoji/小图标)的尺寸上限,与渲染层 PostRichContent.SMALL_IMAGE_MAX 对齐:
 // 宽或高超过它的独立 <img>(或动图)视为整幅内容图,提升为 IMAGE 块,不再压成 18px 行内图。
@@ -8,6 +9,9 @@ export enum RichBlockType {
   PARAGRAPH = 'paragraph',
   HEADING = 'heading',
   QUOTE = 'quote',
+  // Discourse 话题/帖子引用(<aside class="quote" data-topic data-post>,带 quote-title__text-content 头部):
+  // 头部含头像 + 话题标题链接 + 分类徽章,正文是被引用楼的截断预览。渲染成带头部的引用卡,右上角可展开拉全文。
+  TOPIC_QUOTE = 'topic_quote',
   // Obsidian/Discourse callout(discourse-quote-callouts 主题组件):首段以 [!type]± 开头的
   // blockquote → 彩色可折叠提示框。type 决定图标/主色,+ 默认展开、- 默认折叠、无后缀不可折叠。
   CALLOUT = 'callout',
@@ -97,6 +101,14 @@ export interface RichBlock {
   collapsible?: boolean;
   defaultExpanded?: boolean;
   titleInlines?: RichInlineNode[];
+  // TOPIC_QUOTE 头部数据:头像 URL / 作者用户名 / 话题标题 / 目标 topic 与楼号(供展开按 by_number 拉全文)/
+  // 分类徽章。折叠预览的 cooked 复用 text,话题链接复用 href。
+  quoteAvatarUrl?: string;
+  quoteAuthor?: string;
+  quoteTitle?: string;
+  quoteTopicId?: number;
+  quotePostNumber?: number;
+  quoteCategory?: TopicCategory;
 }
 
 // callout 类型别名 → 归一类型(与 discourse-quote-callouts settings.yml 的 alias 一致)。
@@ -265,6 +277,12 @@ export class CookedHtmlParser {
 
       const openTag: string = html.substring(nextTagStart, tagEnd + 1);
       if (CookedHtmlParser.isClosingTag(openTag)) {
+        // 行内元素的闭标签(</a></span></strong>…)属于当前 pending 行内内容,必须保留;
+        // 否则未包 <p> 的裸文本(如引用预览、blockquote 直排文本)里 <a>…</a> 会失衡,
+        // 闭标签被丢弃后其后文本被误当作未闭合链接的一部分整段染蓝可点。仅块级闭标签可安全跳过。
+        if (!CookedHtmlParser.isBlockTag(CookedHtmlParser.getTagName(openTag))) {
+          pendingInlineHtml = `${pendingInlineHtml}${openTag}`;
+        }
         index = tagEnd + 1;
         continue;
       }
@@ -346,6 +364,16 @@ export class CookedHtmlParser {
         level: Number(tagName.substring(1)),
         inlines: CookedHtmlParser.parseInlines(innerHtml)
       }];
+    }
+
+    if (tagName === 'aside' && CookedHtmlParser.hasClass(openTag, 'quote') &&
+      innerHtml.indexOf('quote-title__text-content') >= 0) {
+      // Discourse 话题/帖子引用:头部(头像+标题链接+分类徽章)抽成结构化数据,正文取截断预览,
+      // 渲染成带头部的引用卡。命中失败(缺 data-topic 等)回退成普通引用。
+      const topicQuote: RichBlock | undefined = CookedHtmlParser.topicQuoteFromAside(openTag, innerHtml);
+      if (topicQuote) {
+        return [topicQuote];
+      }
     }
 
     if (tagName === 'blockquote' || (tagName === 'aside' && CookedHtmlParser.hasClass(openTag, 'quote'))) {
@@ -472,6 +500,229 @@ export class CookedHtmlParser {
       }
     }
     return false;
+  }
+
+  // 解析 Discourse 话题引用 <aside class="quote" data-topic data-post> 的头部与预览。
+  // 缺少目标 topic 时返回 undefined,让调用方回退成普通引用。
+  private static topicQuoteFromAside(openTag: string, innerHtml: string): RichBlock | undefined {
+    const topicId: number = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(openTag, 'data-topic'));
+    if (topicId <= 0) {
+      return undefined;
+    }
+    const postNumber: number = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(openTag, 'data-post'));
+
+    // 头像:title 区里 class 含 avatar 的 <img>。
+    const avatarTag: string = CookedHtmlParser.firstImgWithClass(innerHtml, 'avatar');
+    const avatarUrl: string = avatarTag.length > 0
+      ? CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(avatarTag, 'src')) : '';
+
+    // 标题 + 链接:quote-title__text-content 里第一个非徽章的 <a>。
+    const titleContent: string = CookedHtmlParser.firstElementInnerByClass(innerHtml, 'quote-title__text-content');
+    // 标题文字取第一个 <a>(话题链接,class 无 badge)的内部;href 取该开标签的 href 属性。
+    const titleAnchor: string = CookedHtmlParser.firstTopicTitleAnchor(titleContent);
+    const title: string = titleContent.length > 0
+      ? CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.toPlainText(CookedHtmlParser.firstElementInner(titleContent, 'a'))) : '';
+    const href: string = titleAnchor.length > 0
+      ? CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(titleAnchor, 'href')) : '';
+
+    // 分类徽章:badge-category span 上带 data-category-id + --category-badge-* 变量 + 名字 + 图标 svg。
+    const category: TopicCategory | undefined = CookedHtmlParser.categoryFromBadge(titleContent);
+
+    // 正文预览:第一个 <blockquote> 的内部 HTML(截断预览),交渲染层内嵌解析。
+    const preview: string = CookedHtmlParser.firstElementInner(innerHtml, 'blockquote');
+
+    const block: RichBlock = {
+      type: RichBlockType.TOPIC_QUOTE,
+      text: preview,
+      quoteTopicId: topicId,
+      quotePostNumber: postNumber > 0 ? postNumber : 1
+    };
+    if (avatarUrl.length > 0) {
+      block.quoteAvatarUrl = avatarUrl;
+    }
+    if (title.length > 0) {
+      block.quoteTitle = title;
+    }
+    if (href.length > 0) {
+      block.href = href;
+    }
+    if (category) {
+      block.quoteCategory = category;
+    }
+    return block;
+  }
+
+  // 从 title 区取第一个指向话题的 <a>(class 不含 badge-category)的完整开标签。
+  private static firstTopicTitleAnchor(titleContent: string): string {
+    const lower: string = titleContent.toLowerCase();
+    let cursor: number = 0;
+    while (cursor < titleContent.length) {
+      const start: number = lower.indexOf('<a', cursor);
+      if (start < 0) {
+        return '';
+      }
+      const end: number = CookedHtmlParser.findTagEnd(titleContent, start);
+      if (end < 0) {
+        return '';
+      }
+      const tag: string = titleContent.substring(start, end + 1);
+      if (!CookedHtmlParser.hasClassContaining(tag, 'badge-category')) {
+        return tag;
+      }
+      cursor = end + 1;
+    }
+    return '';
+  }
+
+  // 从 badge-category__wrapper 里的 <span class="badge-category" ...> 抽出分类。缺 id/名字则返回 undefined。
+  private static categoryFromBadge(titleContent: string): TopicCategory | undefined {
+    const badgeInner: string = CookedHtmlParser.firstElementInnerByClass(titleContent, 'badge-category__wrapper');
+    if (badgeInner.length === 0) {
+      return undefined;
+    }
+    const spanOpen: string = CookedHtmlParser.firstOpenTagByClass(badgeInner, 'badge-category');
+    const idText: string = CookedHtmlParser.extractAttr(spanOpen, 'data-category-id');
+    const id: number = CookedHtmlParser.parsePositiveNumber(idText);
+    const name: string = CookedHtmlParser.decodeHtmlEntities(
+      CookedHtmlParser.toPlainText(CookedHtmlParser.firstElementInnerByClass(badgeInner, 'badge-category__name')));
+    if (name.length === 0) {
+      return undefined;
+    }
+    const style: string = CookedHtmlParser.extractAttr(spanOpen, 'style');
+    const color: string = CookedHtmlParser.cssVar(style, '--category-badge-color');
+    const textColor: string = CookedHtmlParser.cssVar(style, '--category-badge-text-color');
+    // 图标:徽章内最内层 <svg id="xxx">(外层是 fa 包装 svg)。取 id 作图标名交 getCategoryIcon 归一。
+    const iconId: string = CookedHtmlParser.extractAttr(CookedHtmlParser.lastSvgWithId(badgeInner), 'id');
+
+    const category: TopicCategory = {
+      id: id > 0 ? id : 0,
+      name,
+      color: color.length > 0 ? color.replace('#', '') : '6B7280',
+      textColor: textColor.length > 0 ? textColor.replace('#', '') : 'FFFFFF'
+    };
+    if (iconId.length > 0) {
+      category.icon = iconId;
+    }
+    return category;
+  }
+
+  // 取 style 里某个 CSS 变量的值(如 --category-badge-color: #9cb6c4)。
+  private static cssVar(style: string, name: string): string {
+    const pattern: RegExp = new RegExp(`${name}\\s*:\\s*([^;]+)`, 'i');
+    const match: RegExpMatchArray | null = style.match(pattern);
+    return match ? match[1].trim() : '';
+  }
+
+  // 第一个 class 含指定关键字的 <img> 的完整标签。
+  private static firstImgWithClass(html: string, keyword: string): string {
+    const lower: string = html.toLowerCase();
+    let cursor: number = 0;
+    while (cursor < html.length) {
+      const start: number = lower.indexOf('<img', cursor);
+      if (start < 0) {
+        return '';
+      }
+      const end: number = CookedHtmlParser.findTagEnd(html, start);
+      if (end < 0) {
+        return '';
+      }
+      const tag: string = html.substring(start, end + 1);
+      if (CookedHtmlParser.hasClassContaining(tag, keyword)) {
+        return tag;
+      }
+      cursor = end + 1;
+    }
+    return '';
+  }
+
+  // 最靠后的带 id 的 <svg>(话题分类徽章图标外层是 fa 包装 svg,真正图标是内层 svg[id])。
+  private static lastSvgWithId(html: string): string {
+    const lower: string = html.toLowerCase();
+    let cursor: number = 0;
+    let found: string = '';
+    while (cursor < html.length) {
+      const start: number = lower.indexOf('<svg', cursor);
+      if (start < 0) {
+        break;
+      }
+      const end: number = CookedHtmlParser.findTagEnd(html, start);
+      if (end < 0) {
+        break;
+      }
+      const tag: string = html.substring(start, end + 1);
+      if (CookedHtmlParser.extractAttr(tag, 'id').length > 0) {
+        found = tag;
+      }
+      cursor = end + 1;
+    }
+    return found;
+  }
+
+  // 第一个 class 含 keyword 的元素的开标签(用于取其属性,如 badge-category span 的 style/data-*)。
+  private static firstOpenTagByClass(html: string, keyword: string): string {
+    const lower: string = html.toLowerCase();
+    let cursor: number = 0;
+    while (cursor < html.length) {
+      const start: number = lower.indexOf('<', cursor);
+      if (start < 0) {
+        return '';
+      }
+      const end: number = CookedHtmlParser.findTagEnd(html, start);
+      if (end < 0) {
+        return '';
+      }
+      const tag: string = html.substring(start, end + 1);
+      if (!CookedHtmlParser.isClosingTag(tag) && CookedHtmlParser.hasClassContaining(tag, keyword)) {
+        return tag;
+      }
+      cursor = end + 1;
+    }
+    return '';
+  }
+
+  // 第一个 class 含 keyword 的元素的内部 HTML。
+  private static firstElementInnerByClass(html: string, keyword: string): string {
+    const lower: string = html.toLowerCase();
+    let cursor: number = 0;
+    while (cursor < html.length) {
+      const start: number = lower.indexOf('<', cursor);
+      if (start < 0) {
+        return '';
+      }
+      const end: number = CookedHtmlParser.findTagEnd(html, start);
+      if (end < 0) {
+        return '';
+      }
+      const tag: string = html.substring(start, end + 1);
+      if (!CookedHtmlParser.isClosingTag(tag) && CookedHtmlParser.hasClassContaining(tag, keyword)) {
+        const name: string = CookedHtmlParser.getTagName(tag);
+        const closeStart: number = CookedHtmlParser.findClosingTag(html, end + 1, name);
+        if (closeStart < 0) {
+          return '';
+        }
+        return html.substring(end + 1, closeStart);
+      }
+      cursor = end + 1;
+    }
+    return '';
+  }
+
+  // 第一个指定标签名元素的内部 HTML。
+  private static firstElementInner(html: string, tagName: string): string {
+    const lower: string = html.toLowerCase();
+    const open: number = lower.indexOf(`<${tagName}`);
+    if (open < 0) {
+      return '';
+    }
+    const openEnd: number = CookedHtmlParser.findTagEnd(html, open);
+    if (openEnd < 0) {
+      return '';
+    }
+    const closeStart: number = CookedHtmlParser.findClosingTag(html, openEnd + 1, tagName);
+    if (closeStart < 0) {
+      return '';
+    }
+    return html.substring(openEnd + 1, closeStart);
   }
 
   private static unwrapNestedQuotes(blocks: RichBlock[]): RichBlock[] {

@@ -13,8 +13,13 @@ import { VideoPlayer } from './VideoPlayer';
 import { FaIconView, getFaIcon, FaIconDefinition } from './FaIcon';
 import { Poll, PollVoteResult } from '../../models/TopicDetail';
 import { PollView } from './PollView';
+import { UserAvatar } from './UserAvatar';
+import { TopicCategoryBadge } from './TopicCategoryBadge';
+import { User } from '../../models/User';
+import { TopicCategory } from '../../models/Topic';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { MathRenderService, MathImage } from '../../services/content/MathRenderService';
+import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 
 const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
@@ -22,14 +27,20 @@ const LOG_TAG: string = '[ArkDO][PostRichContent]';
 const SMALL_IMAGE_MAX: number = 48;
 // 剧透打码字符(块级与行内共用)。想换观感改这一行即可,如 ░(浅)/▒(中)/▓(深)/█(实心)。
 const SPOILER_REDACT_CHAR: string = '▒';
-// 打码字符与图片占位块的颜色,接近正文字色。
-const SPOILER_REDACT_COLOR: string = '#374151';
 // 公式位图染色矩阵(4×5):黑色字形按 alpha 覆盖度染成正文色 #374151(55,65,81)。
 // 输入 rgb=0,只用 alpha 通道推出目标色,alpha 原样保留。深色主题改这三个分量即可。
 const MATH_TINT_MATRIX: number[] = [
   0, 0, 0, 0.216, 0,
   0, 0, 0, 0.255, 0,
   0, 0, 0, 0.318, 0,
+  0, 0, 0, 1, 0
+];
+
+// 深色主题版:染成正文色 #E7E9EE(231,233,238)/255=(0.906,0.914,0.933),否则公式深灰贴深底看不见。
+const MATH_TINT_MATRIX_DARK: number[] = [
+  0, 0, 0, 0.906, 0,
+  0, 0, 0, 0.914, 0,
+  0, 0, 0, 0.933, 0,
   0, 0, 0, 1, 0
 ];
 
@@ -58,6 +69,8 @@ export struct PostRichContent {
   // @State 副本(持有与 polls 相同的 @Observed 实例)。PollView 的 @ObjectLink 必须以「状态变量的数组项」
   // 作为数据源,才能在投票/撤销就地改 Poll 字段后重渲染;若直接源自普通输入属性 polls,deep 变更不会传播。
   @State private renderablePolls: Poll[] = [];
+  // 当前是否深色渲染(ThemeManager 维护):公式位图 colorFilter 矩阵按它切换,资源色不受影响。
+  @StorageProp(APP_IS_DARK_STORAGE_KEY) private appIsDark: boolean = false;
   @State private expandedDisclosures: string[] = [];
   // 已揭示的剧透块/行内剧透段。key 是块路径(嵌套时形如 "2-q0-s1"),块级与行内共用。
   @State private revealedSpoilers: string[] = [];
@@ -192,6 +205,8 @@ export struct PostRichContent {
       this.HeadingBlock(block, index > 0 ? 14 : 0, path)
     } else if (block.type === RichBlockType.QUOTE) {
       this.QuoteBlock(block, index > 0 ? 12 : 0, path)
+    } else if (block.type === RichBlockType.TOPIC_QUOTE) {
+      this.TopicQuoteBlock(block, index > 0 ? 12 : 0, path)
     } else if (block.type === RichBlockType.CALLOUT) {
       this.CalloutBlock(block, index > 0 ? 12 : 0, path)
     } else if (block.type === RichBlockType.CODE) {
@@ -207,7 +222,7 @@ export struct PostRichContent {
     } else if (block.type === RichBlockType.DIVIDER) {
       Divider()
         .strokeWidth(1)
-        .color('#E5E7EB')
+        .color($r('app.color.border'))
         .margin({ top: index > 0 ? 14 : 4, bottom: 4 })
     } else if (block.type === RichBlockType.POLL) {
       this.PollBlock(block, index > 0 ? 12 : 0)
@@ -255,7 +270,7 @@ export struct PostRichContent {
     }
     .fontSize(15)
     .lineHeight(22)
-    .fontColor('#374151')
+    .fontColor($r('app.color.text_secondary'))
     .copyOption(CopyOptions.LocalDevice)
     .width('100%')
     .margin({ top: marginTop })
@@ -272,14 +287,14 @@ export struct PostRichContent {
         // 行内 emoji 用一个打码字符占位,隐藏时不加载图片。
         Span(SPOILER_REDACT_CHAR)
           .fontSize(15)
-          .fontColor(SPOILER_REDACT_COLOR)
+          .fontColor($r('app.color.text_secondary'))
           .onClick(() => {
             this.toggleSpoiler(path);
           })
       } else {
         Span(this.redactChars(token.text))
           .fontSize(token.type === RichInlineType.CODE || token.code ? 14 : 15)
-          .fontColor(SPOILER_REDACT_COLOR)
+          .fontColor($r('app.color.text_secondary'))
           .onClick(() => {
             this.toggleSpoiler(path);
           })
@@ -293,12 +308,12 @@ export struct PostRichContent {
           .height(this.mathImageOf(token.text, false).cssHeight)
           .margin({ left: 1, right: 1 })
           .verticalAlign(ImageSpanAlignment.BASELINE)
-          .colorFilter(MATH_TINT_MATRIX)
+          .colorFilter(this.appIsDark ? MATH_TINT_MATRIX_DARK : MATH_TINT_MATRIX)
       } else {
         Span(token.text)
           .fontSize(14)
           .fontFamily('monospace')
-          .fontColor('#6B7280')
+          .fontColor($r('app.color.text_secondary'))
       }
     } else if (token.type === RichInlineType.IMAGE && token.src && token.src.length > 0) {
       ImageSpan(token.src)
@@ -327,7 +342,7 @@ export struct PostRichContent {
       }
       Span(token.text)
         .fontSize(15)
-        .fontColor('#2563EB')
+        .fontColor($r('app.color.brand'))
         .fontWeight(token.bold ? FontWeight.Bold : FontWeight.Normal)
         .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
         .onClick(() => {
@@ -339,7 +354,7 @@ export struct PostRichContent {
           .fontSize(14)
           .fontFamily('monospace')
           .fontColor('#B45309')
-          .backgroundColor('#FEF3C7')
+          .backgroundColor($r('app.color.warn_soft_bg'))
           .onClick(() => {
             this.toggleSpoiler(path);
           })
@@ -348,13 +363,13 @@ export struct PostRichContent {
           .fontSize(14)
           .fontFamily('monospace')
           .fontColor('#B45309')
-          .backgroundColor('#FEF3C7')
+          .backgroundColor($r('app.color.warn_soft_bg'))
       }
     } else if (token.spoiler) {
       // 已揭示的行内剧透文字:再点一下恢复遮蔽(链接/emoji 保持各自的点击行为)。
       Span(token.text)
         .fontSize(15)
-        .fontColor('#374151')
+        .fontColor($r('app.color.text_secondary'))
         .fontWeight(token.bold ? FontWeight.Bold : FontWeight.Normal)
         .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
         .onClick(() => {
@@ -363,7 +378,7 @@ export struct PostRichContent {
     } else {
       Span(token.text)
         .fontSize(15)
-        .fontColor('#374151')
+        .fontColor($r('app.color.text_secondary'))
         .fontWeight(token.bold ? FontWeight.Bold : FontWeight.Normal)
         .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
     }
@@ -379,7 +394,7 @@ export struct PostRichContent {
     .fontSize(this.getHeadingFontSize(block.level ? block.level : 2))
     .lineHeight(this.getHeadingLineHeight(block.level ? block.level : 2))
     .fontWeight(FontWeight.Bold)
-    .fontColor('#111827')
+    .fontColor($r('app.color.text_primary'))
     .width('100%')
     .margin({ top: marginTop })
   }
@@ -397,14 +412,94 @@ export struct PostRichContent {
     }
     .width('100%')
     .padding({ left: 10, right: 10, top: 10, bottom: 10 })
+    .backgroundColor($r('app.color.fill_subtle'))
+    .border({
+      width: { left: 3 },
+      color: $r('app.color.border')
+    })
+    // .borderRadius(8)
+    .margin({ top: marginTop })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  // 话题/帖子引用卡(<aside class="quote" data-topic>):头部(圆头像 + 标题 + 分类徽章 + 右箭头)+ 截断预览正文。
+  // 点头部/箭头跳原帖详情(不就地展开);正文预览走 BlockView 同实例递归渲染(支持图片/嵌套),不新建 PostRichContent。
+  @Builder
+  private TopicQuoteBlock(block: RichBlock, marginTop: number, path: string) {
+    Column() {
+      // 头部:头像 + (标题 / 分类) + 右箭头。整块可点 → 跳原帖详情。
+      Row() {
+        UserAvatar({ user: this.quoteAvatarUser(block), avatarSize: 24 })
+          .margin({ right: 8 })
+
+        Column() {
+          if (block.quoteTitle && block.quoteTitle.length > 0) {
+            Text(block.quoteTitle)
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#374151')
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          if (block.quoteCategory) {
+            Row() {
+              TopicCategoryBadge({ category: block.quoteCategory as TopicCategory })
+            }
+            .margin({ top: 4 })
+          }
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        FaIconView({ icon: this.faIconOf('chevron-right'), color: '#9CA3AF', iconSize: 16 })
+          .margin({ left: 4, top: 2 })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Top)
+      .onClick(() => {
+        if (block.href && block.href.length > 0) {
+          this.openLink(block.href);
+        }
+      })
+
+      // 截断预览正文:解析预览 cooked → BlockView 同实例递归渲染。
+      Column() {
+        ForEach(this.quotePreviewBlocks(block), (child: RichBlock, index: number) => {
+          this.BlockView(child, index, `${path}-tq${index}`)
+        }, (child: RichBlock, index: number) => this.blockKey(child, index))
+      }
+      .width('100%')
+      .margin({ top: 8 })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .padding({ left: 10, right: 10, top: 10, bottom: 10 })
     .backgroundColor('#F8FAFC')
     .border({
       width: { left: 3 },
       color: '#CBD5E1'
     })
-    // .borderRadius(8)
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
+  }
+
+  // 用直链头像 URL 构造最小 User,复用 UserAvatar 的 host webview 取图 + 圆形裁剪。
+  private quoteAvatarUser(block: RichBlock): User {
+    return {
+      id: 0,
+      username: block.quoteAuthor ? block.quoteAuthor : '',
+      avatarTemplate: block.quoteAvatarUrl ? block.quoteAvatarUrl : ''
+    };
+  }
+
+  // 解析引用预览 cooked 成块,交 BlockView 渲染。空预览返回空数组(只显示头部)。
+  private quotePreviewBlocks(block: RichBlock): RichBlock[] {
+    return CookedHtmlParser.parse(block.text ? block.text : '');
+  }
+
+  private faIconOf(id: string): FaIconDefinition {
+    const def: FaIconDefinition | undefined = getFaIcon(id);
+    return def ? def : { id, rawfilePath: `fa_icons/${id}.svg` };
   }
 
   // callout 标题专用行内渲染:整段染成主色(继承外层 Text 的加粗),链接仍可点(主色+下划线),
@@ -511,7 +606,7 @@ export struct PostRichContent {
         if (block.language && block.language.length > 0) {
           Text(block.language)
             .fontSize(12)
-            .fontColor('#6B7280')
+            .fontColor($r('app.color.text_secondary'))
             .fontFamily('monospace')
             .layoutWeight(1)
         } else {
@@ -524,11 +619,11 @@ export struct PostRichContent {
             .height(13)
             .objectFit(ImageFit.Contain)
             .renderMode(ImageRenderMode.Template)
-            .fillColor('#6B7280')
+            .fillColor($r('app.color.text_secondary'))
             .draggable(false)
           Text('复制')
             .fontSize(12)
-            .fontColor('#6B7280')
+            .fontColor($r('app.color.text_secondary'))
             .margin({ left: 4 })
         }
         .padding({ left: 8, right: 8, top: 4, bottom: 4 })
@@ -546,7 +641,7 @@ export struct PostRichContent {
           .fontSize(13)
           .lineHeight(19)
           .fontFamily('monospace')
-          .fontColor('#111827')
+          .fontColor($r('app.color.text_primary'))
           .textAlign(TextAlign.Start)
           .constraintSize({ minWidth: '100%' })
           .copyOption(CopyOptions.LocalDevice)
@@ -558,7 +653,7 @@ export struct PostRichContent {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-    .backgroundColor('#F3F4F6')
+    .backgroundColor($r('app.color.fill_subtle'))
     .borderRadius(8)
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
@@ -597,7 +692,7 @@ export struct PostRichContent {
           .aspectRatio(this.getImageAspectRatio(block))
           .constraintSize({ maxHeight: 520 })
           .objectFit(ImageFit.Contain)
-          .backgroundColor('#F3F4F6')
+          .backgroundColor($r('app.color.fill_subtle'))
           .onClick(() => {
             this.openImageLink(block);
           })
@@ -606,7 +701,7 @@ export struct PostRichContent {
           .width('100%')
           .height(260)
           .objectFit(ImageFit.Contain)
-          .backgroundColor('#F3F4F6')
+          .backgroundColor($r('app.color.fill_subtle'))
           .onClick(() => {
             this.openImageLink(block);
           })
@@ -625,7 +720,7 @@ export struct PostRichContent {
         Row() {
           Text(block.ordered ? `${index + 1}.` : '•')
             .fontSize(15)
-            .fontColor('#6B7280')
+            .fontColor($r('app.color.text_secondary'))
             .width(24)
 
           Column() {
@@ -670,7 +765,7 @@ export struct PostRichContent {
             }
             Text(block.domain ? block.domain : '')
               .fontSize(14)
-              .fontColor('#6B7280')
+              .fontColor($r('app.color.text_secondary'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .layoutWeight(1)
@@ -683,7 +778,7 @@ export struct PostRichContent {
           Text(block.title)
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
-            .fontColor('#2563EB')
+            .fontColor($r('app.color.brand'))
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
@@ -694,7 +789,7 @@ export struct PostRichContent {
           Text(block.description)
             .fontSize(15)
             .lineHeight(22)
-            .fontColor('#222222')
+            .fontColor($r('app.color.text_primary'))
             .wordBreak(WordBreak.BREAK_ALL)
             .maxLines(3)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -704,10 +799,10 @@ export struct PostRichContent {
       }
       .width('100%')
       .padding(16)
-      .backgroundColor('#FFFFFF')
+      .backgroundColor($r('app.color.surface_card'))
       .borderRadius(2)
-      .border({ width: 1, color: '#D3D3D3' })
-      .outline({ width: 4, color: '#F2F2F2', radius: 2 })
+      .border({ width: 1, color: $r('app.color.border') })
+      .outline({ width: 4, color: $r('app.color.page_bg_gray'), radius: 2 })
       .alignItems(HorizontalAlign.Start)
       .onClick(() => {
         this.openLink(block.href ? block.href : '');
@@ -759,7 +854,7 @@ export struct PostRichContent {
             .width(this.mathImageOf(block.text, true).cssWidth)
             .height(this.mathImageOf(block.text, true).cssHeight)
             .objectFit(ImageFit.Contain)
-            .colorFilter(MATH_TINT_MATRIX)
+            .colorFilter(this.appIsDark ? MATH_TINT_MATRIX_DARK : MATH_TINT_MATRIX)
             .draggable(false)
         }
         .scrollable(ScrollDirection.Horizontal)
@@ -770,7 +865,7 @@ export struct PostRichContent {
         Text(block.text ? block.text : '')
           .fontSize(14)
           .fontFamily('monospace')
-          .fontColor('#6B7280')
+          .fontColor($r('app.color.text_secondary'))
           .width('100%')
           .textAlign(TextAlign.Center)
       }
@@ -793,17 +888,17 @@ export struct PostRichContent {
         Text(block.text)
           .fontSize(14)
           .lineHeight(20)
-          .fontColor('#6B7280')
+          .fontColor($r('app.color.text_secondary'))
           .width('100%')
           .margin({ top: 6 })
       }
     }
     .width('100%')
     .padding({ left: 10, right: 10, top: 9, bottom: 9 })
-    .backgroundColor('#FFF7ED')
+    .backgroundColor($r('app.color.warn_soft_bg'))
     .border({
       width: 1,
-      color: '#FED7AA'
+      color: $r('app.color.warn_soft_bg')
     })
     .borderRadius(8)
     .margin({ top: marginTop })
@@ -816,7 +911,7 @@ export struct PostRichContent {
       Row() {
         Text('▼')
           .fontSize(18)
-          .fontColor('#111827')
+          .fontColor($r('app.color.text_primary'))
           .width(28)
           .textAlign(TextAlign.Center)
           .rotate({ angle: this.isDisclosureExpanded(index) ? 0 : -90 })
@@ -824,7 +919,7 @@ export struct PostRichContent {
         Text(this.getDisclosureTitle(block))
           .fontSize(16)
           .fontWeight(FontWeight.Regular)
-          .fontColor('#111827')
+          .fontColor($r('app.color.text_primary'))
           .layoutWeight(1)
       }
       .width('100%')
@@ -846,7 +941,7 @@ export struct PostRichContent {
       }
     }
     .width('100%')
-    .backgroundColor('#F5F5F5')
+    .backgroundColor($r('app.color.fill_subtle'))
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
   }
@@ -916,7 +1011,7 @@ export struct PostRichContent {
         .width('60%')
         .aspectRatio(this.hasImageSize(block) ? this.getImageAspectRatio(block) : 1.6)
         .constraintSize({ maxHeight: 220 })
-        .backgroundColor(SPOILER_REDACT_COLOR)
+        .backgroundColor($r('app.color.text_secondary'))
         .borderRadius(4)
         .margin({ top: index > 0 ? 10 : 0 })
     } else if (block.blocks && block.blocks.length > 0) {
@@ -928,7 +1023,7 @@ export struct PostRichContent {
       Text(this.redactChars(this.redactedBlockText(block)))
         .fontSize(15)
         .lineHeight(22)
-        .fontColor(SPOILER_REDACT_COLOR)
+        .fontColor($r('app.color.text_secondary'))
         .width('100%')
         .margin({ top: index > 0 ? 10 : 0 })
     }
