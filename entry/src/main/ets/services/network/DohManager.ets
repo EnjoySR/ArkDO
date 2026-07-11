@@ -13,6 +13,9 @@ const PREF_KEY_ID_SEQ: string = 'doh_id_seq';
 // 一次性迁移标记:把早期版本种下的 auto 翻成 secure_only(AUTO 实测不走 DoH)。只跑一次,
 // 之后用户仍可自行改回 AUTO。
 const PREF_KEY_MIGRATED_SECURE: string = 'doh_migrated_secure_v1';
+// AppStorage 键:把当前 DoH 摘要(关闭 / 生效服务器名)镜像成响应式数据源,供设置页
+// @StorageProp 订阅。preferences 是磁盘态无法被 ArkUI 观察,靠它跨页即时刷新状态。
+export const DOH_SUMMARY_STORAGE_KEY: string = 'doh_summary';
 
 /** 系统内置默认 DoH:不可删除,首次启动种子数据,也是删除 active 后的兜底。 */
 export const DOH_BUILTIN_ID: string = 'builtin-default';
@@ -190,6 +193,8 @@ export class DohManager {
   static applyActive(context: common.Context): void {
     const enabled: boolean = DohManager.isEnabled(context);
     const active: DohServer = DohManager.getActiveServer(context);
+    // 每次生效即把摘要同步进 AppStorage,设置页 @StorageProp 随之刷新(跨页即时)。
+    AppStorage.setOrCreate(DOH_SUMMARY_STORAGE_KEY, enabled ? active.name : '已关闭');
     try {
       if (!enabled || active.url.length === 0) {
         webview.WebviewController.setHttpDns(webview.SecureDnsMode.OFF, '');

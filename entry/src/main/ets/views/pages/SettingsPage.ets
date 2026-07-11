@@ -3,7 +3,7 @@ import { bundleManager, common } from '@kit.AbilityKit';
 import { DownloadService } from '../../services/content/DownloadService';
 import { FileLogger } from '../../services/logging/FileLogger';
 import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
-import { DohManager } from '../../services/network/DohManager';
+import { DohManager, DOH_SUMMARY_STORAGE_KEY } from '../../services/network/DohManager';
 import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
@@ -24,7 +24,8 @@ export struct SettingsPage {
   // 主动过盾:通知 RootTabPage 打开交互式 Cloudflare 验证页(唯一能真正拿到新 cf_clearance 的路径)。
   onActiveChallenge: () => void = () => {};
   @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
-  @State private dohSummary: string = '';
+  // DoH 摘要:订阅 AppStorage,DoH 配置页改动即时反映到设置页(pop 回来不重建也能刷新)。
+  @StorageProp(DOH_SUMMARY_STORAGE_KEY) dohSummary: string = '已关闭';
   @State private appVersion: string = '';
   // 日志工具:大小标签实时展示,详细日志开关持久化,导出时防重复点击。
   @State private logSizeLabel: string = '';
@@ -37,7 +38,11 @@ export struct SettingsPage {
     this.readAppVersion();
     this.verboseLog = FileLogger.isVerbose();
     this.refreshLogSize();
-    this.refreshDohSummary();
+    // dohSummary 走 @StorageProp 订阅,无需再手动读取。但兜底一次:若 AppStorage 尚未被
+    // DohManager 写入(理论上 init 已写),显式 applyActive 触发一次同步。
+    if (AppStorage.get(DOH_SUMMARY_STORAGE_KEY) === undefined) {
+      DohManager.applyActive(getContext(this));
+    }
     this.enabledFeeds = FeedPrefs.getEnabledKeys(getContext(this));
   }
 
@@ -446,15 +451,6 @@ export struct SettingsPage {
 
   private setThemeMode(mode: ThemeMode): void {
     ThemeManager.setMode(getContext(this), mode);
-  }
-
-  private refreshDohSummary(): void {
-    const context: common.Context = getContext(this);
-    if (!DohManager.isEnabled(context)) {
-      this.dohSummary = '已关闭';
-      return;
-    }
-    this.dohSummary = DohManager.getActiveServer(context).name;
   }
 
   private getThemeModeLabel(): string {

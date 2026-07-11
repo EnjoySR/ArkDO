@@ -518,14 +518,22 @@ export struct DohSettingsPage {
     // 换新数组引用,促使 ForEach 按新 key(含选中位)重新比对,选中圆点才会更新。
     this.rows = this.rows.slice();
     DohManager.setActive(getContext(this), id);
-    this.onDohApplied();
-    this.showToast('已切换 DoH,正在重载');
+    // DoH 未启用时仅记录选择(下次开启才生效),不重载宿主也不提示重载,避免误导。
+    if (this.dohEnabled) {
+      this.onDohApplied();
+      this.showToast('已切换 DoH,正在重载');
+    } else {
+      this.showToast('已切换 DoH');
+    }
   }
 
   private setMode(mode: DohResolveMode): void {
     this.mode = mode;
     DohManager.setMode(getContext(this), mode);
-    this.onDohApplied();
+    // 同上:关闭态改模式不生效,不触发重载。
+    if (this.dohEnabled) {
+      this.onDohApplied();
+    }
   }
 
   private handleAdd(name: string, url: string): void {
@@ -556,8 +564,8 @@ export struct DohSettingsPage {
           const wasActive: boolean = this.activeId === server.id;
           DohManager.removeServer(getContext(this), server.id);
           this.reload();
-          if (wasActive) {
-            // 删的是当前项,已回退内置默认并重新下发,需重载宿主。
+          if (wasActive && this.dohEnabled) {
+            // 删的是当前项,已回退内置默认并重新下发,需重载宿主(仅启用态)。
             this.onDohApplied();
           }
           this.showToast('已删除');
