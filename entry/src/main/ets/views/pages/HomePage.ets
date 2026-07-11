@@ -136,8 +136,6 @@ export struct HomePage {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
 
-        this.JumpButton()
-
         // 仅在会话已确认且已登录时显示铃铛(未登录/未确认不出现)。
         if (this.hasCheckedSession && this.isLoggedIn) {
           NotificationBell({
@@ -344,26 +342,6 @@ export struct HomePage {
     })
   }
 
-  // 调试按钮:点击弹出输入框,填帖子 ID 直接跳转详情。
-  @Builder
-  private JumpButton() {
-    Button() {
-      SymbolGlyph($r('sys.symbol.arrow_right_to_line'))
-        .fontSize(22)
-        .fontColor([$r('app.color.brand')])
-        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-    }
-    .width(42)
-    .height(42)
-    .borderRadius(21)
-    .backgroundColor($r('app.color.surface_muted'))
-    .padding(0)
-    .margin({ right: 10 })
-    .onClick(() => {
-      this.jumpDialogController.open();
-    })
-  }
-
   private jumpToTopic(topicId: number): void {
     Log.i(`${LOG_TAG} debug jump to topic topicId=${topicId}`);
     this.onOpenTopicById(topicId);
@@ -414,6 +392,14 @@ export struct HomePage {
       .onClick(() => {
         this.onAccountClick();
       })
+      // 长按头像:弹出输入框填帖子 ID,直接跳转到指定帖子详情。
+      // Button 自带点击识别器会抢占触摸,须用 priorityGesture 让长按优先于内置手势。
+      .priorityGesture(
+        LongPressGesture({ repeat: false, duration: 500 })
+          .onAction(() => {
+            this.jumpDialogController.open();
+          })
+      )
     }
   }
 
