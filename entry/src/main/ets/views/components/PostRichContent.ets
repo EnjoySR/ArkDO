@@ -36,11 +36,12 @@ const MATH_TINT_MATRIX: number[] = [
   0, 0, 0, 1, 0
 ];
 
-// 深色主题版:染成正文色 #E7E9EE(231,233,238)/255=(0.906,0.914,0.933),否则公式深灰贴深底看不见。
+// 深色主题版:染成正文色 text_body 暗值 #C9CED7(201,206,215)/255=(0.788,0.808,0.843),
+// 与暗色正文文字同色(明色矩阵上方 #374151 亦与正文 text_body 明值一致),否则公式贴深底看不见。
 const MATH_TINT_MATRIX_DARK: number[] = [
-  0, 0, 0, 0.906, 0,
-  0, 0, 0, 0.914, 0,
-  0, 0, 0, 0.933, 0,
+  0, 0, 0, 0.788, 0,
+  0, 0, 0, 0.808, 0,
+  0, 0, 0, 0.843, 0,
   0, 0, 0, 1, 0
 ];
 
@@ -270,7 +271,8 @@ export struct PostRichContent {
     }
     .fontSize(15)
     .lineHeight(22)
-    .fontColor($r('app.color.text_secondary'))
+    // 正文主体色:原 #374151(深石板灰)。勿用 text_secondary(#6B7280),那是次要/meta 灰,会让正文发淡。
+    .fontColor($r('app.color.text_body'))
     .copyOption(CopyOptions.LocalDevice)
     .width('100%')
     .margin({ top: marginTop })
@@ -287,14 +289,14 @@ export struct PostRichContent {
         // 行内 emoji 用一个打码字符占位,隐藏时不加载图片。
         Span(SPOILER_REDACT_CHAR)
           .fontSize(15)
-          .fontColor($r('app.color.text_secondary'))
+          .fontColor($r('app.color.text_body'))
           .onClick(() => {
             this.toggleSpoiler(path);
           })
       } else {
         Span(this.redactChars(token.text))
           .fontSize(token.type === RichInlineType.CODE || token.code ? 14 : 15)
-          .fontColor($r('app.color.text_secondary'))
+          .fontColor($r('app.color.text_body'))
           .onClick(() => {
             this.toggleSpoiler(path);
           })
@@ -369,7 +371,7 @@ export struct PostRichContent {
       // 已揭示的行内剧透文字:再点一下恢复遮蔽(链接/emoji 保持各自的点击行为)。
       Span(token.text)
         .fontSize(15)
-        .fontColor($r('app.color.text_secondary'))
+        .fontColor($r('app.color.text_body'))
         .fontWeight(token.bold ? FontWeight.Bold : FontWeight.Normal)
         .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
         .onClick(() => {
@@ -378,7 +380,7 @@ export struct PostRichContent {
     } else {
       Span(token.text)
         .fontSize(15)
-        .fontColor($r('app.color.text_secondary'))
+        .fontColor($r('app.color.text_body'))
         .fontWeight(token.bold ? FontWeight.Bold : FontWeight.Normal)
         .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
     }
@@ -437,7 +439,7 @@ export struct PostRichContent {
             Text(block.quoteTitle)
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
-              .fontColor('#374151')
+              .fontColor($r('app.color.text_body'))
               .maxLines(2)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
           }
