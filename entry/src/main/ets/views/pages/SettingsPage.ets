@@ -1,6 +1,5 @@
 import { Log } from '../../services/logging/Log';
 import { bundleManager, common } from '@kit.AbilityKit';
-import { AppConstants } from '../../common/constants/AppConstants';
 import { DownloadService } from '../../services/content/DownloadService';
 import { FileLogger } from '../../services/logging/FileLogger';
 import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
@@ -20,11 +19,7 @@ const CARD_GAP: number = 12;
 // 设置与诊断日志:从个人中心页拆出的独立子页,由个人中心右上角齿轮入口 push 进入。
 @Component
 export struct SettingsPage {
-  // 账号与安全入口仅登录态可用,用户名用于拼站内偏好页链接。
-  isLoggedIn: boolean = false;
-  username: string = '';
   onBack: () => void = () => {};
-  onOpenWeb: (url: string, title?: string) => void = () => {};
   onOpenDoh: () => void = () => {};
   // 主动过盾:通知 RootTabPage 打开交互式 Cloudflare 验证页(唯一能真正拿到新 cf_clearance 的路径)。
   onActiveChallenge: () => void = () => {};
@@ -91,7 +86,7 @@ export struct SettingsPage {
 
         Scroll() {
           Column() {
-            // 卡片:外观 / DoH / 账号与安全 / 关于
+            // 卡片:外观 / DoH / 刷新通行证 / 关于
             Column() {
               this.AppearanceCell()
               this.HairlineInset()
@@ -103,12 +98,6 @@ export struct SettingsPage {
               this.SettingCell($r('sys.symbol.checkmark_shield'), '刷新 Cloudflare 通行证', '', () => {
                 this.onActiveChallenge();
               })
-              if (this.isLoggedIn) {
-                this.HairlineInset()
-                this.SettingCell($r('sys.symbol.security_shield'), '账号与安全', '', () => {
-                  this.openUserWebPage('/preferences/security', '账号与安全');
-                })
-              }
               this.HairlineInset()
               this.SettingCell($r('sys.symbol.info_circle'), '关于 ArkDO', this.getVersionLabel(), undefined)
             }
@@ -620,12 +609,5 @@ export struct SettingsPage {
     } catch (err) {
       Log.i(`${LOG_TAG} toast failed: ${message}`);
     }
-  }
-
-  private openUserWebPage(subPath: string, title?: string): void {
-    if (this.username.length === 0) {
-      return;
-    }
-    this.onOpenWeb(`${AppConstants.BASE_URL}/u/${encodeURIComponent(this.username)}${subPath}`, title);
   }
 }

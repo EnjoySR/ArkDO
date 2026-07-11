@@ -276,13 +276,8 @@ export struct RootTabPage {
     } else if (name === AppRouteName.SETTINGS) {
       NavDestination() {
         SettingsPage({
-          isLoggedIn: this.currentUser !== undefined,
-          username: this.currentUser?.username ?? '',
           onBack: () => {
             this.popNavigation();
-          },
-          onOpenWeb: (url: string, title?: string) => {
-            this.openWebPage(url, title);
           },
           onOpenDoh: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DOH_SETTINGS, buildDohSettingsRouteParam('settings')));
