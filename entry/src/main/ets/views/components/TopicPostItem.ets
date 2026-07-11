@@ -117,36 +117,45 @@ export struct TopicPostItem {
   build() {
     ListItem() {
       Column() {
+        // 正文区:左右留白只加在这层内容上,红线才能移到外层通栏铺满(不受 10 留白约束)。
+        Column() {
+          this.PostAuthorHeader()
+
+          PostRichContent({
+            cookedHtml: this.post.cookedHtml,
+            fallbackText: this.post.plainText,
+            onOpenImages: this.onOpenImages,
+            onOpenLink: this.onOpenLink,
+            onResolveMedia: this.onResolveMedia,
+            polls: this.post.polls ? this.post.polls : [],
+            onVote: (poll: Poll, optionIds: string[]) => {
+              return this.onVote(this.post, poll, optionIds);
+            },
+            onRemoveVote: (poll: Poll) => {
+              return this.onRemoveVote(this.post, poll);
+            }
+          })
+            .width('100%')
+            .margin({ top: 12 })
+
+          this.PostFooter()
+        }
+        .width('100%')
+        .padding({ left: 10, right: 10 })
+        .alignItems(HorizontalAlign.Start)
+
+        // 上次访问边界:红线画在这一楼(最后一条已读)的底边,替代常规灰色分割线 —— 楼间只此一条。
+        // 放在留白层之外 → 左右不缩、通栏铺到屏幕两边。
         if (this.showLastVisitedLine) {
           this.LastVisitedDivider()
         }
-
-        this.PostAuthorHeader()
-
-        PostRichContent({
-          cookedHtml: this.post.cookedHtml,
-          fallbackText: this.post.plainText,
-          onOpenImages: this.onOpenImages,
-          onOpenLink: this.onOpenLink,
-          onResolveMedia: this.onResolveMedia,
-          polls: this.post.polls ? this.post.polls : [],
-          onVote: (poll: Poll, optionIds: string[]) => {
-            return this.onVote(this.post, poll, optionIds);
-          },
-          onRemoveVote: (poll: Poll) => {
-            return this.onRemoveVote(this.post, poll);
-          }
-        })
-          .width('100%')
-          .margin({ top: 12 })
-
-        this.PostFooter()
       }
       .width('100%')
-      // 左右留白由本组件持有(而非 List 的 padding):高亮背景才能通栏铺满屏幕宽。
-      .padding({ left: 10, right: 10, top: 12, bottom: 12 })
+      // 上下留白由外层持有(高亮背景通栏);左右留白下放到内层正文区,给红线让出通栏空间。
+      .padding({ top: 12, bottom: 12 })
+      // 锚楼底边交给红线接管,撤掉灰线,避免红线上方再压一条灰线成双。
       .border({
-        width: { bottom: 1 },
+        width: { bottom: this.showLastVisitedLine ? 0 : 1 },
         color: $r('app.color.border')
       })
       .alignItems(HorizontalAlign.Start)
@@ -176,7 +185,9 @@ export struct TopicPostItem {
         .layoutWeight(1)
     }
     .width('100%')
-    .margin({ bottom: 10 })
+    // 底部放置:与上方 footer 拉开间距;下方留白由本楼 padding.bottom(12)提供,红线居中于楼间。
+    // 已在正文留白层之外,width('100%')即通栏,无需再做左右补偿。
+    .margin({ top: 12 })
   }
 
   @Builder
