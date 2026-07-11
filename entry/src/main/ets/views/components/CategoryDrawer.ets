@@ -164,14 +164,16 @@ export struct CategoryDrawer {
           .margin({ left: 6, right: 4 })
       } else if (!p.isChild && this.hasChildren(p.category.id)) {
         // 箭头单独热区:点它只折叠/展开子版块,不进入版块(行其余部分才是「浏览该版块」)。
+        // 热区做宽(整行高 × 56)且右移贴边,减少与「浏览版块」的误触。
         Row() {
           SymbolGlyph($r('sys.symbol.chevron_right'))
-            .fontSize(14)
+            .fontSize(16)
             .fontColor([$r('app.color.text_faint')])
             .rotate({ angle: this.isExpanded(p.category.id) ? 90 : 0 })
         }
         .height('100%')
-        .padding({ left: 10, right: 4 })
+        .width(56)
+        .margin({ right: -16 })
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
           this.toggleExpand(p.category.id);
