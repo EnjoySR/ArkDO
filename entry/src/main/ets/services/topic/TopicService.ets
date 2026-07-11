@@ -62,11 +62,34 @@ interface DiscourseTopicDetail {
   last_read_post_number?: number;
   highest_post_number?: number;
   unread_posts?: number;
+  user_badges?: DiscourseUserBadges;
 }
 
 interface DiscoursePostStream {
   posts?: DiscoursePost[];
   stream?: number[];
+}
+
+// 楼层作者状态:user_status.emoji 是具名表情短名(lollipop / tieba_003 …),经 EmojiUrlRegistry 查 url。
+interface DiscourseUserStatus {
+  emoji?: string;
+  description?: string;
+}
+
+// 顶层 user_badges:users 按 user_id 给出展示的 badge_ids,badges 按 id 给出图标名(FontAwesome)。
+interface DiscourseUserBadges {
+  users?: Record<string, DiscourseUserBadgeUser>;
+  badges?: Record<string, DiscourseBadgeDef>;
+}
+
+interface DiscourseUserBadgeUser {
+  id?: number;
+  badge_ids?: number[];
+}
+
+interface DiscourseBadgeDef {
+  id?: number;
+  icon?: string;
 }
 
 interface DiscourseReaction {
@@ -132,6 +155,7 @@ interface DiscoursePost {
   like_count?: number;
   read?: boolean;
   user_title?: string;
+  user_status?: DiscourseUserStatus;
   reply_to_post_number?: number;
   reply_to_user?: DiscourseBoostUser;
   reactions?: DiscourseReaction[];
@@ -330,7 +354,7 @@ export class TopicService {
         success: true,
         statusCode: response.statusCode,
         challengeState: response.challengeState,
-        data: this.mapPosts(payload.post_stream?.posts)
+        data: this.mapPosts(payload.post_stream?.posts, this.buildBadgeIconMap(payload.user_badges))
       };
     } catch (error) {
       return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, 'Linux.do 加载更多楼层响应不是有效 JSON。');
@@ -745,7 +769,7 @@ export class TopicService {
       likeCount: sourceTopic.like_count,
       viewCount: sourceTopic.views,
       createdAt: sourceTopic.created_at,
-      posts: this.mapPosts(sourceTopic.post_stream?.posts),
+      posts: this.mapPosts(sourceTopic.post_stream?.posts, this.buildBadgeIconMap(sourceTopic.user_badges)),
       lastReadPostNumber: typeof sourceTopic.last_read_post_number === 'number' ? sourceTopic.last_read_post_number : undefined,
       highestPostNumber: typeof sourceTopic.highest_post_number === 'number' ? sourceTopic.highest_post_number : undefined,
       unreadPosts: typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined,
@@ -767,7 +791,36 @@ export class TopicService {
     return out;
   }
 
-  private mapPosts(sourcePosts?: DiscoursePost[]): TopicPost[] {
+  // 顶层 user_badges → Map<userId, 图标名[]>:users 里每个用户的 badge_ids 逐个到 badges 查 icon(FontAwesome 名)。
+  // 只有展示了徽章的用户会出现在 users 里,其余楼层取不到 → badgeIcons 为空。
+  private buildBadgeIconMap(source?: DiscourseUserBadges): Map<number, string[]> {
+    const map: Map<number, string[]> = new Map();
+    if (!source || !source.users || !source.badges) {
+      return map;
+    }
+    const users: Record<string, DiscourseUserBadgeUser> = source.users;
+    const badges: Record<string, DiscourseBadgeDef> = source.badges;
+    const userKeys: string[] = Object.keys(users);
+    for (let i: number = 0; i < userKeys.length; i++) {
+      const user: DiscourseUserBadgeUser = users[userKeys[i]];
+      if (!user || typeof user.id !== 'number' || !Array.isArray(user.badge_ids)) {
+        continue;
+      }
+      const icons: string[] = [];
+      for (let j: number = 0; j < user.badge_ids.length; j++) {
+        const badge: DiscourseBadgeDef | undefined = badges[`${user.badge_ids[j]}`];
+        if (badge && typeof badge.icon === 'string' && badge.icon.length > 0) {
+          icons.push(badge.icon);
+        }
+      }
+      if (icons.length > 0) {
+        map.set(user.id, icons);
+      }
+    }
+    return map;
+  }
+
+  private mapPosts(sourcePosts?: DiscoursePost[], badgeMap?: Map<number, string[]>): TopicPost[] {
     const posts: TopicPost[] = [];
     if (!sourcePosts) {
       return posts;
@@ -808,6 +861,11 @@ export class TopicService {
       post.bookmarked = sourcePost.bookmarked === true;
       post.bookmarkId = typeof sourcePost.bookmark_id === 'number' ? sourcePost.bookmark_id : undefined;
       post.polls = this.mapPolls(sourcePost);
+      const statusEmoji: string | undefined = sourcePost.user_status?.emoji;
+      post.statusEmoji =
+        typeof statusEmoji === 'string' && statusEmoji.length > 0 ? statusEmoji : undefined;
+      const authorId: number | undefined = typeof sourcePost.user_id === 'number' ? sourcePost.user_id : undefined;
+      post.badgeIcons = badgeMap && authorId !== undefined ? badgeMap.get(authorId) : undefined;
       posts.push(post);
     }
 

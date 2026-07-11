@@ -6,12 +6,15 @@ import { RelativeTime } from '../../common/utils/RelativeTime';
 import { ReactionMutation } from '../../services/topic/ReactionMutation';
 import { getReactionEmoji, REACTION_ORDER } from './EmojiRegistry';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
+import { getEmojiUrl } from './EmojiUrlRegistry';
 import { PostRichContent } from './PostRichContent';
 import { ViewerImage } from './ImageViewer';
 import { UserAvatar } from './UserAvatar';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 
 const LIKE_RED: string = '#EF4444';
+// 昵称后徽章图标(FontAwesome 单色)统一染金色,明暗底皆成立;与站点徽章展示一致。
+const BADGE_GOLD: string = '#E5A50A';
 
 // 拷贝链接成功后按钮右下角"画勾"动画,对齐 Discourse post-action-feedback:
 // 复制成功后按钮右下角"画勾"反馈。strokeDashOffset 在本环境不吃 animateTo,改用「左→右揭示」实现描边过程:
@@ -196,14 +199,36 @@ export struct TopicPostItem {
       UserAvatar({ user: this.post.author, avatarSize: 40 })
         .margin({ right: 12 })
 
-      // 昵称在上,姓名 + 称号一行在下。
+      // 昵称(+ 状态表情、徽章)在上,姓名 + 称号一行在下。
       Column() {
-        Text(this.getAuthorName())
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Row() {
+          // 昵称过长时收缩省略,给右侧表情/徽章留位(shrink=1 而非 layoutWeight,避免短昵称被拉宽把图标顶到最右)。
+          Text(this.getAuthorName())
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .flexShrink(1)
+
+          // 状态表情(user_status.emoji,如棒棒糖)——具名表情图片,经 EmojiUrlRegistry 查 url。
+          if (this.statusEmojiUrl().length > 0) {
+            Image(this.statusEmojiUrl())
+              .width(16)
+              .height(16)
+              .objectFit(ImageFit.Contain)
+              .draggable(false)
+              .margin({ left: 6 })
+          }
+
+          // 徽章图标(user_badges 解出的 FontAwesome 名,如 far-eye/seedling/hammer),单色染金。
+          ForEach(this.badgeIconDefs(), (def: FaIconDefinition) => {
+            FaIconView({ icon: def, color: BADGE_GOLD, iconSize: 15 })
+              .margin({ left: 5 })
+          }, (def: FaIconDefinition) => def.id)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
 
         Row() {
           Text(this.getUsername())
@@ -860,6 +885,28 @@ export struct TopicPostItem {
   private faIcon(name: string): FaIconDefinition {
     const def: FaIconDefinition | undefined = getFaIcon(name);
     return def ? def : { id: name, rawfilePath: '' };
+  }
+
+  // 作者状态表情的图片 url;无状态或该表情未收录 → ''(调用方跳过渲染)。
+  private statusEmojiUrl(): string {
+    const url: string | undefined = getEmojiUrl(this.post.statusEmoji);
+    return url ? url : '';
+  }
+
+  // 徽章图标名 → 可渲染的 FaIconDefinition,过滤掉字库里没有的图标(避免空 rawfile 报错)。
+  private badgeIconDefs(): FaIconDefinition[] {
+    const names: string[] | undefined = this.post.badgeIcons;
+    const defs: FaIconDefinition[] = [];
+    if (!names) {
+      return defs;
+    }
+    for (let i: number = 0; i < names.length; i++) {
+      const def: FaIconDefinition | undefined = getFaIcon(names[i]);
+      if (def) {
+        defs.push(def);
+      }
+    }
+    return defs;
   }
 
   // 当前回应是「非 heart 且我们有对应 PNG」的表情时为真。

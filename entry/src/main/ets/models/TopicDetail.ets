@@ -89,6 +89,10 @@ export class TopicPost {
   // 加/删成功后就地更新,由 @ObjectLink 驱动书签图标切换。
   bookmarked?: boolean;
   bookmarkId?: number;
+  // 昵称后展示的状态表情短名(user_status.emoji,如 "lollipop"/"tieba_003");渲染时经 EmojiUrlRegistry 查 url。
+  statusEmoji?: string;
+  // 昵称后展示的徽章图标名数组(顶层 user_badges 按 user_id 解出的 FontAwesome 名,如 far-eye/seedling/hammer)。
+  badgeIcons?: string[];
 }
 
 export interface TopicDetail {

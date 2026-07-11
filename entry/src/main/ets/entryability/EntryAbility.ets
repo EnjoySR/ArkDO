@@ -10,6 +10,7 @@ import { FileLogger } from '../services/logging/FileLogger';
 import { AppStateEventBus } from '../services/session/AppStateEventBus';
 import { LINUXDO_FA_SYMBOLS_RAWFILE, loadFaIconsFromRawContent } from '../views/components/FaIcon';
 import { LINUXDO_TAG_ICONS_RAWFILE, loadTagIconsFromRawContent } from '../views/components/TagIconRegistry';
+import { LINUXDO_EMOJIS_RAWFILE, loadEmojiUrlsFromRawContent } from '../views/components/EmojiUrlRegistry';
 import { ArkWebNetworkBridge } from '../services/network/ArkWebNetworkBridge';
 
 const DOMAIN = 0x0000;
@@ -121,6 +122,15 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, 'testTag', 'Loaded Linux.do tag icons: %{public}d', tagIconCount);
     } catch (err) {
       hilog.error(DOMAIN, 'testTag', 'Failed to load Linux.do tag icons. Cause: %{public}s',
+        JSON.stringify(err));
+    }
+
+    try {
+      const rawContent: Uint8Array = this.context.resourceManager.getRawFileContentSync(LINUXDO_EMOJIS_RAWFILE);
+      const emojiCount: number = loadEmojiUrlsFromRawContent(rawContent);
+      hilog.info(DOMAIN, 'testTag', 'Loaded Linux.do emoji urls: %{public}d', emojiCount);
+    } catch (err) {
+      hilog.error(DOMAIN, 'testTag', 'Failed to load Linux.do emoji urls. Cause: %{public}s',
         JSON.stringify(err));
     }
   }
