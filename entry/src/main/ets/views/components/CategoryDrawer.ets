@@ -233,9 +233,15 @@ export struct CategoryDrawer {
     return result;
   }
 
-  // 过滤 Discourse 默认的「未分类」版块(slug=uncategorized),不在版块列表里展示。
+  // 过滤 Discourse 默认的「未分类」版块,不在版块列表里展示。
+  // slug 可能为空或非标准,故 slug 与 name 任一命中即隐藏(linux.do 名为「未分类」)。
   private isHiddenCategory(category: TopicCategory): boolean {
-    return category.slug === 'uncategorized';
+    const slug: string = (category.slug ?? '').trim().toLowerCase();
+    if (slug === 'uncategorized') {
+      return true;
+    }
+    const name: string = category.name.trim();
+    return name === '未分类' || name.toLowerCase() === 'uncategorized';
   }
 
   private childrenOf(parentId: number): TopicCategory[] {
