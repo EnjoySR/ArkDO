@@ -45,6 +45,10 @@ interface DiscourseUser {
   name?: string;
   avatar_template?: string;
   animated_avatar?: string;
+  flair_url?: string;
+  flair_bg_color?: string;
+  flair_color?: string;
+  flair_name?: string;
 }
 
 interface DiscourseTopicDetail {
@@ -156,6 +160,10 @@ interface DiscoursePost {
   read?: boolean;
   user_title?: string;
   user_status?: DiscourseUserStatus;
+  flair_url?: string;
+  flair_bg_color?: string;
+  flair_color?: string;
+  flair_name?: string;
   reply_to_post_number?: number;
   reply_to_user?: DiscourseBoostUser;
   reactions?: DiscourseReaction[];
@@ -745,7 +753,15 @@ export class TopicService {
           username: sourceUser.username,
           displayName: sourceUser.name,
           avatarTemplate: sourceUser.avatar_template,
-          animatedAvatar: sourceUser.animated_avatar ? sourceUser.animated_avatar : undefined
+          animatedAvatar: sourceUser.animated_avatar ? sourceUser.animated_avatar : undefined,
+          flairUrl: typeof sourceUser.flair_url === 'string' && sourceUser.flair_url.length > 0
+            ? sourceUser.flair_url : undefined,
+          flairBgColor: typeof sourceUser.flair_bg_color === 'string' && sourceUser.flair_bg_color.length > 0
+            ? sourceUser.flair_bg_color : undefined,
+          flairColor: typeof sourceUser.flair_color === 'string' && sourceUser.flair_color.length > 0
+            ? sourceUser.flair_color : undefined,
+          flairName: typeof sourceUser.flair_name === 'string' && sourceUser.flair_name.length > 0
+            ? sourceUser.flair_name : undefined
         };
       }
     }
@@ -983,7 +999,15 @@ export class TopicService {
       username: sourcePost.username,
       displayName: sourcePost.name,
       avatarTemplate: sourcePost.avatar_template,
-      animatedAvatar: sourcePost.animated_avatar ? sourcePost.animated_avatar : undefined
+      animatedAvatar: sourcePost.animated_avatar ? sourcePost.animated_avatar : undefined,
+      flairUrl: typeof sourcePost.flair_url === 'string' && sourcePost.flair_url.length > 0
+        ? sourcePost.flair_url : undefined,
+      flairBgColor: typeof sourcePost.flair_bg_color === 'string' && sourcePost.flair_bg_color.length > 0
+        ? sourcePost.flair_bg_color : undefined,
+      flairColor: typeof sourcePost.flair_color === 'string' && sourcePost.flair_color.length > 0
+        ? sourcePost.flair_color : undefined,
+      flairName: typeof sourcePost.flair_name === 'string' && sourcePost.flair_name.length > 0
+        ? sourcePost.flair_name : undefined
     };
   }
 
