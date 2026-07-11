@@ -85,6 +85,10 @@
       "value": "#9CA3AF"
     },
     {
+      "name": "text_body",
+      "value": "#374151"
+    },
+    {
       "name": "icon_secondary",
       "value": "#4B5563"
     },

@@ -252,11 +252,12 @@ export struct PollView {
   @Builder
   private PollButton(iconId: string, label: string, flexible: boolean, action: () => void) {
     Row() {
-      FaIconView({ icon: this.faIcon(iconId), color: $r('app.color.text_secondary'), iconSize: 15 })
+      // 按钮文字/图标用正文主体色 text_body(原 #374151),与正文一致;非次要 meta 灰。
+      FaIconView({ icon: this.faIcon(iconId), color: $r('app.color.text_body'), iconSize: 15 })
         .margin({ right: 6 })
       Text(label)
         .fontSize(14)
-        .fontColor($r('app.color.text_secondary'))
+        .fontColor($r('app.color.text_body'))
     }
     .justifyContent(FlexAlign.Center)
     .layoutWeight(flexible ? 1 : 0)
