@@ -31,6 +31,9 @@ export enum RichBlockType {
   // discourse-math 块级公式(<div class="math">):text 存裸 LaTeX(displayMode=true),
   // 渲染层交离屏 KaTeX 引擎出图后居中显示。
   MATH = 'math',
+  // Markdown 表格(<table>,Discourse 常裹一层 <div class="md-table">):抽成行/单元格结构,
+  // 渲染层用等宽列对齐 + 横向 Scroll,过宽时左右滑动而不撑破栏宽。
+  TABLE = 'table',
   UNSUPPORTED = 'unsupported'
 }
 
@@ -67,11 +70,25 @@ export interface RichListItem {
   blocks?: RichBlock[];
 }
 
+// TABLE 单元格:行内节点序列 + 是否表头(<th> 或位于 <thead> 内)。
+export interface RichTableCell {
+  inlines: RichInlineNode[];
+  header?: boolean;
+}
+
+export interface RichTableRow {
+  cells: RichTableCell[];
+  // 整行是否表头行(全部单元格来自 thead / 全为 th)。渲染表头行加底色与粗体。
+  header?: boolean;
+}
+
 export interface RichBlock {
   type: RichBlockType;
   inlines?: RichInlineNode[];
   blocks?: RichBlock[];
   items?: RichListItem[];
+  // TABLE 块:按出现顺序的行,每行含若干单元格。
+  tableRows?: RichTableRow[];
   text?: string;
   title?: string;
   unsupportedKind?: string;
@@ -447,6 +464,14 @@ export class CookedHtmlParser {
     if (CookedHtmlParser.hasClass(openTag, 'math')) {
       const latex: string = CookedHtmlParser.toPlainText(innerHtml);
       return latex.length > 0 ? [{ type: RichBlockType.MATH, text: latex }] : [];
+    }
+
+    // Markdown 表格:<table> 直挂或裹在 <div class="md-table"> 里都在此拦截,抽成结构化块。
+    // 须在 detectUnsupportedKind 之前(否则会落回「待实现:表格」占位)。解析失败(无有效行)返回
+    // undefined,自然退回下方占位兜底。
+    const tableBlock: RichBlock | undefined = CookedHtmlParser.tableBlockFrom(tagName, innerHtml);
+    if (tableBlock) {
+      return [tableBlock];
     }
 
     const unsupportedKind: string = CookedHtmlParser.detectUnsupportedKind(tagName, openTag, innerHtml);
@@ -1106,6 +1131,88 @@ export class CookedHtmlParser {
       ordered,
       items
     };
+  }
+
+  // 从 <table>(或含 <table> 的包裹元素,如 <div class="md-table">)抽出结构化表格块。
+  // 无有效行时返回 undefined,交由调用方回退到占位。
+  private static tableBlockFrom(tagName: string, innerHtml: string): RichBlock | undefined {
+    let tableInner: string = '';
+    if (tagName === 'table') {
+      tableInner = innerHtml;
+    } else if (innerHtml.toLowerCase().indexOf('<table') >= 0) {
+      tableInner = CookedHtmlParser.extractElementInner(innerHtml, 'table');
+    }
+    if (tableInner.length === 0) {
+      return undefined;
+    }
+
+    const rows: RichTableRow[] = CookedHtmlParser.tableRowsFromHtml(tableInner);
+    if (rows.length === 0) {
+      return undefined;
+    }
+    return {
+      type: RichBlockType.TABLE,
+      tableRows: rows
+    };
+  }
+
+  private static tableRowsFromHtml(tableHtml: string): RichTableRow[] {
+    const rows: RichTableRow[] = [];
+    let search: number = 0;
+    while (search < tableHtml.length) {
+      const trStart: number = CookedHtmlParser.findOpenTag(tableHtml, 'tr', search);
+      if (trStart < 0) {
+        break;
+      }
+      const trOpenEnd: number = CookedHtmlParser.findTagEnd(tableHtml, trStart);
+      if (trOpenEnd < 0) {
+        break;
+      }
+      const trClose: number = CookedHtmlParser.findClosingTag(tableHtml, trOpenEnd + 1, 'tr');
+      if (trClose < 0) {
+        break;
+      }
+      const rowHtml: string = tableHtml.substring(trOpenEnd + 1, trClose);
+      const cells: RichTableCell[] = CookedHtmlParser.tableCellsFromRow(rowHtml);
+      if (cells.length > 0) {
+        const allHeader: boolean = cells.every((cell: RichTableCell) => cell.header === true);
+        rows.push({ cells, header: allHeader });
+      }
+      const trCloseEnd: number = CookedHtmlParser.findTagEnd(tableHtml, trClose);
+      search = trCloseEnd >= 0 ? trCloseEnd + 1 : trClose + 1;
+    }
+    return rows;
+  }
+
+  private static tableCellsFromRow(rowHtml: string): RichTableCell[] {
+    const cells: RichTableCell[] = [];
+    let index: number = 0;
+    while (index < rowHtml.length) {
+      const thStart: number = CookedHtmlParser.findOpenTag(rowHtml, 'th', index);
+      const tdStart: number = CookedHtmlParser.findOpenTag(rowHtml, 'td', index);
+      if (thStart < 0 && tdStart < 0) {
+        break;
+      }
+      const isHeader: boolean = thStart >= 0 && (tdStart < 0 || thStart < tdStart);
+      const cellStart: number = isHeader ? thStart : tdStart;
+      const cellTag: string = isHeader ? 'th' : 'td';
+      const openEnd: number = CookedHtmlParser.findTagEnd(rowHtml, cellStart);
+      if (openEnd < 0) {
+        break;
+      }
+      const closeStart: number = CookedHtmlParser.findClosingTag(rowHtml, openEnd + 1, cellTag);
+      if (closeStart < 0) {
+        break;
+      }
+      const cellHtml: string = rowHtml.substring(openEnd + 1, closeStart);
+      cells.push({
+        inlines: CookedHtmlParser.parseInlines(cellHtml),
+        header: isHeader
+      });
+      const closeEnd: number = CookedHtmlParser.findTagEnd(rowHtml, closeStart);
+      index = closeEnd >= 0 ? closeEnd + 1 : closeStart + 1;
+    }
+    return cells;
   }
 
   private static unsupportedBlock(kind: string, innerHtml: string): RichBlock {
@@ -1772,6 +1879,9 @@ export class CookedHtmlParser {
     }
     if (block.type === RichBlockType.LIST) {
       return !!block.items && block.items.length > 0;
+    }
+    if (block.type === RichBlockType.TABLE) {
+      return !!block.tableRows && block.tableRows.length > 0;
     }
     if (block.type === RichBlockType.DISCLOSURE) {
       return (!!block.title && block.title.length > 0) || (!!block.blocks && block.blocks.length > 0);

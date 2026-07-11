@@ -5,7 +5,9 @@ import {
   RichBlockType,
   RichInlineNode,
   RichInlineType,
-  RichListItem
+  RichListItem,
+  RichTableRow,
+  RichTableCell
 } from '../../services/content/CookedHtmlParser';
 import { ViewerImage } from './ImageViewer';
 import { AudioPlayer } from './AudioPlayer';
@@ -25,6 +27,9 @@ const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
 // 不撑满栏宽，避免小表情被 .width('100%') 拉成大方块。
 const SMALL_IMAGE_MAX: number = 48;
+// 表格每列固定宽度(vp):列宽统一才能让上下行的列对齐(ArkUI 无法在横向 Scroll 里自动等宽)。
+// 单元格文字在此宽度内自动换行;总宽超过栏宽时由外层横向 Scroll 左右滑动。
+const TABLE_COL_WIDTH: number = 132;
 // 剧透打码字符(块级与行内共用)。想换观感改这一行即可,如 ░(浅)/▒(中)/▓(深)/█(实心)。
 const SPOILER_REDACT_CHAR: string = '▒';
 // 公式位图染色矩阵(4×5):黑色字形按 alpha 覆盖度染成正文色 #374151(55,65,81)。
@@ -170,6 +175,14 @@ export struct PostRichContent {
           }
         }
       }
+      if (block.tableRows) {
+        for (let r: number = 0; r < block.tableRows.length; r++) {
+          const cells: RichTableCell[] = block.tableRows[r].cells;
+          for (let c: number = 0; c < cells.length; c++) {
+            this.collectInlineMath(cells[c].inlines, out);
+          }
+        }
+      }
       if (block.blocks && block.blocks.length > 0) {
         this.collectMath(block.blocks, out);
       }
@@ -235,6 +248,8 @@ export struct PostRichContent {
       this.VideoBlock(block, index > 0 ? 12 : 0)
     } else if (block.type === RichBlockType.MATH) {
       this.MathBlock(block, index > 0 ? 12 : 0)
+    } else if (block.type === RichBlockType.TABLE) {
+      this.TableBlock(block, index > 0 ? 12 : 0, path)
     } else {
       this.UnsupportedBlock(block, index > 0 ? 10 : 0)
     }
@@ -875,6 +890,96 @@ export struct PostRichContent {
     .width('100%')
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Center)
+  }
+
+  // 表格:等宽列(TABLE_COL_WIDTH)保证上下行列对齐,整表过宽时外层横向 Scroll 左右滑动。
+  // 表头行加底色 + 粗体;单元格间画发丝网格线(外层补顶/左边,单元格补右/下边,合成完整网格)。
+  @Builder
+  private TableBlock(block: RichBlock, marginTop: number, path: string) {
+    Scroll() {
+      Column() {
+        ForEach(this.safeTableRows(block), (row: RichTableRow, r: number) => {
+          // Flex + ItemAlign.Stretch:同行单元格等高(Row/VerticalAlign 无 Stretch),
+          // 短单元格才会撑满行高,右/下发丝线连成完整网格。
+          Flex({ direction: FlexDirection.Row, alignItems: ItemAlign.Stretch }) {
+            ForEach(row.cells, (cell: RichTableCell, c: number) => {
+              Column() {
+                if (cell.header) {
+                  Text(this.tableCellText(cell))
+                    .fontSize(14)
+                    .lineHeight(20)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor($r('app.color.text_primary'))
+                    .textAlign(TextAlign.Start)
+                    .width('100%')
+                } else {
+                  Text() {
+                    ForEach(cell.inlines, (token: RichInlineNode, t: number) => {
+                      this.InlineToken(token, `${path}-r${r}c${c}`)
+                    }, (token: RichInlineNode, t: number) => this.inlineKey(token, t))
+                  }
+                  .fontSize(14)
+                  .lineHeight(20)
+                  .fontColor($r('app.color.text_body'))
+                  .textAlign(TextAlign.Start)
+                  .width('100%')
+                  .copyOption(CopyOptions.LocalDevice)
+                }
+              }
+              .width(TABLE_COL_WIDTH)
+              .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+              .justifyContent(FlexAlign.Center)
+              .alignItems(HorizontalAlign.Start)
+              .border({
+                width: { right: 0.5, bottom: 0.5 },
+                color: $r('app.color.border')
+              })
+            }, (cell: RichTableCell, c: number) => `${r}-${c}`)
+          }
+          .backgroundColor(row.header ? $r('app.color.fill_subtle') : Color.Transparent)
+        }, (row: RichTableRow, r: number) => `row-${r}`)
+      }
+      .width(this.tableTotalWidth(block))
+      .alignItems(HorizontalAlign.Start)
+      .border({
+        width: { top: 0.5, left: 0.5 },
+        color: $r('app.color.border')
+      })
+      .borderRadius(8)
+      .clip(true)
+    }
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Auto)
+    .align(Alignment.Start)
+    .width('100%')
+    .margin({ top: marginTop })
+  }
+
+  private safeTableRows(block: RichBlock): RichTableRow[] {
+    return block.tableRows ? block.tableRows : [];
+  }
+
+  // 表格总宽 = 最多列数 × 固定列宽,给内层容器一个确定宽度(否则 Flex 行 100% 与 wrap 宽循环解析),
+  // 横向 Scroll 才能按此内容宽判定是否需要滑动。
+  private tableTotalWidth(block: RichBlock): number {
+    const rows: RichTableRow[] = this.safeTableRows(block);
+    let maxCols: number = 0;
+    for (let i: number = 0; i < rows.length; i++) {
+      if (rows[i].cells.length > maxCols) {
+        maxCols = rows[i].cells.length;
+      }
+    }
+    return maxCols * TABLE_COL_WIDTH;
+  }
+
+  // 表头单元格用纯文本(拼接行内文字)以稳定加粗;换行折成空格。
+  private tableCellText(cell: RichTableCell): string {
+    let text: string = '';
+    for (let i: number = 0; i < cell.inlines.length; i++) {
+      const token: RichInlineNode = cell.inlines[i];
+      text += token.type === RichInlineType.LINE_BREAK ? ' ' : token.text;
+    }
+    return text;
   }
 
   @Builder
