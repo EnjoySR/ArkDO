@@ -2,7 +2,6 @@ import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { isChallengeCompletionResponse } from '../../services/challenge/ChallengeCompletionDetector';
-import { ChallengeResolutionProbe } from '../../services/challenge/ChallengeResolutionProbe';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { CookiePresenceSnapshot, WebSessionManager } from '../../services/web/WebSessionManager';
 
@@ -24,19 +23,20 @@ export struct CfChallengePage {
   private challengePollTimer: number = -1;
   private challengePollCount: number = 0;
   private hasResolved: boolean = false;
-  private isApiProbeRunning: boolean = false;
   // 弹层打开时的 cf_clearance 值快照:失效旧 cookie 仍残留,只有值变化才是 CF 真发了新通行证。
   private initialCfClearance: string = '';
   // 挑战资源(challenges.cloudflare.com)加载失败时的自动重载次数,赌网络下一次能通。
   private challengeReloadCount: number = 0;
+  // 【测量】是否观察到 CF 人机验证控件资源(challenges.cloudflare.com)被加载——CF 真发起挑战的铁证。
+  private sawChallengeWidget: boolean = false;
 
   aboutToAppear(): void {
     webview.WebviewController.initializeWebEngine();
     WebSessionManager.configureCookieAccess('CfChallengePage');
     this.hasResolved = false;
-    this.isApiProbeRunning = false;
     this.challengePollCount = 0;
     this.challengeReloadCount = 0;
+    this.sawChallengeWidget = false;
     this.initialCfClearance = WebSessionManager.getCfClearanceValue();
     this.logDiagnostic('appear', 'start');
     this.startChallengeCookiePolling();
@@ -101,6 +101,19 @@ export struct CfChallengePage {
           this.logDiagnostic('pageEnd', `url=${this.safeUrlLabel(event.url)}`);
           this.resolveIfCfClearanceExists('pageEnd');
         })
+        // 【测量】每个子资源加载都会回调:命中 challenges.cloudflare.com 即证明 CF 真的弹了人机验证控件。
+        .onResourceLoad((event: OnResourceLoadEvent) => {
+          const label: string = this.safeUrlLabel(event.url);
+          if (label === 'cloudflare_challenge_resource') {
+            if (!this.sawChallengeWidget) {
+              this.sawChallengeWidget = true;
+              Log.i(`${LOG_TAG} CF challenge widget resource loaded — CF IS challenging`);
+            }
+            this.logDiagnostic('challengeWidgetSeen', `label=${label}`);
+          } else if (label === 'cloudflare_other') {
+            this.logDiagnostic('cloudflareResource', `label=${label}`);
+          }
+        })
         .onErrorReceive((event: OnErrorReceiveEvent) => {
           const url: string = this.safeRequestUrl(event.request);
           const code: number = this.safeErrorCode(event.error);
@@ -114,7 +127,10 @@ export struct CfChallengePage {
           const isMainFrame: boolean = this.safeIsMainFrame(event.request);
           const cfMitigatedHeader: string = this.safeResponseHeader(event.response, 'cf-mitigated');
           Log.i(`${LOG_TAG} http error url=${this.safeUrlLabel(url)} status=${statusCode} mainFrame=${isMainFrame} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)} reason=${this.safeReasonMessage(event.response)}`);
-          this.logDiagnostic('httpError', `url=${this.safeUrlLabel(url)} status=${statusCode} mainFrame=${isMainFrame} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)}`);
+          // 【测量】打全 CF 关键响应头原始值 + 完整 url:cf-mitigated=challenge 表示 CF 在质询;
+          // 过盾成功后回跳的 404,这里能看到 CF 带回来的完整 url(是否带 __cf_chl_ 查询参数)。
+          Log.i(`${LOG_TAG} [MEASURE] status=${statusCode} url="${url}" cf-mitigated="${cfMitigatedHeader}" server="${this.safeResponseHeader(event.response, 'server')}" cf-ray="${this.safeResponseHeader(event.response, 'cf-ray')}"`);
+          this.logDiagnostic('httpError', `url=${this.safeUrlLabel(url)} status=${statusCode} mainFrame=${isMainFrame} cfMitigated="${cfMitigatedHeader}"`);
           if (this.resolveIfChallengeCompletionResponse(url, statusCode, isMainFrame, cfMitigatedHeader)) {
             return;
           }
@@ -140,10 +156,6 @@ export struct CfChallengePage {
       this.challengePollCount++;
       if (this.resolveIfCfClearanceExists('polling')) {
         return;
-      }
-
-      if (this.shouldProbeApi()) {
-        this.resolveIfApiProbeSucceeds('polling');
       }
 
       if (this.challengePollCount % 5 === 0) {
@@ -211,33 +223,6 @@ export struct CfChallengePage {
     }, CHALLENGE_RELOAD_DELAY_MS);
   }
 
-  private shouldProbeApi(): boolean {
-    return !this.hasResolved && !this.isApiProbeRunning && this.challengePollCount > 0 && this.challengePollCount % 5 === 0;
-  }
-
-  private async resolveIfApiProbeSucceeds(stage: string): Promise<void> {
-    if (this.hasResolved || this.isApiProbeRunning) {
-      return;
-    }
-
-    this.isApiProbeRunning = true;
-    this.logDiagnostic('apiProbeStart', `stage=${stage}`);
-    const resolved: boolean = await new ChallengeResolutionProbe(this.bridge).canAccessLatestJson();
-    this.isApiProbeRunning = false;
-
-    if (!resolved || this.hasResolved) {
-      this.logDiagnostic('apiProbePending', `stage=${stage}`);
-      return;
-    }
-
-    this.hasResolved = true;
-    Log.i(`${LOG_TAG} challenge resolved by api probe stage=${stage}`);
-    this.logDiagnostic('resolvedByApiProbe', `stage=${stage}`);
-    WebSessionManager.saveCookies('CfChallengePage');
-    this.stopChallengeCookiePolling();
-    this.onChallengeResolved();
-  }
-
   private resolveIfChallengeCompletionResponse(url: string, statusCode: number, isMainFrame: boolean, cfMitigatedHeader: string): boolean {
     if (this.hasResolved) {
       return true;
@@ -252,6 +237,13 @@ export struct CfChallengePage {
       return false;
     }
 
+    // 门槛:只认"CF 真挑战过之后"的 404 为过盾成功。sawChallengeWidget=false 说明 CF 根本没挑战、
+    // 直接放行到源站的假 404(不需要过盾),此时不算过盾、不关窗,避免假报"已通过"。
+    if (!this.sawChallengeWidget) {
+      this.logDiagnostic('source404NoChallenge', `url=${this.safeUrlLabel(url)}`);
+      return false;
+    }
+
     this.hasResolved = true;
     Log.i(`${LOG_TAG} challenge resolved by source 404 url=${this.safeUrlLabel(url)} status=${statusCode} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)}`);
     this.logDiagnostic('resolvedBySource404', `url=${this.safeUrlLabel(url)} status=${statusCode} cfMitigated=${this.safeHeaderLabel(cfMitigatedHeader)}`);
@@ -263,7 +255,7 @@ export struct CfChallengePage {
 
   private logDiagnostic(stage: string, detail: string): void {
     const snapshot: CookiePresenceSnapshot = WebSessionManager.getCookiePresenceSnapshot('cf_clearance');
-    Log.i(`${DIAG_TAG} stage=${stage} hasCfClearance=${snapshot.hasCookie} cookieHeaderLength=${snapshot.headerLength} pollCount=${this.challengePollCount} timerActive=${this.challengePollTimer >= 0} hasResolved=${this.hasResolved} apiProbeRunning=${this.isApiProbeRunning} ${detail}`);
+    Log.i(`${DIAG_TAG} stage=${stage} hasCfClearance=${snapshot.hasCookie} cookieHeaderLength=${snapshot.headerLength} pollCount=${this.challengePollCount} timerActive=${this.challengePollTimer >= 0} hasResolved=${this.hasResolved} sawChallengeWidget=${this.sawChallengeWidget} ${detail}`);
   }
 
   private safeUrlLabel(url: string): string {
@@ -341,7 +333,18 @@ export struct CfChallengePage {
   }
 
   private safeResponseHeader(response: WebResourceResponse, headerName: string): string {
-    return '';
+    try {
+      const headers: Array<Header> = response.getResponseHeader();
+      const target: string = headerName.toLowerCase();
+      for (let index: number = 0; index < headers.length; index++) {
+        if (headers[index].headerKey.toLowerCase() === target) {
+          return headers[index].headerValue;
+        }
+      }
+      return '';
+    } catch (error) {
+      return '';
+    }
   }
 
   private safeHeaderLabel(value: string): string {
