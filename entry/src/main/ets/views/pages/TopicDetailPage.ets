@@ -573,10 +573,13 @@ export struct TopicDetailPage {
       // 已加载:落地高亮(与重开窗口路径观感一致)。
       const targetListIndex: number = index + 1;
       this.armTargetFlash(this.dataSource.getData(index).id);
-      // 目标楼已在视口内(含部分可见)就不滚动,避免把它无谓地拽到屏顶;仅靠高亮提示位置。
+      // 目标楼已在视口范围内:用 AUTO 对齐——完全可见就原地不动(不把它无谓拽到屏顶,仅靠高亮提示),
+      // 只在顶/底被裁只露一半时,按最短距离滑动把它完整带进视口。
       if (targetListIndex >= this.currentStartListIndex && targetListIndex <= this.currentEndListIndex) {
+        this.scroller.scrollToIndex(targetListIndex, true, ScrollAlign.AUTO);
         return;
       }
+      // 完全在屏外:对齐到视口顶部(导航栏下)定位。
       this.scroller.scrollToIndex(targetListIndex, true);
       return;
     }
