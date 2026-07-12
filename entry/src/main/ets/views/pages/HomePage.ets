@@ -129,7 +129,7 @@ export struct HomePage {
           this.MenuButton()
 
           Text(this.currentFeedTitle())
-            .fontSize(28)
+            .fontSize(26)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
             .maxLines(1)
@@ -152,7 +152,7 @@ export struct HomePage {
       }
       .width('100%')
       .height(56)
-      .padding({ left: 12, right: 12, top: 20, bottom: 12 })
+      .padding({ left: 12, right: 12, top: 16, bottom: 14 })
 
       Stack() {
         Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
@@ -334,7 +334,7 @@ export struct HomePage {
     .width(42)
     .height(42)
     .borderRadius(21)
-    .backgroundColor($r('app.color.surface_muted'))
+    .backgroundColor(Color.Transparent)
     .padding(0)
     .margin({ right: 10 })
     .onClick(() => {
