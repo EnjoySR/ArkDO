@@ -45,7 +45,7 @@ export struct NotificationPage {
         }
         .width(40)
         .height(40)
-        .backgroundColor($r('app.color.border'))
+        .backgroundColor($r('app.color.surface_muted'))
         .onClick(() => {
           this.onBack();
         })

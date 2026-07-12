@@ -75,12 +75,12 @@ export struct WebViewPage {
     Row({ space: 8 }) {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.chevron_left'))
-          .fontSize(26)
+          .fontSize(28)
           .fontColor([$r('app.color.text_primary')])
           .renderingStrategy(SymbolRenderingStrategy.SINGLE)
       }
-      .width(38)
-      .height(38)
+      .width(40)
+      .height(40)
       .backgroundColor($r('app.color.surface_muted'))
       .onClick(() => {
         this.handleBack();

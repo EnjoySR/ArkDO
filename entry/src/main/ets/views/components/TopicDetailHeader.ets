@@ -20,7 +20,7 @@ export struct TopicDetailHeader {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.chevron_left'))
           .fontSize(28)
-          .fontColor([$r('app.color.icon_secondary')])
+          .fontColor([$r('app.color.text_primary')])
           .renderingStrategy(SymbolRenderingStrategy.SINGLE)
       }
       .width(40)
