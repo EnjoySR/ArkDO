@@ -183,7 +183,8 @@ export struct TopicDetailPage {
           category: CategoryIndex.find(this.categories, this.detail?.categoryId),
           parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
           tags: this.getTags(),
-          metaText: this.getTopicMetaText()
+          metaText: this.getTopicMetaText(),
+          solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0
         })
       }
 
@@ -306,6 +307,7 @@ export struct TopicDetailPage {
         category: CategoryIndex.find(this.categories, this.detail?.categoryId),
         parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
         tags: this.getTags(),
+        solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0,
         onBack: () => {
           this.onBack();
         }

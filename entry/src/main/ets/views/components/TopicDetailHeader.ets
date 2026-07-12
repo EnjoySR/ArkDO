@@ -13,6 +13,8 @@ export struct TopicDetailHeader {
   @Prop category: TopicCategory | undefined = undefined;
   @Prop parentCategory: TopicCategory | undefined = undefined;
   @Prop tags: TopicTag[] = [];
+  // 已解决(有采纳答案):滚动后的帖子标题(图层 B)行首内联绿色 far-square-check 标记,与顶部摘要卡一致。
+  @Prop solved: boolean = false;
   onBack: () => void = () => {};
 
   build() {
@@ -46,7 +48,17 @@ export struct TopicDetailHeader {
 
         // 图层 B:摘要滑出后显示的帖子标题 + 分类/标签行。
         Column({ space: 2 }) {
-          Text(this.title)
+          // 已解决时行首内联绿色勾选框标记(同摘要卡:烘 #090 的专用 SVG,ImageSpan 内联随文字排)。
+          Text() {
+            if (this.solved) {
+              ImageSpan($rawfile('fa_icons/far-square-check-green.svg'))
+                .width(15)
+                .height(15)
+                .margin({ right: 5 })
+                .verticalAlign(ImageSpanAlignment.CENTER)
+            }
+            Span(this.title)
+          }
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('sys.color.font_primary'))

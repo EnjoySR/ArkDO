@@ -10,10 +10,23 @@ export struct TopicSummaryCard {
   @Prop parentCategory: TopicCategory | undefined = undefined;
   @Prop tags: TopicTag[] = [];
   @Prop metaText: string = '';
+  // 已解决(有采纳答案):标题行首内联一个绿色 far-square-check 标记。
+  @Prop solved: boolean = false;
 
   build() {
     Column() {
-      Text(this.title)
+      // 标题:solved 时行首内联绿色勾选框标记。ImageSpan 无 fillColor、colorFilter 对矢量 SVG 不生效,
+      // 故用已烘 #090 的专用 SVG 变体(同 download_blue 先例);内联进 Text 才随标题文字换行同排。
+      Text() {
+        if (this.solved) {
+          ImageSpan($rawfile('fa_icons/far-square-check-green.svg'))
+            .width(20)
+            .height(20)
+            .margin({ right: 6 })
+            .verticalAlign(ImageSpanAlignment.CENTER)
+        }
+        Span(this.title)
+      }
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
