@@ -126,7 +126,10 @@ export struct HomePage {
       // 主体:顶栏 + 帖子列表
       Column() {
         Row() {
-          this.MenuButton()
+          // 环境未就绪("准备环境中...")时抽屉尚无意义,隐藏汉堡入口(标题左移填满,就绪后再出现)。
+          if (this.isArkWebReady) {
+            this.MenuButton()
+          }
 
           Text(this.currentFeedTitle())
             .fontSize(26)

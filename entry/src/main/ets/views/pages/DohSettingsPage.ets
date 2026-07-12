@@ -518,7 +518,6 @@ export struct DohSettingsPage {
     // 换新数组引用,促使 ForEach 按新 key(含选中位)重新比对,选中圆点才会更新。
     this.rows = this.rows.slice();
     DohManager.setActive(getContext(this), id);
-    Log.i(`${LOG_TAG} selectServer set=${id} readback=${DohManager.getActiveId(getContext(this))}`);
     // DoH 未启用时仅记录选择(下次开启才生效),不重载宿主也不提示重载,避免误导。
     if (this.dohEnabled) {
       this.onDohApplied();

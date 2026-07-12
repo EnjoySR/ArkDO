@@ -294,7 +294,6 @@ export struct RootTabPage {
       .onShown(() => {
         const prev: number = (AppStorage.get(SETTINGS_DOH_TICK) as number | undefined) ?? 0;
         AppStorage.setOrCreate(SETTINGS_DOH_TICK, prev + 1);
-        Log.i(`${LOG_TAG} settings destination onShown tick=${prev + 1}`);
       })
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。

@@ -57,7 +57,6 @@ export struct SettingsPage {
 
   // NavDestination 重新可见(从 DoH 配置页 pop 回)时由 dohTick 变更触发,重读最新 DoH 摘要。
   private onSettingsShown(): void {
-    Log.i(`${LOG_TAG} onSettingsShown tick=${this.dohTick}`);
     this.refreshDohSummary();
   }
 
@@ -67,7 +66,6 @@ export struct SettingsPage {
     const enabled: boolean = DohManager.isEnabled(context);
     const active: DohServer = DohManager.getActiveServer(context);
     this.dohSummary = enabled ? active.name : '已关闭';
-    Log.i(`${LOG_TAG} refreshDohSummary enabled=${enabled} activeId=${active.id} name=${active.name}`);
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
