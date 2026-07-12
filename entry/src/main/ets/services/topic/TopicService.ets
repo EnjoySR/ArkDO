@@ -32,6 +32,7 @@ interface DiscourseTopic {
   last_read_post_number?: number;
   highest_post_number?: number;
   posters?: DiscoursePoster[];
+  has_accepted_answer?: boolean;
 }
 
 interface DiscoursePoster {
@@ -690,6 +691,7 @@ export class TopicService {
       topic.unreadPosts = typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined;
       topic.lastReadPostNumber = typeof sourceTopic.last_read_post_number === 'number' ? sourceTopic.last_read_post_number : undefined;
       topic.highestPostNumber = typeof sourceTopic.highest_post_number === 'number' ? sourceTopic.highest_post_number : undefined;
+      topic.hasAcceptedAnswer = sourceTopic.has_accepted_answer === true;
       topic.author = this.findOriginalPoster(sourceTopic, sourceUsers);
       topics.push(topic);
     }

@@ -39,4 +39,7 @@ export class Topic {
   lastReadPostNumber?: number;
   highestPostNumber?: number;
   author?: User;
+  // discourse-solved:该主题是否有被采纳的解决方案(列表接口 has_accepted_answer)。
+  // 为真时列表标题行首内联绿色 far-square-check 标记,与详情页一致。
+  hasAcceptedAnswer?: boolean;
 }
