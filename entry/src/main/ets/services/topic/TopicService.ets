@@ -1,5 +1,5 @@
 import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
-import { Poll, PollOption, PollVoteResult, PostBoost, PostReaction, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { AcceptedAnswer, Poll, PollOption, PollVoteResult, PostBoost, PostReaction, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
@@ -67,11 +67,21 @@ interface DiscourseTopicDetail {
   highest_post_number?: number;
   unread_posts?: number;
   user_badges?: DiscourseUserBadges;
+  accepted_answers?: DiscourseAcceptedAnswer[];
 }
 
 interface DiscoursePostStream {
   posts?: DiscoursePost[];
   stream?: number[];
+}
+
+// discourse-solved 采纳答案快照:自带 cooked HTML,面板据此自渲染,无需回列表找楼。
+interface DiscourseAcceptedAnswer {
+  post_number?: number;
+  username?: string;
+  avatar_template?: string;
+  created_at?: string;
+  cooked?: string;
 }
 
 // 楼层作者状态:user_status.emoji 是具名表情短名(lollipop / tieba_003 …),经 EmojiUrlRegistry 查 url。
@@ -789,8 +799,31 @@ export class TopicService {
       lastReadPostNumber: typeof sourceTopic.last_read_post_number === 'number' ? sourceTopic.last_read_post_number : undefined,
       highestPostNumber: typeof sourceTopic.highest_post_number === 'number' ? sourceTopic.highest_post_number : undefined,
       unreadPosts: typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined,
-      stream: this.mapStream(sourceTopic.post_stream?.stream)
+      stream: this.mapStream(sourceTopic.post_stream?.stream),
+      acceptedAnswers: this.mapAcceptedAnswers(sourceTopic.accepted_answers)
     };
+  }
+
+  // discourse-solved:采纳答案数组 → AcceptedAnswer 列表;缺 post_number 的条目丢弃(跳楼无落点)。
+  private mapAcceptedAnswers(source?: DiscourseAcceptedAnswer[]): AcceptedAnswer[] | undefined {
+    if (!source || source.length === 0) {
+      return undefined;
+    }
+    const out: AcceptedAnswer[] = [];
+    for (let index: number = 0; index < source.length; index++) {
+      const item: DiscourseAcceptedAnswer = source[index];
+      if (typeof item.post_number !== 'number') {
+        continue;
+      }
+      const answer: AcceptedAnswer = new AcceptedAnswer();
+      answer.postNumber = item.post_number;
+      answer.username = item.username ?? '';
+      answer.avatarTemplate = item.avatar_template ?? '';
+      answer.createdAt = item.created_at ?? '';
+      answer.cookedHtml = item.cooked ?? '';
+      out.push(answer);
+    }
+    return out.length > 0 ? out : undefined;
   }
 
   private mapStream(stream?: number[]): number[] {

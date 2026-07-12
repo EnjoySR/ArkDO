@@ -193,6 +193,8 @@ export struct TopicDetailPage {
           lastReadPostNumber: this.detail?.lastReadPostNumber ?? -1,
           showLastVisitedLine: post.id === this.lastVisitedAnchorPostId && this.lastVisitedAnchorPostId > 0,
           flashTargetPostId: this.flashTargetPostId,
+          // 采纳答案面板只挂一楼:非一楼下发空数组,免得每个 item 都持有整份数据。
+          acceptedAnswers: post.postNumber === 1 ? (this.detail?.acceptedAnswers ?? []) : [],
           onOpenImages: (images: ViewerImage[], startIndex: number) => {
             this.openImageViewer(images, startIndex);
           },

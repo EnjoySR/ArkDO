@@ -95,6 +95,19 @@ export class TopicPost {
   badgeIcons?: string[];
 }
 
+// discourse-solved:被采纳为解决方案的答案楼快照(topic.json 顶层 accepted_answers)。
+// 快问快答/问答帖在一楼下方渲染「已解决」面板,内容完全自给(带 cooked HTML),
+// 哪怕该答案楼尚未加载进列表也能展示;「阅读更多」据 postNumber 跳楼。
+// 数组天然支持多解:一题多个采纳答案就铺多张卡片。
+@Observed
+export class AcceptedAnswer {
+  postNumber: number = 0;
+  username: string = '';
+  avatarTemplate: string = '';
+  createdAt: string = '';
+  cookedHtml: string = '';
+}
+
 export interface TopicDetail {
   id: number;
   title: string;
@@ -111,4 +124,6 @@ export interface TopicDetail {
   highestPostNumber?: number;
   unreadPosts?: number;
   stream?: number[];
+  // discourse-solved 采纳答案面板数据源;无解或非问答帖为 undefined/空数组。
+  acceptedAnswers?: AcceptedAnswer[];
 }

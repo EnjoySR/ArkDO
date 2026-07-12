@@ -1,6 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import { curves } from '@kit.ArkUI';
-import { Poll, PollVoteResult, PostBoost, PostReaction, TopicPost } from '../../models/TopicDetail';
+import { AcceptedAnswer, Poll, PollVoteResult, PostBoost, PostReaction, TopicPost } from '../../models/TopicDetail';
 import { CookedHtmlParser, RichInlineNode, RichInlineType } from '../../services/content/CookedHtmlParser';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { ReactionMutation } from '../../services/topic/ReactionMutation';
@@ -11,6 +11,7 @@ import { HolographicText } from './HolographicText';
 import { PostRichContent } from './PostRichContent';
 import { ViewerImage } from './ImageViewer';
 import { UserAvatar } from './UserAvatar';
+import { AcceptedAnswerPanel } from './AcceptedAnswerPanel';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 
 const LIKE_RED: string = '#EF4444';
@@ -61,6 +62,8 @@ export struct TopicPostItem {
   @Prop @Watch('onFlashTargetChanged') flashTargetPostId: number = 0;
   // 当前是否深色渲染(ThemeManager 维护):落地高亮色是烘进的字面量、非资源色,须按明暗手动切换。
   @StorageProp(APP_IS_DARK_STORAGE_KEY) private appIsDark: boolean = false;
+  // discourse-solved 采纳答案:仅一楼(postNumber===1)非空,页面只往一楼下发,正文下方渲染「已解决」面板。
+  acceptedAnswers: AcceptedAnswer[] = [];
   // 图片浏览器在页面级渲染，这里把 PostRichContent 的「打开」请求继续上抛给页面
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击继续上抛给页面(由页面经 LinkRouter 判断跳原生详情或通用 WebView)。
@@ -144,6 +147,17 @@ export struct TopicPostItem {
           })
             .width('100%')
             .margin({ top: 12 })
+
+          // 采纳答案面板:仅一楼渲染(页面只对一楼下发非空数组),跳楼/图片/链接/媒体沿用本楼回调。
+          if (this.acceptedAnswers.length > 0) {
+            AcceptedAnswerPanel({
+              answers: this.acceptedAnswers,
+              onJumpToPost: this.onJumpToPost,
+              onOpenImages: this.onOpenImages,
+              onOpenLink: this.onOpenLink,
+              onResolveMedia: this.onResolveMedia
+            })
+          }
 
           this.PostFooter()
         }
