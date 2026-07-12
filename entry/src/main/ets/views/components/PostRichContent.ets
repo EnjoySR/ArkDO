@@ -468,7 +468,7 @@ export struct PostRichContent {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        FaIconView({ icon: this.faIconOf('chevron-right'), color: '#9CA3AF', iconSize: 16 })
+        FaIconView({ icon: this.faIconOf('chevron-right'), color: $r('app.color.text_tertiary'), iconSize: 16 })
           .margin({ left: 4, top: 2 })
       }
       .width('100%')
@@ -491,10 +491,10 @@ export struct PostRichContent {
     }
     .width('100%')
     .padding({ left: 10, right: 10, top: 10, bottom: 10 })
-    .backgroundColor('#F8FAFC')
+    .backgroundColor($r('app.color.fill_subtle'))
     .border({
       width: { left: 3 },
-      color: '#CBD5E1'
+      color: $r('app.color.border')
     })
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)

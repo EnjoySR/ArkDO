@@ -3,14 +3,18 @@ import { bundleManager, common } from '@kit.AbilityKit';
 import { DownloadService } from '../../services/content/DownloadService';
 import { FileLogger } from '../../services/logging/FileLogger';
 import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
-import { DohManager, DOH_SUMMARY_STORAGE_KEY } from '../../services/network/DohManager';
+import { DohManager, DohServer } from '../../services/network/DohManager';
 import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
 
+// AppStorage 计数键:RootTabPage 在设置页 NavDestination onShown 时自增,驱动设置页重读
+// DoH 摘要(单纯的 @Prop 不会随父 @State 流入已创建的 NavDestination 子树)。
+export const SETTINGS_DOH_TICK: string = 'settings_doh_tick';
+
 // 与个人中心同款鸿蒙设置页式卡片分组:灰底 + 无描边圆角卡片。
 const PAGE_MARGIN: number = 12;
-// 内容入口配置行高(启用区拖动排序 List 需按项数定高,避免与外层 Scroll 抢滚动)。
+// 内容入口配置行高:拖动排序按此行高换算跟手位移与让位步长。
 const FEED_ROW_H: number = 52;
 const CARD_RADIUS: number = 16;
 const CARD_PADDING: number = 16;
@@ -24,8 +28,12 @@ export struct SettingsPage {
   // 主动过盾:通知 RootTabPage 打开交互式 Cloudflare 验证页(唯一能真正拿到新 cf_clearance 的路径)。
   onActiveChallenge: () => void = () => {};
   @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
-  // DoH 摘要:订阅 AppStorage,DoH 配置页改动即时反映到设置页(pop 回来不重建也能刷新)。
-  @StorageProp(DOH_SUMMARY_STORAGE_KEY) dohSummary: string = '已关闭';
+  // RootTabPage 在本页 NavDestination onShown 时自增此 AppStorage 计数(本页此刻已在前台,
+  // @StorageProp 变更能可靠触发重渲染)。被 DoH 配置页覆盖后 pop 回来常驻不重建,靠它
+  // @Watch 重读 DoH 摘要——不依赖 @Prop 流入(NavDestination 子树不随父 @State 重建)。
+  @StorageProp(SETTINGS_DOH_TICK) @Watch('onSettingsShown') private dohTick: number = 0;
+  // DoH 摘要:关闭显示"已关闭",启用显示当前生效服务器名;每次进入/重新可见即从 DohManager 重算。
+  @State private dohSummary: string = '已关闭';
   @State private appVersion: string = '';
   // 日志工具:大小标签实时展示,详细日志开关持久化,导出时防重复点击。
   @State private logSizeLabel: string = '';
@@ -33,17 +41,33 @@ export struct SettingsPage {
   @State private isExportingLog: boolean = false;
   // 首页内容入口:启用且有序的可选入口 key(不含恒在的最新)。
   @State private enabledFeeds: string[] = [];
+  // 拖动排序状态:draggingIndex=被拖行原始下标(-1 为未拖动);dragOffsetY=浮起行跟手位移;
+  // hoverIndex=当前落位槽位(邻行据此实时让位)。松手后吸附到 hoverIndex 再提交顺序。
+  @State private draggingIndex: number = -1;
+  @State private dragOffsetY: number = 0;
+  @State private hoverIndex: number = -1;
 
   aboutToAppear(): void {
     this.readAppVersion();
     this.verboseLog = FileLogger.isVerbose();
     this.refreshLogSize();
-    // dohSummary 走 @StorageProp 订阅,无需再手动读取。但兜底一次:若 AppStorage 尚未被
-    // DohManager 写入(理论上 init 已写),显式 applyActive 触发一次同步。
-    if (AppStorage.get(DOH_SUMMARY_STORAGE_KEY) === undefined) {
-      DohManager.applyActive(getContext(this));
-    }
+    this.refreshDohSummary();
     this.enabledFeeds = FeedPrefs.getEnabledKeys(getContext(this));
+  }
+
+  // NavDestination 重新可见(从 DoH 配置页 pop 回)时由 dohTick 变更触发,重读最新 DoH 摘要。
+  private onSettingsShown(): void {
+    Log.i(`${LOG_TAG} onSettingsShown tick=${this.dohTick}`);
+    this.refreshDohSummary();
+  }
+
+  // 直接从 DohManager 读当前开关与生效服务器,组装摘要文案;不依赖 @StorageProp 的跨页刷新。
+  private refreshDohSummary(): void {
+    const context: common.Context = getContext(this);
+    const enabled: boolean = DohManager.isEnabled(context);
+    const active: DohServer = DohManager.getActiveServer(context);
+    this.dohSummary = enabled ? active.name : '已关闭';
+    Log.i(`${LOG_TAG} refreshDohSummary enabled=${enabled} activeId=${active.id} name=${active.name}`);
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -95,9 +119,7 @@ export struct SettingsPage {
             Column() {
               this.AppearanceCell()
               this.HairlineInset()
-              this.SettingCell($r('sys.symbol.security_shield'), 'DoH 配置', this.dohSummary, () => {
-                this.onOpenDoh();
-              })
+              this.DohCell()
               this.HairlineInset()
               // 主动过盾:打开交互式 CF 验证页(https://linux.do/challenge)手动过 Cloudflare。
               this.SettingCell($r('sys.symbol.checkmark_shield'), '刷新 Cloudflare 通行证', '', () => {
@@ -177,6 +199,35 @@ export struct SettingsPage {
         }
       }
     ])
+  }
+
+  // DoH 行单独成 Builder:直接读 this.dohSummary(而非当参数传给 SettingCell)。@Builder 的
+  // 按值参数不随 @State 变化重渲染,而直接引用组件状态的 @Builder 会——这样切换 DoH pop 回来
+  // 摘要文字才会真正刷新(参数式的 SettingCell 只有整页重建才更新)。
+  @Builder
+  private DohCell() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.security_shield'))
+        .fontSize(20)
+        .fontColor([$r('app.color.text_secondary')])
+      Text('DoH 配置')
+        .fontSize(15)
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+        .margin({ left: 14 })
+      if (this.dohSummary.length > 0) {
+        Text(this.dohSummary)
+          .fontSize(13)
+          .fontColor($r('app.color.text_faint'))
+          .margin({ right: 6 })
+      }
+      this.ChevronIcon()
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 14, bottom: 14 })
+    .onClick(() => {
+      this.onOpenDoh();
+    })
   }
 
   @Builder
@@ -314,26 +365,16 @@ export struct SettingsPage {
       .height(FEED_ROW_H)
       .padding({ left: CARD_PADDING, right: CARD_PADDING })
 
-      // 启用区:长按拖动排序(只有启用项参与排序)。
+      // 启用区:长按整行抬起、跟手拖动,邻行实时让位,松手吸附落位(只有启用项参与排序)。
       if (this.enabledFeeds.length > 0) {
         this.HairlineInset()
-        List() {
-          ForEach(this.enabledFeeds, (key: string) => {
-            ListItem() {
-              this.EnabledFeedRow(key)
-            }
+        Column() {
+          ForEach(this.enabledFeeds, (key: string, index: number) => {
+            this.EnabledFeedRow(key, index)
           }, (key: string) => key)
         }
         .width('100%')
-        .height(this.enabledFeeds.length * FEED_ROW_H)
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.None)
-        .onItemDragStart((event: ItemDragInfo, itemIndex: number) => {
-          return this.FeedDragPreview(this.enabledFeeds[itemIndex]);
-        })
-        .onItemDrop((event: ItemDragInfo, itemIndex: number, insertIndex: number, isSuccess: boolean) => {
-          this.reorderFeed(itemIndex, insertIndex, isSuccess);
-        })
+        .clip(false)
       }
 
       // 未启用区:关闭态,勾选即启用(移入启用区末尾)。
@@ -350,7 +391,7 @@ export struct SettingsPage {
   }
 
   @Builder
-  private EnabledFeedRow(key: string) {
+  private EnabledFeedRow(key: string, index: number) {
     Row() {
       this.DragHandle()
       Text(this.feedLabel(key))
@@ -370,6 +411,24 @@ export struct SettingsPage {
     .height(FEED_ROW_H)
     .padding({ left: CARD_PADDING, right: CARD_PADDING })
     .backgroundColor($r('app.color.surface_card'))
+    // 被拖行浮起在最上层;其余行按 hoverIndex 上下让位。
+    .zIndex(this.draggingIndex === index ? 1 : 0)
+    .translate({ y: this.rowTranslateY(index) })
+    .scale(this.draggingIndex === index ? { x: 1.02, y: 1.02 } : { x: 1, y: 1 })
+    .shadow(this.draggingIndex === index
+      ? { radius: 12, color: '#33000000', offsetY: 4 }
+      : { radius: 0, color: Color.Transparent })
+    // 长按抬起后转拖动:先长按拿到拖动权,再用竖向 Pan 跟手,避免与外层滚动抢手势。
+    .gesture(
+      GestureGroup(GestureMode.Sequence,
+        LongPressGesture({ repeat: false, duration: 300 })
+          .onAction(() => this.beginDrag(index)),
+        PanGesture({ direction: PanDirection.Vertical })
+          .onActionUpdate((event: GestureEvent) => this.updateDrag(event.offsetY))
+          .onActionEnd(() => this.endDrag())
+          .onActionCancel(() => this.endDrag())
+      )
+    )
   }
 
   @Builder
@@ -408,19 +467,6 @@ export struct SettingsPage {
     }
     .justifyContent(FlexAlign.Center)
     .width(16)
-  }
-
-  // 拖动时的浮层预览:显示被拖入口的标签。
-  @Builder
-  private FeedDragPreview(key: string) {
-    Row() {
-      Text(this.feedLabel(key))
-        .fontSize(15)
-        .fontColor($r('app.color.text_primary'))
-    }
-    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
-    .backgroundColor($r('app.color.surface_muted'))
-    .borderRadius(10)
   }
 
   @Builder
@@ -564,18 +610,91 @@ export struct SettingsPage {
     this.persistFeeds(next);
   }
 
-  private reorderFeed(fromIndex: number, insertIndex: number, isSuccess: boolean): void {
-    if (!isSuccess || fromIndex < 0 || insertIndex < 0 || fromIndex === insertIndex) {
+  // 被拖行浮起后,其余行让位的位移量:被拖行本身跟手,夹在原位与落位之间的行整体上/下移一格。
+  private rowTranslateY(index: number): number {
+    if (this.draggingIndex < 0) {
+      return 0;
+    }
+    if (index === this.draggingIndex) {
+      return this.dragOffsetY;
+    }
+    const from: number = this.draggingIndex;
+    const to: number = this.hoverIndex;
+    if (from < to && index > from && index <= to) {
+      return -FEED_ROW_H;
+    }
+    if (from > to && index >= to && index < from) {
+      return FEED_ROW_H;
+    }
+    return 0;
+  }
+
+  // 长按达成:抬起该行(轻微放大+投影),进入拖动。
+  private beginDrag(index: number): void {
+    this.hoverIndex = index;
+    this.dragOffsetY = 0;
+    animateTo({ duration: 150, curve: Curve.FastOutSlowIn }, () => {
+      this.draggingIndex = index;
+    });
+  }
+
+  // 拖动中:跟手位移(夹在启用区上下边界内),按半格阈值更新落位槽,邻行动画让位。
+  private updateDrag(offsetY: number): void {
+    if (this.draggingIndex < 0) {
       return;
     }
-    const next: string[] = this.enabledFeeds.slice();
-    if (fromIndex >= next.length) {
+    const len: number = this.enabledFeeds.length;
+    const maxUp: number = -this.draggingIndex * FEED_ROW_H;
+    const maxDown: number = (len - 1 - this.draggingIndex) * FEED_ROW_H;
+    let y: number = offsetY;
+    if (y < maxUp) {
+      y = maxUp;
+    }
+    if (y > maxDown) {
+      y = maxDown;
+    }
+    this.dragOffsetY = y;
+    let hover: number = this.draggingIndex + Math.round(y / FEED_ROW_H);
+    if (hover < 0) {
+      hover = 0;
+    }
+    if (hover > len - 1) {
+      hover = len - 1;
+    }
+    if (hover !== this.hoverIndex) {
+      animateTo({ duration: 180, curve: Curve.Friction }, () => {
+        this.hoverIndex = hover;
+      });
+    }
+  }
+
+  // 松手:浮起行吸附到落位槽,动画结束后提交新顺序并清空拖动态(此刻数组与画面已一致,无跳变)。
+  private endDrag(): void {
+    if (this.draggingIndex < 0) {
       return;
     }
-    const moved: string[] = next.splice(fromIndex, 1);
-    const target: number = insertIndex > next.length ? next.length : insertIndex;
-    next.splice(target, 0, moved[0]);
-    this.persistFeeds(next);
+    const from: number = this.draggingIndex;
+    const to: number = this.hoverIndex;
+    animateTo({
+      duration: 180,
+      curve: Curve.FastOutSlowIn,
+      onFinish: () => this.commitReorder(from, to)
+    }, () => {
+      this.dragOffsetY = (to - from) * FEED_ROW_H;
+    });
+  }
+
+  private commitReorder(from: number, to: number): void {
+    if (from >= 0 && to >= 0 && from !== to && from < this.enabledFeeds.length) {
+      const next: string[] = this.enabledFeeds.slice();
+      const moved: string[] = next.splice(from, 1);
+      const target: number = to > next.length ? next.length : to;
+      next.splice(target, 0, moved[0]);
+      this.persistFeeds(next);
+    }
+    this.draggingIndex = -1;
+    this.hoverIndex = -1;
+    this.dragOffsetY = 0;
   }
 
   private persistFeeds(keys: string[]): void {

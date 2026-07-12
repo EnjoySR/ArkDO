@@ -24,7 +24,7 @@ import { HomePage } from './HomePage';
 import { LoginPage } from './LoginPage';
 import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
-import { SettingsPage } from './SettingsPage';
+import { SettingsPage, SETTINGS_DOH_TICK } from './SettingsPage';
 import { DohSettingsPage } from './DohSettingsPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { BookmarksPage } from './BookmarksPage';
@@ -289,6 +289,13 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // 从 DoH 配置页 pop 回来时本页重新可见,自增 AppStorage 计数,让设置页 @StorageProp 重读
+      // DoH 摘要(此刻本页已在前台,变更能可靠触发重渲染;单纯 @Prop 不会流入 NavDestination 子树)。
+      .onShown(() => {
+        const prev: number = (AppStorage.get(SETTINGS_DOH_TICK) as number | undefined) ?? 0;
+        AppStorage.setOrCreate(SETTINGS_DOH_TICK, prev + 1);
+        Log.i(`${LOG_TAG} settings destination onShown tick=${prev + 1}`);
+      })
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
       .backgroundColor($r('app.color.page_bg'))
