@@ -31,9 +31,6 @@ const POSTS_CACHED_COUNT: number = 4;
 const EARLIER_PREFETCH_INDEX: number = 10;
 // 顶部"正在加载/定位"悬浮胶囊开关:暂时隐藏(产品观感待定),置 true 即恢复。
 const SHOW_LOADING_CAPSULE: boolean = false;
-// 未读入口首帧:目标楼(首条未读)顶格会把它上一楼底边的"上次访问"红线顶到导航栏后面。
-// 定位落定后回滚这么多 vp,把红线连同一小截上一楼露到导航栏下方(≈红线带高 + 上下留白)。
-const LAST_VISITED_REVEAL_VP: number = 48;
 // 提交成功的 toast 延后到浮层完全收场(遮罩淡出 220ms、退全屏 240ms、键盘收起约 270ms)之后再弹,
 // 否则 toast 存活期横跨键盘收起与退全屏两次布局变化,会被重新锚定而在屏幕上跳一下。
 const SUCCESS_TOAST_DELAY_MS: number = 350;
@@ -61,8 +58,6 @@ export struct TopicDetailPage {
   // 否则线会消失);锚楼 = 快照后第一条已加载未读楼的 post.id,楼层创建前确定,不再变化。
   private lastVisitedSnapshot: number = 0;
   private lastVisitedAnchorPostId: number = 0;
-  // 未读入口一次性标记:首帧定位落定后(首个 onScrollIndex)回滚露出红线,消费即清零。
-  private pendingRevealLastVisited: boolean = false;
   // 落地高亮的目标楼 post.id(通知/引用跳转):@State 经 @Prop 下发给各楼,已在组件树上的楼
   // 靠 @Watch 就地起播(已加载路径的楼内跳转)。短暂生效后清零,避免楼层销毁重建时重播。
   @State private flashTargetPostId: number = 0;
@@ -270,12 +265,6 @@ export struct TopicDetailPage {
     .cachedCount(POSTS_CACHED_COUNT)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .onScrollIndex((start: number, end: number) => {
-      // 未读入口首帧:此刻 initialIndex 定位已落定(目标楼顶格),回滚一点把上一楼底边的红线露出来。
-      // 一次性,消费即清零;flag 挡住后续滚动/重建再次触发。
-      if (this.pendingRevealLastVisited) {
-        this.pendingRevealLastVisited = false;
-        this.scroller.scrollBy(0, -LAST_VISITED_REVEAL_VP);
-      }
       this.currentStartListIndex = start;
       this.currentEndListIndex = end;
       // List 的 index 0 是 TopicSummary,楼层从 index 1 起 → 换算成 posts 下标再交给已读控制器。
@@ -797,9 +786,13 @@ export struct TopicDetailPage {
         }
       }
       this.updateLastVisitedAnchor();
-      // 未读入口且确有边界红线:首帧目标楼顶格会把红线顶到导航栏后,标记一次"定位后回滚露出"。
+      // 定位与红线对齐:红线锚楼取自详情接口的真实水位(result.data.lastReadPostNumber → lastVisitedSnapshot),
+      // 而入口楼号 param.targetPostNumber 来自列表页水位(可能陈旧/估算,见 HomePage.openTopic),两者不一致
+      // 会造成"定位到 50 楼、红线却画在 43 楼"。锚楼一旦确定,改用真实水位把首帧落点重算成第一条真实未读楼
+      // (锚楼的下一楼),与红线严格对齐;未读楼顶格,红线自然落在其顶边(导航栏下方),无需额外偏移。
       if (isUnreadBadgeEntry && this.lastVisitedAnchorPostId > 0) {
-        this.pendingRevealLastVisited = true;
+        const firstUnreadIndex: number = Math.max(0, this.dataSource.findIndexAtOrAfterPostNumber(this.lastVisitedSnapshot + 1));
+        this.initialListIndex = firstUnreadIndex + 1;
       }
       Log.i(`${LOG_TAG} load detail success topicId=${result.data.id} posts=${result.data.posts.length} stream=${result.data.stream ? result.data.stream.length : 0}`);
       this.startReadingTrackerIfNeeded();

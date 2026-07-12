@@ -192,9 +192,11 @@ export struct TopicPostItem {
         .layoutWeight(1)
     }
     .width('100%')
-    // 底部放置:与上方 footer 拉开间距;下方留白由本楼 padding.bottom(12)提供,红线居中于楼间。
+    // 底部放置:与上方 footer 拉开间距。红线是"横线+『上次访问』文字"一行,横线在行内垂直居中,
+    // 单靠外层 padding.bottom=0 贴底后,横线仍离楼底约半行文字高(~8vp);负的 bottom margin 抵消这半行,
+    // 把横线真正压到楼底"已读|未读"分界线上。-8 是按 fontSize 12 行高估算,可按实测微调。
     // 已在正文留白层之外,width('100%')即通栏,无需再做左右补偿。
-    .margin({ top: 12 })
+    .margin({ top: 12, bottom: -8 })
   }
 
   @Builder
