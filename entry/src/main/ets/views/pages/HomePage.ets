@@ -131,13 +131,7 @@ export struct HomePage {
             this.MenuButton()
           }
 
-          Text(this.currentFeedTitle())
-            .fontSize(26)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
+          this.FeedTitle()
 
         // 仅在会话已确认且已登录时显示铃铛(未登录/未确认不出现)。
         if (this.hasCheckedSession && this.isLoggedIn) {
@@ -321,6 +315,36 @@ export struct HomePage {
     .width('100%')
     .height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  // 顶栏标题:默认「最新」显示应用名时,把「ArkDO」末尾的 O 换成 linux.do 三色圆 logo(内联 ImageSpan
+  // 保持基线对齐);选中版块/其他入口时仍是纯文字标题。logo 为固定色 SVG,深色模式下不翻转,保留品牌配色。
+  @Builder
+  private FeedTitle() {
+    if (this.currentFeedTitle() === AppConstants.APP_NAME) {
+      Text() {
+        Span(AppConstants.APP_NAME.slice(0, -1))
+        ImageSpan($r('app.media.linuxdo_logo'))
+          .width(24)
+          .height(24)
+          .verticalAlign(ImageSpanAlignment.CENTER)
+          .margin({ bottom: 2 })
+      }
+      .fontSize(26)
+      .fontWeight(FontWeight.Bold)
+      .fontColor($r('app.color.text_primary'))
+      .maxLines(1)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+      .layoutWeight(1)
+    } else {
+      Text(this.currentFeedTitle())
+        .fontSize(26)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+    }
   }
 
   // 左上角汉堡入口:打开版块抽屉(三条发丝线,无需依赖 sys.symbol 资源)。
