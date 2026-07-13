@@ -487,7 +487,7 @@ export struct SettingsPage {
   @Builder
   private ChevronIcon() {
     SymbolGlyph($r('sys.symbol.chevron_right'))
-      .fontSize(14)
+      .fontSize(18)
       .fontColor([$r('app.color.text_faint')])
   }
 

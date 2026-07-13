@@ -5,6 +5,11 @@ import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { UserAvatar } from './UserAvatar';
 
 const AVATAR_SIZE: number = 42;
+// 头像右下角角标配色:未读=品牌蓝底白图标;已读=白底深灰图标(对齐站点)。
+const BADGE_BG_UNREAD: string = '#08C';
+const BADGE_BG_READ: string = '#FFFFFF';
+const BADGE_FG_UNREAD: string = '#FFFFFF';
+const BADGE_FG_READ: string = '#222222';
 
 // 通知列表单行:有发起人 → 头像 + 右下角类型角标;系统类 → 纯色类型图标圈。
 // 右侧动作文案(发起人加粗)+ 帖子标题两行、相对时间;未读整行淡蓝底 + 蓝点。
@@ -79,13 +84,16 @@ export struct NotificationListItem {
           avatarSize: AVATAR_SIZE
         })
         Stack() {
-          FaIconView({ icon: this.faIcon(this.item.iconId), color: '#FFFFFF', iconSize: 11 })
+          FaIconView({
+            icon: this.faIcon(this.item.iconId),
+            color: this.item.read ? BADGE_FG_READ : BADGE_FG_UNREAD,
+            iconSize: 11
+          })
         }
         .width(20)
         .height(20)
         .borderRadius(10)
-        .backgroundColor(this.item.iconColor)
-        .border({ width: 2.5, color: this.item.read ? $r('app.color.page_bg') : $r('app.color.info_soft_bg') })
+        .backgroundColor(this.item.read ? BADGE_BG_READ : BADGE_BG_UNREAD)
         .alignContent(Alignment.Center)
         .margin({ right: -3, bottom: -3 })
       } else {

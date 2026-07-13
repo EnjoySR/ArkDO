@@ -359,31 +359,6 @@ export struct TopicDetailPage {
       })
     }
 
-    // 回到顶部 mini 按钮:滚出首屏(摘要卡不可见)才淡入,叠在蓝色回复 FAB 正上方。
-    if (this.detail && !this.summaryVisible && !this.showComposer && !this.composerFullScreen) {
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        FaIconView({
-          icon: this.backToTopIcon(),
-          color: $r('app.color.icon_secondary'),
-          iconSize: 18
-        })
-      }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_card'))
-      .border({ width: 0.5, color: $r('app.color.border') })
-      .shadow({ radius: 6, color: '#22000000', offsetX: 0, offsetY: 1 })
-      // 与 52 的回复 FAB 中线对齐(16 + (52-40)/2),竖直叠在其上方 8px。
-      .margin({ right: 22, bottom: 84 })
-      .transition(TransitionEffect.asymmetric(
-        TransitionEffect.OPACITY.animation({ duration: 150, curve: Curve.EaseOut }),
-        TransitionEffect.OPACITY.animation({ duration: 100, curve: Curve.EaseIn })
-      ))
-      .onClick(() => {
-        this.scroller.scrollEdge(Edge.Top);
-      })
-    }
-
     // 右下角悬浮回复按钮:仅在帖子已加载、浮层未展开且全屏布局已还原时显示。
     // 必须一并绑定 composerFullScreen:关闭浮层时退全屏延迟 240ms,期间根 Stack 底边仍延伸到
     // 导航条区域,锚在底边的按钮会先出现在偏下位置、退全屏后再跳回(用户反馈的"闪回" BUG)。
@@ -718,11 +693,6 @@ export struct TopicDetailPage {
   private replyFabIcon(): FaIconDefinition {
     const def: FaIconDefinition | undefined = getFaIcon('reply');
     return def ? def : { id: 'reply', rawfilePath: 'fa_icons/reply.svg' };
-  }
-
-  private backToTopIcon(): FaIconDefinition {
-    const def: FaIconDefinition | undefined = getFaIcon('arrows-up-to-line');
-    return def ? def : { id: 'arrows-up-to-line', rawfilePath: 'fa_icons/arrows-up-to-line.svg' };
   }
 
   // 依据视口首/末项下标维护 scrubber 状态:可滚动性、钉底闩、当前楼号。

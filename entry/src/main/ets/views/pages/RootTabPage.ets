@@ -13,7 +13,7 @@ import { NotificationService } from '../../services/notification/NotificationSer
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { AvatarImageCache } from '../../services/network/AvatarImageCache';
-import { NetworkResult } from '../../services/network/NetworkTypes';
+import { NetworkResult, NetworkErrorCode, ChallengeState } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { ArkWebHost } from '../components/ArkWebHost';
 import { MathRenderHost } from '../components/MathRenderHost';
@@ -59,6 +59,9 @@ export struct RootTabPage {
   private sessionCheckSequence: number = 0;
   // 上次会话检查是否失败(CF 盾/网络原因,状态可能不真实),下拉刷新时据此补查。
   private lastSessionCheckFailed: boolean = false;
+  // 网络层自愈闸:长时间后台回前台后宿主 webview 连接/DNS 可能僵死(status=0 且非 CF 盾),
+  // 首次遇到时重载一次宿主拿新连接并重查;每段失败只自愈一次,成功后复位,避免重载死循环。
+  private hasSelfHealedNetwork: boolean = false;
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private handledChallengeVersion: number = ChallengeEventBus.getCurrentVersion();
   private unsubscribeChallengeRequired?: () => void = undefined;
@@ -136,8 +139,10 @@ export struct RootTabPage {
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .bindSheet($$this.isSheetVisible, this.RootSheetBuilder, {
-      height: '90%',
-      dragBar: true,
+      // CF 交互式挑战需要尽量完整的视口(半屏+圆角+露底会被 Turnstile 视作可疑),且过盾中途
+      // 不该被误滑关,故 CHALLENGE 用满高全屏、去拖动条;登录 sheet 维持 90% 底部弹层。
+      height: this.activeSheet === RootSheet.CHALLENGE ? '100%' : '90%',
+      dragBar: this.activeSheet !== RootSheet.CHALLENGE,
       // CF 验证弹窗自带「关闭」按钮,隐藏原生右上角 X 避免出现两个关闭入口;其余 sheet 保留原生 X。
       showClose: this.activeSheet !== RootSheet.CHALLENGE,
       maskColor: '#33000000',
@@ -608,6 +613,8 @@ export struct RootTabPage {
     this.hasCheckedSession = true;
     if (result.success) {
       this.lastSessionCheckFailed = false;
+      // 连接恢复,复位自愈闸,允许下一段网络故障再自愈一次。
+      this.hasSelfHealedNetwork = false;
       this.currentUser = result.data;
       Log.i(`${LOG_TAG} current user checked loggedIn=${this.currentUser !== undefined} username=${this.currentUser?.username ?? ''} hasAvatar=${this.currentUser?.avatarTemplate !== undefined}`);
       // 登录:本次响应已带未读数,立即广播一次(铃铛与头像同帧出现),再启动前台轮询;
@@ -628,6 +635,20 @@ export struct RootTabPage {
     // 仅记失败标记,等下一次下拉刷新时补查。只有成功响应且 current_user 为空才真正置为未登录。
     this.lastSessionCheckFailed = true;
     Log.i(`${LOG_TAG} current user check failed status=${result.statusCode} challenge=${result.challengeState}, keep previous loggedIn=${this.currentUser !== undefined}`);
+
+    // 长时间后台回前台后,宿主 webview 的连接/DNS 解析器可能已僵死:表现为 status=0 的纯网络
+    // 失败(error=network_failure),且非 CF 盾(challengeState=NONE)。这条旧连接自己不会恢复,
+    // 再怎么用它重查都白搭;重载一次宿主拿一条全新连接(等价于用户手动切 DoH 触发的重载)。
+    // reloadHostForDoh 会同步 bump 会话版本 → handleSessionChanged → 宿主重载完再自动重查,
+    // 无需在此显式重查。每段失败只自愈一次,重载后仍失败就退回既有兜底,不再循环重载。
+    const isNetworkFailure: boolean =
+      result.error?.code === NetworkErrorCode.NETWORK_FAILURE &&
+      result.challengeState === ChallengeState.NONE;
+    if (isNetworkFailure && !this.hasSelfHealedNetwork) {
+      this.hasSelfHealedNetwork = true;
+      Log.i(`${LOG_TAG} network failure self-heal: reload host and recheck`);
+      this.reloadHostForDoh();
+    }
   }
 
   // 下拉刷新时的会话补查:仅在上次检查失败(状态可能不真实)时重查一次,正常情况零开销。

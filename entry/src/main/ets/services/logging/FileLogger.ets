@@ -9,8 +9,8 @@ const HILOG_DOMAIN: number = 0x0000;
 const LOG_DIR_NAME: string = 'app_logs';
 const CURRENT_FILE_NAME: string = 'arkdo.log';
 const EXPORT_FILE_NAME: string = 'arkdo-log-export.txt';
-// 单文件封顶 4MB,归档保留 2 个(current + 2 = 3 份),总占用 ≤12MB。
-const MAX_FILE_BYTES: number = 4 * 1024 * 1024;
+// 单文件封顶 1MB,归档保留 2 个(current + 2 = 3 份),总占用 ≤3MB。
+const MAX_FILE_BYTES: number = 1 * 1024 * 1024;
 const MAX_ARCHIVE_FILES: number = 2;
 // 攒够 64KB 或每 5 秒刷盘一次:批量写避免高峰期(列表刷新)频繁同步 IO 卡主线程。
 const FLUSH_INTERVAL_MS: number = 5000;

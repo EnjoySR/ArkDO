@@ -16,18 +16,30 @@ const T_PRIVATE_MESSAGE: number = 6;
 const T_INVITED_TO_PM: number = 7;
 const T_INVITEE_ACCEPTED: number = 8;
 const T_POSTED: number = 9;
+const T_MOVED_POST: number = 10;
 const T_LINKED: number = 11;
 const T_GRANTED_BADGE: number = 12;
+const T_INVITED_TO_TOPIC: number = 13;
+const T_CUSTOM: number = 14;
 const T_GROUP_MENTIONED: number = 15;
 const T_GROUP_MESSAGE_SUMMARY: number = 16;
 const T_WATCHING_FIRST_POST: number = 17;
+const T_TOPIC_REMINDER: number = 18;
 const T_LIKED_CONSOLIDATED: number = 19;
-const T_CUSTOM: number = 14;
 const T_POST_APPROVED: number = 20;
+const T_MEMBERSHIP_REQUEST_ACCEPTED: number = 22;
+const T_MEMBERSHIP_REQUEST_CONSOLIDATED: number = 23;
 const T_BOOKMARK_REMINDER: number = 24;
 const T_REACTION: number = 25;
-const T_BOOST: number = 43;        // linux.do 的 Boost 助力
-const T_FOLLOWING: number = 801;   // linux.do 自定义:关注的用户有新动态
+const T_VOTES_RELEASED: number = 26;
+const T_WATCHING_CATEGORY_OR_TAG: number = 36;
+const T_NEW_FEATURES: number = 37;
+const T_ADMIN_PROBLEMS: number = 38;
+const T_LINKED_CONSOLIDATED: number = 39;
+const T_BOOST: number = 43;                // linux.do 的 Boost 助力
+const T_FOLLOWING: number = 800;           // discourse-follow:有人关注了你
+const T_FOLLOWING_CREATED_TOPIC: number = 801; // discourse-follow:关注的人发布了主题
+const T_FOLLOWING_REPLIED: number = 802;   // discourse-follow:关注的人有新回复
 
 // 角标配色(对齐设计稿)。
 const C_REPLY: string = '#3B82F6';
@@ -198,8 +210,15 @@ export class NotificationApi {
   // 类型 → 图标/颜色/文案。未覆盖但有发起人的类型走"智能兜底"(头像+comment+按楼号推动词),
   // 纯系统类才落到铃铛。hasActorHint=是否解析到发起人名。
   private describe(type: number, data: RawNotificationData, postNumber: number | undefined, hasActorHint: boolean): NotificationVisual {
+    // discourse-follow 插件:图标与站点保持一致(new-follower / new-topic / new-reply)。
     if (type === T_FOLLOWING) {
-      return { iconId: 'user-plus', iconColor: C_REPLY, actionText: this.postVerb(postNumber), hasActor: true };
+      return { iconId: 'discourse-follow-new-follower', iconColor: C_REPLY, actionText: '关注了你', hasActor: true };
+    }
+    if (type === T_FOLLOWING_CREATED_TOPIC) {
+      return { iconId: 'discourse-follow-new-topic', iconColor: C_REPLY, actionText: '发布了新主题', hasActor: true };
+    }
+    if (type === T_FOLLOWING_REPLIED) {
+      return { iconId: 'discourse-follow-new-reply', iconColor: C_REPLY, actionText: '回复了主题', hasActor: true };
     }
     if (type === T_CUSTOM) {
       return { iconId: 'comment', iconColor: C_QUOTE, actionText: this.postVerb(postNumber), hasActor: true };
@@ -208,17 +227,20 @@ export class NotificationApi {
       return { iconId: 'rocket', iconColor: C_WATCH, actionText: '为你的帖子助力', hasActor: true };
     }
     if (type === T_POST_APPROVED) {
-      return { iconId: 'circle-check', iconColor: C_APPROVED, actionText: '你的帖子已通过审核', hasActor: false };
+      return { iconId: 'check', iconColor: C_APPROVED, actionText: '你的帖子已通过审核', hasActor: false };
     }
-    if (type === T_REPLIED || type === T_POSTED) {
-      return { iconId: 'reply', iconColor: C_REPLY, actionText: type === T_POSTED ? '回复了主题' : '回复了你', hasActor: true };
+    if (type === T_REPLIED) {
+      return { iconId: 'reply', iconColor: C_REPLY, actionText: '回复了你', hasActor: true };
+    }
+    if (type === T_POSTED || type === T_WATCHING_CATEGORY_OR_TAG) {
+      return { iconId: 'discourse-bell-exclamation', iconColor: C_REPLY, actionText: '回复了主题', hasActor: true };
     }
     if (type === T_MENTIONED) {
       return { iconId: 'at', iconColor: C_MENTION, actionText: '提到了你', hasActor: true };
     }
     if (type === T_GROUP_MENTIONED) {
       const group: string = data.group_name ? `@${data.group_name}` : '群组';
-      return { iconId: 'at', iconColor: C_MENTION, actionText: `在 ${group} 提到了你`, hasActor: true };
+      return { iconId: 'users', iconColor: C_MENTION, actionText: `在 ${group} 提到了你`, hasActor: true };
     }
     if (type === T_LIKED || type === T_LIKED_CONSOLIDATED || type === T_REACTION) {
       return { iconId: 'heart', iconColor: C_LIKE, actionText: type === T_REACTION ? '点了表情回应' : '赞了你的帖子', hasActor: true };
@@ -226,26 +248,53 @@ export class NotificationApi {
     if (type === T_QUOTED) {
       return { iconId: 'quote-right', iconColor: C_QUOTE, actionText: '引用了你', hasActor: true };
     }
-    if (type === T_LINKED) {
+    if (type === T_LINKED || type === T_LINKED_CONSOLIDATED) {
       return { iconId: 'link', iconColor: C_QUOTE, actionText: '引用了你的帖子', hasActor: true };
     }
-    if (type === T_PRIVATE_MESSAGE || type === T_INVITED_TO_PM || type === T_GROUP_MESSAGE_SUMMARY) {
+    if (type === T_INVITED_TO_TOPIC) {
+      return { iconId: 'hand-point-right', iconColor: C_PM, actionText: '邀请你参与话题', hasActor: true };
+    }
+    if (type === T_PRIVATE_MESSAGE || type === T_INVITED_TO_PM) {
       return { iconId: 'envelope', iconColor: C_PM, actionText: type === T_INVITED_TO_PM ? '邀请你参与私信' : '给你发了私信', hasActor: true };
     }
+    if (type === T_GROUP_MESSAGE_SUMMARY) {
+      return { iconId: 'users', iconColor: C_PM, actionText: '有新的群组私信', hasActor: false };
+    }
     if (type === T_INVITEE_ACCEPTED) {
-      return { iconId: 'envelope', iconColor: C_PM, actionText: '接受了你的邀请', hasActor: true };
+      return { iconId: 'user', iconColor: C_PM, actionText: '接受了你的邀请', hasActor: true };
     }
     if (type === T_EDITED) {
-      return { iconId: 'reply', iconColor: C_GRAY, actionText: '编辑了你的帖子', hasActor: true };
+      return { iconId: 'pencil', iconColor: C_GRAY, actionText: '编辑了你的帖子', hasActor: true };
+    }
+    if (type === T_MOVED_POST) {
+      return { iconId: 'right-from-bracket', iconColor: C_GRAY, actionText: '移动了你的帖子', hasActor: true };
     }
     if (type === T_GRANTED_BADGE) {
       return { iconId: 'certificate', iconColor: C_BADGE, actionText: '你获得了徽章', hasActor: false };
     }
+    if (type === T_MEMBERSHIP_REQUEST_ACCEPTED) {
+      return { iconId: 'user-plus', iconColor: C_APPROVED, actionText: '通过了你的加群申请', hasActor: false };
+    }
+    if (type === T_MEMBERSHIP_REQUEST_CONSOLIDATED) {
+      return { iconId: 'users', iconColor: C_MENTION, actionText: '有新的加群申请', hasActor: false };
+    }
     if (type === T_BOOKMARK_REMINDER) {
-      return { iconId: 'bookmark', iconColor: C_BOOK, actionText: '书签提醒', hasActor: false };
+      return { iconId: 'discourse-bookmark-clock', iconColor: C_BOOK, actionText: '书签提醒', hasActor: false };
+    }
+    if (type === T_TOPIC_REMINDER) {
+      return { iconId: 'far-clock', iconColor: C_WATCH, actionText: '主题提醒', hasActor: false };
+    }
+    if (type === T_VOTES_RELEASED) {
+      return { iconId: 'plus', iconColor: C_APPROVED, actionText: '你的投票已释放', hasActor: false };
+    }
+    if (type === T_NEW_FEATURES) {
+      return { iconId: 'gift', iconColor: C_REPLY, actionText: '有新功能上线', hasActor: false };
+    }
+    if (type === T_ADMIN_PROBLEMS) {
+      return { iconId: 'triangle-exclamation', iconColor: C_LIKE, actionText: '站点存在待处理问题', hasActor: false };
     }
     if (type === T_WATCHING_FIRST_POST) {
-      return { iconId: 'bell', iconColor: C_WATCH, actionText: '发布了新主题', hasActor: true };
+      return { iconId: 'discourse-bell-one', iconColor: C_WATCH, actionText: '发布了新主题', hasActor: true };
     }
     // 智能兜底:未知类型但有发起人 → 当作帖子动态(头像 + comment 角标 + 按楼号推动词);
     // 无发起人才落到系统铃铛。避免"有头像却显示灰铃铛"。
