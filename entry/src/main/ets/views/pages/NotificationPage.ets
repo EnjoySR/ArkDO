@@ -2,6 +2,7 @@ import { Log } from '../../services/logging/Log';
 import { NotificationItem } from '../../models/Notification';
 import { NotificationApi } from '../../services/notification/NotificationApi';
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
+import { LoginGate } from '../../services/session/LoginGate';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
 import { NotificationListItem } from '../components/NotificationListItem';
 
@@ -259,6 +260,10 @@ export struct NotificationPage {
   }
 
   private async markAllRead(): Promise<void> {
+    // 未登录:拦截并弹登录页,不发请求(全部标记已读)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return;
+    }
     const next: NotificationItem[] = [];
     for (let index: number = 0; index < this.items.length; index++) {
       next.push(this.items[index].read ? this.items[index] : this.cloneRead(this.items[index]));

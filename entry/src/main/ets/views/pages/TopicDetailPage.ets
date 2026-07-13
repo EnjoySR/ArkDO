@@ -5,6 +5,7 @@ import { TopicCategory, TopicTag } from '../../models/Topic';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
+import { LoginGate } from '../../services/session/LoginGate';
 import { TopicReadController } from '../../services/reading/TopicReadController';
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
 import { PostActions } from '../../services/topic/PostActions';
@@ -452,6 +453,10 @@ export struct TopicDetailPage {
 
   // 点 FAB:回复整个话题(顶层回复)。
   private openComposerForTopic(): void {
+    // 未登录:拦截并弹登录页,不打开输入浮层(回复/评论)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return;
+    }
     this.boostTargetPostId = 0;
     this.replyTargetPostNumber = 0;
     this.composerPlaceholder = '回复当前话题';
@@ -460,6 +465,10 @@ export struct TopicDetailPage {
 
   // 点某楼回复按钮:定向回复该楼,占位文字「回复<作者昵称>」。
   private openComposerForPost(post: TopicPost): void {
+    // 未登录:拦截并弹登录页,不打开输入浮层(定向回复)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return;
+    }
     this.boostTargetPostId = 0;
     this.replyTargetPostNumber = post.postNumber;
     this.composerPlaceholder = `回复${this.resolveAuthorName(post)}`;
@@ -468,6 +477,10 @@ export struct TopicDetailPage {
 
   // 点火箭:给该楼发 boost,占位文字「发一个 boost…」。
   private openComposerForBoost(post: TopicPost): void {
+    // 未登录:拦截并弹登录页,不打开输入浮层(boost)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return;
+    }
     this.replyTargetPostNumber = 0;
     this.boostTargetPostId = post.id;
     this.composerPlaceholder = '发一个 boost…';

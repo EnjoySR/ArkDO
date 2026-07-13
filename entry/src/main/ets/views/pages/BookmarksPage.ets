@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { LoginGate } from '../../services/session/LoginGate';
 import { Bookmark, BookmarkPage } from '../../models/Bookmark';
 import { TopicCategory } from '../../models/Topic';
 import { RelativeTime } from '../../common/utils/RelativeTime';
@@ -396,6 +397,10 @@ export struct BookmarksPage {
     if (!this.service) {
       return;
     }
+    // 未登录:拦截并弹登录页,不发请求(书签置顶)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return;
+    }
     const result: NetworkResult<boolean> = await this.service.togglePin(item.id);
     if (!result.success) {
       this.showToast(result.error?.message ? result.error.message : '操作失败，请稍后再试');
@@ -436,6 +441,10 @@ export struct BookmarksPage {
 
   private async performDelete(item: Bookmark): Promise<void> {
     if (!this.service) {
+      return;
+    }
+    // 未登录:拦截并弹登录页,不发请求(删除书签)。
+    if (!LoginGate.ensureLoggedIn()) {
       return;
     }
     const result: NetworkResult<boolean> = await this.service.deleteBookmark(item.id);

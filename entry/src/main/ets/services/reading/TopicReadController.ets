@@ -3,6 +3,7 @@ import { TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { AppStateEventBus } from '../session/AppStateEventBus';
 import { TopicReadStateEventBus } from '../session/TopicReadStateEventBus';
 import { ReadingTracker, ReportTimingsFn } from './ReadingTracker';
+import { LoginGate } from '../session/LoginGate';
 
 // 相邻楼层错峰翻已读的间隔:让蓝点淡出动画自上而下依次开始,对齐官网的级联观感。
 const READ_STAGGER_STEP_MS: number = 80;
@@ -57,10 +58,15 @@ export class TopicReadController {
     }
   }
 
-  // 详情加载成功后启动计时上报。未登录时详情响应不含已读字段,不启动(匿名不 POST timings)。
+  // 详情加载成功后启动计时上报。未登录一律不启动:匿名 POST /topics/timings 会被后端拒,
+  // 且 Discourse 匿名话题响应里 post 仍带 read(boolean),不能靠"响应是否含已读字段"推断登录态,
+  // 必须以全局登录闸门为准(避免未登录时定时器不停发 timings 报错)。
   startIfNeeded(reportFn: ReportTimingsFn, logTag: string): void {
     const detail: TopicDetail | undefined = this.getDetail();
     if (this.started || !detail) {
+      return;
+    }
+    if (!LoginGate.isLoggedIn()) {
       return;
     }
     if (!this.hasServerReadState()) {

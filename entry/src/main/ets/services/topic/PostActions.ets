@@ -5,6 +5,7 @@ import { Poll, PollVoteResult, TopicPost } from '../../models/TopicDetail';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { PollMutation, PollSnapshot } from './PollMutation';
 import { TopicService } from './TopicService';
+import { LoginGate } from '../session/LoginGate';
 
 const LOG_TAG: string = '[ArkDO][PostActions]';
 
@@ -32,6 +33,10 @@ export class PostActions {
 
   // 切换某楼表情回应:请求先行(不乐观更新),返回成败;成功由组件侧应用状态变化并播动画。
   async toggleReaction(post: TopicPost, reaction: string): Promise<boolean> {
+    // 未登录:拦截并弹登录页,不发请求(点赞/表情回应)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return false;
+    }
     const result: NetworkResult<string> =
       await new TopicService(this.getBridge()).toggleReaction(post.id, this.resolveTopicId(post), reaction);
 
@@ -44,6 +49,10 @@ export class PostActions {
 
   // 投票:先乐观更新模型,再发 PUT;成功用服务端真实值校正模型并回传给 PollView,失败回滚并回传 null。
   async vote(post: TopicPost, poll: Poll, optionIds: string[]): Promise<PollVoteResult | null> {
+    // 未登录:拦截并弹登录页,不做乐观更新也不发请求(投票)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return null;
+    }
     const snapshot: PollSnapshot = PollMutation.snapshot(poll);
     PollMutation.applyVote(poll, optionIds);
 
@@ -62,6 +71,10 @@ export class PostActions {
 
   // 撤销投票:先乐观更新模型,再发 DELETE;成功用服务端真实值校正模型并回传,失败回滚并回传 null。
   async removeVote(post: TopicPost, poll: Poll): Promise<PollVoteResult | null> {
+    // 未登录:拦截并弹登录页,不做乐观更新也不发请求(撤销投票)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return null;
+    }
     const snapshot: PollSnapshot = PollMutation.snapshot(poll);
     PollMutation.applyRemove(poll);
 
@@ -96,6 +109,10 @@ export class PostActions {
   // 书签 toggle:post.bookmarked/bookmarkId 为网络侧真源,发网络+失败回滚;返回操作后的最终收藏态,
   // 交给子组件校正本地显示 @State(子组件负责乐观翻转与重渲染)。带 [ARKDO][Bookmark] 日志便于排查。
   async toggleBookmark(post: TopicPost): Promise<boolean> {
+    // 未登录:拦截并弹登录页,不做乐观更新也不发请求(收藏/书签)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return post.bookmarked === true;
+    }
     const topicId: number = this.resolveTopicId(post);
     const service: TopicService = new TopicService(this.getBridge());
     const wasBookmarked: boolean = post.bookmarked === true;

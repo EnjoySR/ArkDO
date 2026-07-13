@@ -15,6 +15,7 @@ import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge'
 import { AvatarImageCache } from '../../services/network/AvatarImageCache';
 import { NetworkResult, NetworkErrorCode, ChallengeState } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
+import { LoginGate } from '../../services/session/LoginGate';
 import { ArkWebHost } from '../components/ArkWebHost';
 import { MathRenderHost } from '../components/MathRenderHost';
 import { ensureFaIconsLoaded } from '../components/FaIcon';
@@ -67,6 +68,7 @@ export struct RootTabPage {
   private unsubscribeChallengeRequired?: () => void = undefined;
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeDownload?: () => void = undefined;
+  private unsubscribeRequireLogin?: () => void = undefined;
   // 挑战恢复协调器:优先后台静默过盾,失败才弹窗。惰性创建(需闭包引用本组件方法)。
   private challengeRecovery?: ChallengeRecoveryCoordinator = undefined;
 
@@ -101,6 +103,12 @@ export struct RootTabPage {
         this.handleDownloadResult(result);
       });
     }
+    // 深层页面/楼层动作在未登录时点写操作,经 LoginGate 请求登录,统一在此弹出登录页。
+    if (!this.unsubscribeRequireLogin) {
+      this.unsubscribeRequireLogin = LoginGate.subscribe(() => {
+        this.openLoginPage();
+      });
+    }
   }
 
   aboutToDisappear(): void {
@@ -117,6 +125,10 @@ export struct RootTabPage {
     if (this.unsubscribeDownload) {
       this.unsubscribeDownload();
       this.unsubscribeDownload = undefined;
+    }
+    if (this.unsubscribeRequireLogin) {
+      this.unsubscribeRequireLogin();
+      this.unsubscribeRequireLogin = undefined;
     }
   }
 
@@ -616,6 +628,8 @@ export struct RootTabPage {
       // 连接恢复,复位自愈闸,允许下一段网络故障再自愈一次。
       this.hasSelfHealedNetwork = false;
       this.currentUser = result.data;
+      // 同步全局登录态镜像:供深层页面/楼层动作的写操作闸门(LoginGate)读取。
+      LoginGate.setLoggedIn(this.currentUser !== undefined);
       Log.i(`${LOG_TAG} current user checked loggedIn=${this.currentUser !== undefined} username=${this.currentUser?.username ?? ''} hasAvatar=${this.currentUser?.avatarTemplate !== undefined}`);
       // 登录:本次响应已带未读数,立即广播一次(铃铛与头像同帧出现),再启动前台轮询;
       // 登出:停表并清零。
