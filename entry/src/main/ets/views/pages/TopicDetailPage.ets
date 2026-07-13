@@ -1,6 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
-import { Poll, PollVoteResult, PostBoost, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { Poll, PollVoteResult, PostBoost, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { TopicCategory, TopicTag } from '../../models/Topic';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
@@ -239,6 +239,13 @@ export struct TopicDetailPage {
           },
           onToggleBookmark: (targetPost: TopicPost) => {
             return this.postActions.toggleBookmark(targetPost);
+          },
+          // "俺也一样"(shared issue):话题级功能,只对 shared_issue_visible 的一楼下发有效值,其余楼不渲染。
+          sharedIssueVisible: post.postNumber === 1 && (this.detail?.sharedIssueVisible ?? false),
+          sharedIssueCount: post.postNumber === 1 ? (this.detail?.sharedIssueCount ?? 0) : 0,
+          sharedIssueCreated: post.postNumber === 1 ? (this.detail?.userCreatedSharedIssue ?? false) : false,
+          onToggleSharedIssue: (): Promise<SharedIssueResult | null> => {
+            return this.toggleSharedIssue();
           }
         })
       }, (post: TopicPost) => post.id.toString())
@@ -686,6 +693,22 @@ export struct TopicDetailPage {
     const reason: string = result.error ? result.error.message : '加载回复失败，请稍后重试。';
     this.showComposerToast(reason, 2000);
     return null;
+  }
+
+  // "俺也一样"(shared issue)toggle:发网络并把服务端返回的权威新态回写到 this.detail(持久化计数/已点态),
+  // 免得一楼 item 被 LazyForEach 回收重建后 aboutToAppear 又从旧值初始化、把刚点的"抹回去"。
+  // 返回 { created, count } 给按钮做本地校正;null=失败(按钮回滚)。
+  private async toggleSharedIssue(): Promise<SharedIssueResult | null> {
+    const topicId: number = this.detail?.id ?? 0;
+    if (topicId <= 0) {
+      return null;
+    }
+    const result: SharedIssueResult | null = await this.postActions.toggleSharedIssue(topicId);
+    if (result !== null && this.detail) {
+      this.detail.userCreatedSharedIssue = result.created;
+      this.detail.sharedIssueCount = result.count;
+    }
+    return result;
   }
 
   private showComposerToast(message: string, duration: number): void {

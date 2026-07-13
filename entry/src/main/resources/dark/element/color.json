@@ -151,6 +151,18 @@
     {
       "name": "connect_text_tertiary",
       "value": "#666666"
+    },
+    {
+      "name": "me_too_fg",
+      "value": "#C8CCD2"
+    },
+    {
+      "name": "me_too_border",
+      "value": "#3A3D42"
+    },
+    {
+      "name": "boost_bubble_bg",
+      "value": "#26292E"
     }
   ]
 }

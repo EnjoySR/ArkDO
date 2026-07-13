@@ -1,6 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import { curves } from '@kit.ArkUI';
-import { AcceptedAnswer, Poll, PollVoteResult, PostBoost, PostReaction, TopicPost } from '../../models/TopicDetail';
+import { AcceptedAnswer, Poll, PollVoteResult, PostBoost, PostReaction, SharedIssueResult, TopicPost } from '../../models/TopicDetail';
 import { CookedHtmlParser, RichInlineNode, RichInlineType } from '../../services/content/CookedHtmlParser';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { ReactionMutation } from '../../services/topic/ReactionMutation';
@@ -97,6 +97,13 @@ export struct TopicPostItem {
   onCopyPostLink: (post: TopicPost) => void = () => {};
   // 书签 toggle 上抛页面发网络,返回操作后的最终收藏态(失败=回滚后的原态),用于校正本地显示。
   onToggleBookmark: (post: TopicPost) => Promise<boolean> = () => Promise.resolve(false);
+  // linux.do shared issue（"俺也一样"）。仅一楼(postNumber===1)且 shared_issue_visible 时,页面下发 sharedIssueVisible=true。
+  // 计数/已点态是话题级值(不在 @Observed post 上),按 memory objectlink-state-source 用本组件自身 @State 驱动显示才稳。
+  sharedIssueVisible: boolean = false;
+  sharedIssueCount: number = 0;
+  sharedIssueCreated: boolean = false;
+  // "俺也一样" toggle(纯翻转端点,不需传目标态):上抛页面发网络,返回服务端权威新态 { created, count } 覆盖本地;null=失败回滚。
+  onToggleSharedIssue: () => Promise<SharedIssueResult | null> = () => Promise.resolve(null);
   @State private showReactionPicker: boolean = false;
   // 「更多」展开态:点 ellipsis 后换出「拷贝链接 + 书签」两个按钮。对齐官方:展开后不再收起。
   @State private moreExpanded: boolean = false;
@@ -131,6 +138,12 @@ export struct TopicPostItem {
   private flashTimerId: number = -1;
   // 「跳到帖子」跳转进行中的目标楼号(>0 时该行箭头换加载图标;重开窗口是网络请求,需要反馈)。
   @State private jumpLoadingPostNumber: number = 0;
+  // "俺也一样"本地显示态:aboutToAppear 从 props(话题级值)初始化,点击乐观翻转,再用页面回传的服务端计数校正。
+  // 用自身 @State(而非 @ObjectLink post 深层字段)驱动,重渲染才稳(见 memory objectlink-state-source)。
+  @State private meTooLocal: boolean = false;
+  @State private meTooCountLocal: number = 0;
+  // 请求进行中:守卫防连点(乐观已翻转,不再叠加 loading 图标,观感对齐官网即点即变)。
+  @State private meTooRequesting: boolean = false;
 
   build() {
     ListItem() {
@@ -180,6 +193,11 @@ export struct TopicPostItem {
               .fontWeight(FontWeight.Bold)
               .fontColor('#00AEFF')
               .margin({ top: 10 })
+          }
+
+          // "俺也一样"(shared issue):话题级功能,仅一楼(页面只对 shared_issue_visible 的一楼下发)渲染,悬在操作栏上方。
+          if (this.sharedIssueVisible) {
+            this.MeTooButton()
           }
 
           this.PostFooter()
@@ -621,6 +639,58 @@ export struct TopicPostItem {
     })
   }
 
+  // "俺也一样"(shared issue)按钮:surface_card 底 + me_too_border 描边(1px)+ 圆角 4,hand 图标 + 文字。
+  // 未点:图标/文字 me_too_fg;已点:图标染 ld_accent,文字后带英文括号计数,如"俺也一样(3)"。配色全走资源色,深浅自动翻转。
+  // 图标用结构化 if/else 分三支渲染(loading / 已点 / 未点)各自独立实例:ArkUI 对子组件对象型属性(此处 color 是 Resource)
+  // 的 diff 更新不可靠,复用同一 FaIconView 只换 color 不会重绘(点后手不变色的根因,同 chevron/书签,见 objectlink-state-source)。
+  @Builder
+  private MeTooButton() {
+    Row({ space: 6 }) {
+      if (this.meTooRequesting) {
+        LoadingProgress()
+          .width(16)
+          .height(16)
+          .color($r('app.color.me_too_fg'))
+      } else if (this.meTooLocal) {
+        FaIconView({ icon: this.faIcon('hand'), color: $r('app.color.ld_accent'), iconSize: 16 })
+      } else {
+        FaIconView({ icon: this.faIcon('hand'), color: $r('app.color.me_too_fg'), iconSize: 16 })
+      }
+      Text(this.meTooLabel())
+        .fontSize(15)
+        .fontColor($r('app.color.me_too_fg'))
+    }
+    .alignItems(VerticalAlign.Center)
+    .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+    .backgroundColor($r('app.color.surface_card'))
+    .border({ width: 1, color: $r('app.color.me_too_border') })
+    .borderRadius(4)
+    .margin({ top: 12 })
+    .onClick(() => {
+      this.toggleMeToo();
+    })
+  }
+
+  // 按钮文字:未点"俺也一样";已点在其后追加英文括号计数"俺也一样(N)"。
+  private meTooLabel(): string {
+    return this.meTooLocal ? `俺也一样(${this.meTooCountLocal})` : '俺也一样';
+  }
+
+  // "俺也一样" toggle:不做乐观更新——点击即转圈(meTooRequesting),发网络等结果;
+  // 成功用服务端权威新态 { created, count } 覆盖本地,失败保持原态(服务层已 toast)。请求中重复点忽略。
+  private async toggleMeToo(): Promise<void> {
+    if (this.meTooRequesting) {
+      return;
+    }
+    this.meTooRequesting = true;
+    const result: SharedIssueResult | null = await this.onToggleSharedIssue();
+    this.meTooRequesting = false;
+    if (result !== null) {
+      this.meTooLocal = result.created;
+      this.meTooCountLocal = result.count;
+    }
+  }
+
   // boost 列表:头像+短文本气泡逐个平铺(可换行),末尾接火箭入口(canBoost 时)。
   @Builder
   private BoostRow() {
@@ -652,7 +722,7 @@ export struct TopicPostItem {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .padding({ left: 4, right: 10, top: 4, bottom: 4 })
-        .backgroundColor($r('app.color.surface_muted'))
+        .backgroundColor($r('app.color.boost_bubble_bg'))
         .borderRadius(16)
         .constraintSize({ maxWidth: '72%' })
         .margin({ right: 8, top: 6 })
@@ -1011,6 +1081,9 @@ export struct TopicPostItem {
   aboutToAppear(): void {
     this.syncBreathing();
     this.bookmarkedLocal = this.post.bookmarked === true;
+    // "俺也一样"显示态从话题级 props 初始化(仅一楼下发有效值)。
+    this.meTooLocal = this.sharedIssueCreated;
+    this.meTooCountLocal = this.sharedIssueCount;
     if (this.flashTargetPostId === this.post.id) {
       this.startTargetFlash();
     }

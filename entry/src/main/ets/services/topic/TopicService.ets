@@ -1,10 +1,13 @@
 import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
-import { AcceptedAnswer, Poll, PollOption, PollVoteResult, PostBoost, PostReaction, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { AcceptedAnswer, Poll, PollOption, PollVoteResult, PostBoost, PostReaction, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { FeedKey } from '../site/FeedPrefs';
+
+// linux.do shared issue（"俺也一样"）toggle 端点:同一 POST 翻转(点/撤),form body 只带 topic_id。
+const SHARED_ISSUE_TOGGLE_PATH: string = '/solution/shared_issue';
 
 interface DiscourseLatestResponse {
   topic_list?: DiscourseTopicList;
@@ -72,6 +75,11 @@ interface DiscourseTopicDetail {
   // 主题作者(楼主)用户 id:优先 details.created_by.id,回退顶层 user_id。
   user_id?: number;
   details?: DiscourseTopicDetailsField;
+  // linux.do shared issue（"俺也一样"）:一楼下方举手按钮的真源(非 topic-voting)。
+  shared_issue_visible?: boolean;
+  can_create_shared_issue?: boolean;
+  user_created_shared_issue?: boolean;
+  shared_issue_count?: number;
 }
 
 // topic.json 顶层 details:此处只取 created_by(楼主),其余字段暂不消费。
@@ -206,6 +214,12 @@ interface DiscoursePost {
 interface DiscoursePollVoteResponse {
   poll?: DiscoursePoll;
   vote?: string[];
+}
+
+// shared issue（"俺也一样"）toggle 的响应:{ count, user_created_shared_issue }——最新计数 + 已点态。
+interface DiscourseSharedIssueResponse {
+  count?: number;
+  user_created_shared_issue?: boolean;
 }
 
 // POST /bookmarks.json 的响应:{ success:"OK", id:<bookmarkId> }。
@@ -517,6 +531,36 @@ export class TopicService {
       };
     } catch (error) {
       return this.unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, 'Linux.do 投票响应不是有效 JSON。');
+    }
+  }
+
+  // linux.do shared issue（"俺也一样"）toggle:POST /solution/shared_issue,form body topic_id。
+  // 纯翻转端点——点/撤同一地址;响应 { count, user_created_shared_issue } 即翻转后的权威新态,直接回给调用方覆盖乐观值。
+  // notifyChallenge:true——与书签/评论一致:撞 CF(403 BAD CSRF 等)时通知 ChallengeEventBus 触发静默恢复,
+  // 刷新 cf_clearance/CSRF,下一次点击就能过(否则会像现在这样接连 BAD CSRF 失败)。
+  async toggleSharedIssue(topicId: number): Promise<NetworkResult<SharedIssueResult>> {
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    const response: NetworkResult<string> =
+      await this.bridge.postForm(SHARED_ISSUE_TOGGLE_PATH, `topic_id=${topicId}`, { notifyChallenge: true, referrer: referrer });
+    if (!response.success) {
+      return this.forwardFailure<SharedIssueResult>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<SharedIssueResult>(response.statusCode, response.challengeState, 'Linux.do "俺也一样"响应为空。');
+    }
+    try {
+      const wrapper: DiscourseSharedIssueResponse = JSON.parse(response.data) as DiscourseSharedIssueResponse;
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: {
+          created: wrapper.user_created_shared_issue === true,
+          count: typeof wrapper.count === 'number' ? wrapper.count : 0
+        }
+      };
+    } catch (error) {
+      return this.unexpectedResponse<SharedIssueResult>(response.statusCode, response.challengeState, 'Linux.do "俺也一样"响应不是有效 JSON。');
     }
   }
 
@@ -841,7 +885,11 @@ export class TopicService {
       highestPostNumber: typeof sourceTopic.highest_post_number === 'number' ? sourceTopic.highest_post_number : undefined,
       unreadPosts: typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined,
       stream: this.mapStream(sourceTopic.post_stream?.stream),
-      acceptedAnswers: this.mapAcceptedAnswers(sourceTopic.accepted_answers)
+      acceptedAnswers: this.mapAcceptedAnswers(sourceTopic.accepted_answers),
+      sharedIssueVisible: sourceTopic.shared_issue_visible === true,
+      canCreateSharedIssue: sourceTopic.can_create_shared_issue === true,
+      userCreatedSharedIssue: sourceTopic.user_created_shared_issue === true,
+      sharedIssueCount: typeof sourceTopic.shared_issue_count === 'number' ? sourceTopic.shared_issue_count : 0
     };
   }
 

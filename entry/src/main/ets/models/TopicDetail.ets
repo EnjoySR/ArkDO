@@ -16,6 +16,13 @@ export interface PostBoost {
   user: User;
 }
 
+// linux.do shared issue（"俺也一样"）toggle 后服务端返回的权威新状态:是否已点 + 最新计数。
+// 服务端是纯 toggle(同一 POST 端点翻转),响应 { count, user_created_shared_issue } 即真值,直接覆盖本地乐观值。
+export interface SharedIssueResult {
+  created: boolean;
+  count: number;
+}
+
 // discourse-poll 插件:一个投票选项(id + 展示文字 + 当前票数)。
 export interface PollOption {
   id: string;
@@ -129,4 +136,14 @@ export interface TopicDetail {
   stream?: number[];
   // discourse-solved 采纳答案面板数据源;无解或非问答帖为 undefined/空数组。
   acceptedAnswers?: AcceptedAnswer[];
+  // linux.do shared issue（"俺也一样 / 我也遇到"）:一楼下方那枚举手按钮。注意不是 discourse-topic-voting——
+  // topic-voting 的 can_vote/user_voted/vote_count 在本站恒为 false/0,真源是下面这组 shared_issue 字段。
+  // shared_issue_visible:是否渲染按钮。
+  sharedIssueVisible?: boolean;
+  // can_create_shared_issue:当前用户能否点(未登录/自己是楼主等 → false;仍显示,点了走登录拦截)。
+  canCreateSharedIssue?: boolean;
+  // user_created_shared_issue:当前用户是否已点 → 已点则图标染 #08c 且文字带括号计数。
+  userCreatedSharedIssue?: boolean;
+  // shared_issue_count:已有多少人"俺也一样",已点时展示在文字后的英文括号里。
+  sharedIssueCount?: number;
 }

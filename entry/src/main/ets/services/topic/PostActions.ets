@@ -1,7 +1,7 @@
 import { Log } from '../logging/Log';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppConstants } from '../../common/constants/AppConstants';
-import { Poll, PollVoteResult, TopicPost } from '../../models/TopicDetail';
+import { Poll, PollVoteResult, SharedIssueResult, TopicPost } from '../../models/TopicDetail';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { PollMutation, PollSnapshot } from './PollMutation';
 import { TopicService } from './TopicService';
@@ -88,6 +88,22 @@ export class PostActions {
     Log.i(`${LOG_TAG} remove vote failed postId=${post.id} poll=${poll.name} status=${result.statusCode}, rollback`);
     PollMutation.restore(poll, snapshot);
     this.toast('撤销投票失败，请稍后重试', 1500);
+    return null;
+  }
+
+  // linux.do shared issue（"俺也一样"）toggle。纯翻转端点,不需传目标态;返回服务端翻转后的权威新态
+  // { created, count } 供按钮覆盖乐观值;失败返回 null 按钮回滚。未登录经 LoginGate 拦截弹登录页,不发请求。
+  async toggleSharedIssue(topicId: number): Promise<SharedIssueResult | null> {
+    if (!LoginGate.ensureLoggedIn()) {
+      return null;
+    }
+    const result: NetworkResult<SharedIssueResult> =
+      await new TopicService(this.getBridge()).toggleSharedIssue(topicId);
+    if (result.success && result.data) {
+      return result.data;
+    }
+    Log.i(`${LOG_TAG} shared issue toggle failed topicId=${topicId} status=${result.statusCode}`);
+    this.toast('操作失败，请稍后重试', 1500);
     return null;
   }
 
