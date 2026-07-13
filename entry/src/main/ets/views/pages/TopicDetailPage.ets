@@ -202,6 +202,12 @@ export struct TopicDetailPage {
           onOpenLink: (url: string) => {
             this.onOpenLink(url);
           },
+          onJumpToQuote: (topicId: number, postNumber: number, fallbackUrl: string) => {
+            this.jumpToQuote(topicId, postNumber, fallbackUrl);
+          },
+          onResolveQuotedPost: (topicId: number, postNumber: number): Promise<string> => {
+            return this.resolveQuotedPost(topicId, postNumber);
+          },
           onResolveMedia: (url: string): Promise<string> => {
             return this.bridge.downloadMedia(url);
           },
@@ -588,6 +594,41 @@ export struct TopicDetailPage {
       return;
     }
     await this.rewindowToPost(postNumber);
+  }
+
+  // 引用卡 arrow-up:被引用楼在本帖 → 滚动定位;跨帖 → 走 fallbackUrl 开详情(经 LinkRouter)。
+  private jumpToQuote(topicId: number, postNumber: number, fallbackUrl: string): void {
+    if (topicId === this.param.topicId && postNumber > 0) {
+      this.jumpToPostNumber(postNumber);
+      return;
+    }
+    if (fallbackUrl.length > 0) {
+      this.onOpenLink(fallbackUrl);
+    }
+  }
+
+  // 引用卡取被引用楼层全文:先遍历已加载楼层(本帖),没有再按需 GET /posts/by_number/{topicId}/{postNumber}。
+  // 拉不到返回 ''(→ 引用卡隐藏展开、只显示预览)。
+  private async resolveQuotedPost(topicId: number, postNumber: number): Promise<string> {
+    if (topicId <= 0 || postNumber <= 0) {
+      return '';
+    }
+    // 1. 已加载楼层直接取(仅本帖流里有)。
+    if (topicId === this.param.topicId) {
+      const index: number = this.dataSource.findIndexByPostNumber(postNumber);
+      if (index >= 0) {
+        const html: string = this.dataSource.getData(index).cookedHtml;
+        if (html.length > 0) {
+          return html;
+        }
+      }
+    }
+    // 2. 未加载:按需拉取单楼 cooked。
+    const result: NetworkResult<string> = await new TopicService(this.bridge).getPostByNumber(topicId, postNumber);
+    if (result.success && result.data !== undefined) {
+      return result.data;
+    }
+    return '';
   }
 
   // 目标楼未加载:以该楼为锚重新拉一窗详情,原地换窗。

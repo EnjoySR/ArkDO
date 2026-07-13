@@ -56,6 +56,13 @@ interface MathNode {
   display: boolean;
 }
 
+// 引用卡展开时被引用楼层全文的按需加载态。status:1 加载中 / 2 已加载 / 3 失败(拿不到)。
+class QuoteFullState {
+  path: string = '';
+  status: number = 0;
+  html: string = '';
+}
+
 @Component
 export struct PostRichContent {
   cookedHtml: string = '';
@@ -65,6 +72,10 @@ export struct PostRichContent {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 点击正文链接 / onebox 卡片时上抛给页面,由页面经 LinkRouter 判断跳原生详情或通用 WebView。
   onOpenLink: (url: string) => void = () => {};
+  // 引用卡右上角 arrow-up 点击:跳到被引用楼层。同帖(topicId==当前帖)由页面滚动定位,跨帖走 fallbackUrl 开详情。
+  onJumpToQuote: (topicId: number, postNumber: number, fallbackUrl: string) => void = () => {};
+  // 取被引用楼层的全文 cooked:页面先翻已加载楼层,没有再 GET /posts/by_number 拉取。拿不到返回 ''。
+  onResolveQuotedPost: (topicId: number, postNumber: number) => Promise<string> = () => Promise.resolve('');
   // 音视频播放:把媒体 URL 交给页面(经 bridge 下载委托过 CF)下到沙箱,返回本地路径。
   onResolveMedia: (url: string) => Promise<string> = () => Promise.reject(new Error('媒体下载未接入'));
   // 该 post 的投票列表(动态票数/已投项);cooked 里的 POLL 块按 name 关联到这里的 Poll 对象。
@@ -78,6 +89,10 @@ export struct PostRichContent {
   // 当前是否深色渲染(ThemeManager 维护):公式位图 colorFilter 矩阵按它切换,资源色不受影响。
   @StorageProp(APP_IS_DARK_STORAGE_KEY) private appIsDark: boolean = false;
   @State private expandedDisclosures: string[] = [];
+  // 已展开的话题/回复引用卡路径(默认折叠,显示 blockquote 预览;展开显示被引用楼层全文)。
+  @State private expandedQuotes: string[] = [];
+  // 各引用卡按需拉取的被引用楼层全文缓存(按路径)。
+  @State private quoteFulls: QuoteFullState[] = [];
   // 已揭示的剧透块/行内剧透段。key 是块路径(嵌套时形如 "2-q0-s1"),块级与行内共用。
   @State private revealedSpoilers: string[] = [];
   // 被用户点过(即"从默认折叠态翻转")的 callout 路径。展开态 = defaultExpanded XOR (path ∈ 此表),
@@ -439,12 +454,13 @@ export struct PostRichContent {
     .alignItems(HorizontalAlign.Start)
   }
 
-  // 话题/帖子引用卡(<aside class="quote" data-topic>):头部(圆头像 + 标题 + 分类徽章 + 右箭头)+ 截断预览正文。
-  // 点头部/箭头跳原帖详情(不就地展开);正文预览走 BlockView 同实例递归渲染(支持图片/嵌套),不新建 PostRichContent。
+  // 话题/帖子引用卡(<aside class="quote" data-topic>):头部(圆头像 + 标题 + 分类徽章 + 折叠 chevron + 跳转 arrow-up)。
+  // 折叠态始终显示 aside 内 blockquote 的截断预览;拿得到被引用楼层全文(同帖已加载)时才出 chevron,
+  // 展开显示该楼全文,再点收起。点 arrow-up 定位/跳转到被引用楼层。正文走 BlockView 同实例递归渲染。
   @Builder
   private TopicQuoteBlock(block: RichBlock, marginTop: number, path: string) {
     Column() {
-      // 头部:头像 + (标题 / 分类) + 右箭头。整块可点 → 跳原帖详情。
+      // 头部:头像 + (标题 / 分类) + 折叠 chevron + 跳转 arrow-up。
       Row() {
         UserAvatar({ user: this.quoteAvatarUser(block), avatarSize: 24 })
           .margin({ right: 8 })
@@ -468,22 +484,48 @@ export struct PostRichContent {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        FaIconView({ icon: this.faIconOf('chevron-right'), color: $r('app.color.text_tertiary'), iconSize: 16 })
-          .margin({ left: 4, top: 2 })
+        // 折叠开关:一张 chevron-down 绕中心旋转——折叠 0°、展开 180°(转到底即朝上)。
+        // 用旋转而非换图:既拿到动画,又绕开「FaIconView.icon 普通成员改属性不刷新」的坑。
+        // 点击按需拉取被引用楼层全文并展开;拉取失败(status 3)后隐藏。外包 padding 放大命中区。
+        if (block.quotePostNumber && block.quotePostNumber > 0 && this.quoteFullStatus(path) !== 3) {
+          Row() {
+            // 角度随展开态变;旋转动画统一由 toggleQuote 的 animateTo 驱动(不再自带 .animation,避免同属性双驱动)。
+            FaIconView({ icon: this.faIconOf('chevron-down'), color: $r('app.color.text_tertiary'), iconSize: 16 })
+              .rotate({ angle: this.isQuoteExpanded(path) ? 180 : 0 })
+          }
+          .padding(6)
+          .onClick(() => this.toggleQuote(block, path))
+        }
+
+        // 跳转:同帖回复引用 → arrow-up(往上定位本帖楼层);跨帖引用 → chevron-right(打开另一个帖子)。
+        Row() {
+          FaIconView({
+            icon: this.faIconOf(block.quoteIsReply ? 'arrow-up' : 'chevron-right'),
+            color: $r('app.color.text_tertiary'),
+            iconSize: 16
+          })
+        }
+        .padding(6)
+        .onClick(() => {
+          if (block.quoteIsReply) {
+            this.onJumpToQuote(
+              block.quoteTopicId ? block.quoteTopicId : 0,
+              block.quotePostNumber ? block.quotePostNumber : 0,
+              block.href ? block.href : '');
+          } else if (block.href && block.href.length > 0) {
+            this.openLink(block.href);
+          }
+        })
       }
       .width('100%')
       .alignItems(VerticalAlign.Top)
-      .onClick(() => {
-        if (block.href && block.href.length > 0) {
-          this.openLink(block.href);
-        }
-      })
 
-      // 截断预览正文:解析预览 cooked → BlockView 同实例递归渲染。
+      // 正文:折叠态显示 blockquote 截断预览;展开态显示被引用楼层全文。高度变化由 toggleQuote 的 animateTo 过渡。
       Column() {
-        ForEach(this.quotePreviewBlocks(block), (child: RichBlock, index: number) => {
+        // key 带展开态(p 预览 / f 全文),避免 snippet 与全文段落 key 撞车导致 ForEach 不重建。
+        ForEach(this.quoteBodyBlocks(block, path), (child: RichBlock, index: number) => {
           this.BlockView(child, index, `${path}-tq${index}`)
-        }, (child: RichBlock, index: number) => this.blockKey(child, index))
+        }, (child: RichBlock, index: number) => `${this.isQuoteExpanded(path) ? 'f' : 'p'}-${this.blockKey(child, index)}`)
       }
       .width('100%')
       .margin({ top: 8 })
@@ -500,6 +542,96 @@ export struct PostRichContent {
     .alignItems(HorizontalAlign.Start)
   }
 
+  private isQuoteExpanded(path: string): boolean {
+    return this.expandedQuotes.indexOf(path) >= 0;
+  }
+
+  // 展开态集合的增删(重建数组触发 @State 刷新)。
+  private setQuoteExpanded(path: string, expanded: boolean): void {
+    const next: string[] = [];
+    for (let i: number = 0; i < this.expandedQuotes.length; i++) {
+      if (this.expandedQuotes[i] !== path) {
+        next.push(this.expandedQuotes[i]);
+      }
+    }
+    if (expanded) {
+      next.push(path);
+    }
+    this.expandedQuotes = next;
+  }
+
+  private quoteFullStatus(path: string): number {
+    for (let i: number = 0; i < this.quoteFulls.length; i++) {
+      if (this.quoteFulls[i].path === path) {
+        return this.quoteFulls[i].status;
+      }
+    }
+    return 0;
+  }
+
+  private quoteFullHtmlCached(path: string): string {
+    for (let i: number = 0; i < this.quoteFulls.length; i++) {
+      if (this.quoteFulls[i].path === path) {
+        return this.quoteFulls[i].html;
+      }
+    }
+    return '';
+  }
+
+  // 写入某路径的加载态(重建数组触发刷新)。
+  private setQuoteFull(path: string, status: number, html: string): void {
+    const next: QuoteFullState[] = [];
+    for (let i: number = 0; i < this.quoteFulls.length; i++) {
+      if (this.quoteFulls[i].path !== path) {
+        next.push(this.quoteFulls[i]);
+      }
+    }
+    const entry: QuoteFullState = new QuoteFullState();
+    entry.path = path;
+    entry.status = status;
+    entry.html = html;
+    next.push(entry);
+    this.quoteFulls = next;
+  }
+
+  // 展开/收起过渡:每次可见的展开态变化只用一个 animateTo,正文高度与箭头角度一起平滑过渡。
+  // 关键——不要一次点击连开两个 animateTo(会互相打断,首次展开失败但已标记展开)。
+  private animateQuote(action: () => void): void {
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseInOut }, action);
+  }
+
+  // 点 chevron:已展开则折叠;未展开则展开——有缓存直接开,否则先拉全文、到手后「展开+落全文」一次性做。
+  private toggleQuote(block: RichBlock, path: string): void {
+    if (this.isQuoteExpanded(path)) {
+      this.animateQuote(() => this.setQuoteExpanded(path, false));
+      return;
+    }
+    const status: number = this.quoteFullStatus(path);
+    if (status === 2) {
+      this.animateQuote(() => this.setQuoteExpanded(path, true)); // 已缓存:单次 animateTo 展开
+      return;
+    }
+    if (status === 1) {
+      return; // 正在加载,忽略重复点击
+    }
+    // 加载中先不展开(避免与到手时的 animateTo 二次冲突);全文到手后一次 animateTo 展开+落全文。
+    this.setQuoteFull(path, 1, '');
+    const topicId: number = block.quoteTopicId ? block.quoteTopicId : 0;
+    const postNumber: number = block.quotePostNumber ? block.quotePostNumber : 0;
+    this.onResolveQuotedPost(topicId, postNumber).then((html: string) => {
+      if (html.length > 0) {
+        this.animateQuote(() => {
+          this.setQuoteFull(path, 2, html);
+          this.setQuoteExpanded(path, true);
+        });
+      } else {
+        this.setQuoteFull(path, 3, ''); // 拉不到:不展开,chevron 随即隐藏
+      }
+    }).catch(() => {
+      this.setQuoteFull(path, 3, '');
+    });
+  }
+
   // 用直链头像 URL 构造最小 User,复用 UserAvatar 的 host webview 取图 + 圆形裁剪。
   private quoteAvatarUser(block: RichBlock): User {
     return {
@@ -509,8 +641,14 @@ export struct PostRichContent {
     };
   }
 
-  // 解析引用预览 cooked 成块,交 BlockView 渲染。空预览返回空数组(只显示头部)。
-  private quotePreviewBlocks(block: RichBlock): RichBlock[] {
+  // 引用卡正文:展开且已拿到全文 → 被引用楼层全文;否则(折叠 / 加载中) → aside 内 blockquote 截断预览。
+  private quoteBodyBlocks(block: RichBlock, path: string): RichBlock[] {
+    if (this.isQuoteExpanded(path) && this.quoteFullStatus(path) === 2) {
+      const full: string = this.quoteFullHtmlCached(path);
+      if (full.length > 0) {
+        return CookedHtmlParser.parse(full);
+      }
+    }
     return CookedHtmlParser.parse(block.text ? block.text : '');
   }
 

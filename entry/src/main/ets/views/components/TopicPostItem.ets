@@ -68,6 +68,10 @@ export struct TopicPostItem {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击继续上抛给页面(由页面经 LinkRouter 判断跳原生详情或通用 WebView)。
   onOpenLink: (url: string) => void = () => {};
+  // 引用卡 arrow-up:同帖滚动定位、跨帖开详情,上抛给页面。
+  onJumpToQuote: (topicId: number, postNumber: number, fallbackUrl: string) => void = () => {};
+  // 引用卡取被引用楼层全文:上抛给页面(先翻已加载楼层,没有再打接口),拿不到返回 ''。
+  onResolveQuotedPost: (topicId: number, postNumber: number) => Promise<string> = () => Promise.resolve('');
   // 音视频播放:媒体 URL 经页面 bridge 的下载委托下到沙箱,返回本地路径。
   onResolveMedia: (url: string) => Promise<string> = () => Promise.reject(new Error('媒体下载未接入'));
   // 表情回应切换:请求先行,页面发 PUT 并返回成败;成功后本组件才改 this.post
@@ -136,6 +140,8 @@ export struct TopicPostItem {
             fallbackText: this.post.plainText,
             onOpenImages: this.onOpenImages,
             onOpenLink: this.onOpenLink,
+            onJumpToQuote: this.onJumpToQuote,
+            onResolveQuotedPost: this.onResolveQuotedPost,
             onResolveMedia: this.onResolveMedia,
             polls: this.post.polls ? this.post.polls : [],
             onVote: (poll: Poll, optionIds: string[]) => {
@@ -446,6 +452,8 @@ export struct TopicPostItem {
                     fallbackText: reply.plainText,
                     onOpenImages: this.onOpenImages,
                     onOpenLink: this.onOpenLink,
+                    onJumpToQuote: this.onJumpToQuote,
+                    onResolveQuotedPost: this.onResolveQuotedPost,
                     onResolveMedia: this.onResolveMedia
                   })
                     .width('100%')

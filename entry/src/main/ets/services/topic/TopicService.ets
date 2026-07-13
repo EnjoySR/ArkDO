@@ -407,6 +407,32 @@ export class TopicService {
     }
   }
 
+  // 按楼号取单楼 cooked:GET /posts/by_number/{topicId}/{postNumber}。返回单个裸 post 对象。
+  // 供引用卡展开被引用楼层全文用(该楼未在已加载窗口内时按需拉取)。GET 无需 CSRF/referer。
+  async getPostByNumber(topicId: number, postNumber: number): Promise<NetworkResult<string>> {
+    const path: string = `/posts/by_number/${topicId}/${postNumber}`;
+
+    const response: NetworkResult<string> = await this.bridge.getJson(path);
+    if (!response.success) {
+      return this.forwardFailure<string>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<string>(response.statusCode, response.challengeState, 'Linux.do 楼层详情响应为空。');
+    }
+
+    try {
+      const payload: DiscoursePost = JSON.parse(response.data) as DiscoursePost;
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: payload.cooked ? payload.cooked : ''
+      };
+    } catch (error) {
+      return this.unexpectedResponse<string>(response.statusCode, response.challengeState, 'Linux.do 楼层详情响应不是有效 JSON。');
+    }
+  }
+
   async reportTimings(topicId: number, timings: Map<number, number>, topicTime: number): Promise<NetworkResult<string>> {
     // 编码成 Discourse 期望的 application/x-www-form-urlencoded:
     // timings%5B楼号%5D=毫秒&...&topic_time=毫秒&topic_id=id

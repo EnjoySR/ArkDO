@@ -126,6 +126,9 @@ export interface RichBlock {
   quoteTopicId?: number;
   quotePostNumber?: number;
   quoteCategory?: TopicCategory;
+  // 同帖回复引用(title 只有「显示名:」无话题链接):跳转是在本帖内往上定位到那一楼 → 用 arrow-up;
+  // 跨帖引用(有话题链接)则是打开另一个帖子 → 用 chevron-right。
+  quoteIsReply?: boolean;
 }
 
 // callout 类型别名 → 归一类型(与 discourse-quote-callouts settings.yml 的 alias 一致)。
@@ -383,10 +386,11 @@ export class CookedHtmlParser {
       }];
     }
 
-    if (tagName === 'aside' && CookedHtmlParser.hasClass(openTag, 'quote') &&
-      innerHtml.indexOf('quote-title__text-content') >= 0) {
+    if (tagName === 'aside' && CookedHtmlParser.hasClass(openTag, 'quote')) {
       // Discourse 话题/帖子引用:头部(头像+标题链接+分类徽章)抽成结构化数据,正文取截断预览,
-      // 渲染成带头部的引用卡。命中失败(缺 data-topic 等)回退成普通引用。
+      // 渲染成带头部的引用卡。兼容新式 quote-title__text-content 与老式 <div class="title"> 两种标记。
+      // 判据是标题里有没有指向话题的 <a> 链接:有=跨帖引用→卡片;无(同帖内引用楼层,只显示「用户名:」)
+      // 或缺 data-topic → 返回 undefined,落到下方回退成普通引用。
       const topicQuote: RichBlock | undefined = CookedHtmlParser.topicQuoteFromAside(openTag, innerHtml);
       if (topicQuote) {
         return [topicQuote];
@@ -541,17 +545,39 @@ export class CookedHtmlParser {
     const avatarUrl: string = avatarTag.length > 0
       ? CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(avatarTag, 'src')) : '';
 
-    // 标题 + 链接:quote-title__text-content 里第一个非徽章的 <a>。
-    const titleContent: string = CookedHtmlParser.firstElementInnerByClass(innerHtml, 'quote-title__text-content');
+    // 标题 + 链接:优先取新式 quote-title__text-content;取不到再退回老式 <div class="title"> 的内部。
+    let titleContent: string = CookedHtmlParser.firstElementInnerByClass(innerHtml, 'quote-title__text-content');
+    if (titleContent.length === 0) {
+      titleContent = CookedHtmlParser.firstElementInnerByClass(innerHtml, 'title');
+    }
+    // 用户名(头像身份,兼作缺显示名时的兜底标题)。
+    const username: string = CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.extractAttr(openTag, 'data-username'));
+
     // 标题文字取第一个 <a>(话题链接,class 无 badge)的内部;href 取该开标签的 href 属性。
     const titleAnchor: string = CookedHtmlParser.firstTopicTitleAnchor(titleContent);
-    const title: string = titleContent.length > 0
-      ? CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.toPlainText(CookedHtmlParser.firstElementInner(titleContent, 'a'))) : '';
-    const href: string = titleAnchor.length > 0
-      ? CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(titleAnchor, 'href')) : '';
-
-    // 分类徽章:badge-category span 上带 data-category-id + --category-badge-* 变量 + 名字 + 图标 svg。
-    const category: TopicCategory | undefined = CookedHtmlParser.categoryFromBadge(titleContent);
+    let title: string;
+    let href: string;
+    let category: TopicCategory | undefined;
+    let isReply: boolean = false;
+    if (titleAnchor.length > 0) {
+      // 跨话题引用:title 里带话题链接 → 标题取链接文字、href 取链接、分类取徽章。
+      title = CookedHtmlParser.decodeHtmlEntities(
+        CookedHtmlParser.toPlainText(CookedHtmlParser.firstElementInner(titleContent, 'a')));
+      href = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(titleAnchor, 'href'));
+      // 分类徽章:badge-category span 上带 data-category-id + --category-badge-* 变量 + 名字 + 图标 svg。
+      category = CookedHtmlParser.categoryFromBadge(titleContent);
+    } else {
+      isReply = true;
+      // 同帖回复引用:title 只有「显示名:」无链接 → 用 aside 属性组卡。
+      // 标题取 data-display-name(缺则退 data-username);跳转按 data-topic/data-post 自拼站内帖链接。
+      let displayName: string = CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.extractAttr(openTag, 'data-display-name'));
+      if (displayName.length === 0) {
+        displayName = username;
+      }
+      title = displayName;
+      href = CookedHtmlParser.resolveUrl(`/t/topic/${topicId}/${postNumber > 0 ? postNumber : 1}`);
+      category = undefined;
+    }
 
     // 正文预览:第一个 <blockquote> 的内部 HTML(截断预览),交渲染层内嵌解析。
     const preview: string = CookedHtmlParser.firstElementInner(innerHtml, 'blockquote');
@@ -565,6 +591,9 @@ export class CookedHtmlParser {
     if (avatarUrl.length > 0) {
       block.quoteAvatarUrl = avatarUrl;
     }
+    if (username.length > 0) {
+      block.quoteAuthor = username;
+    }
     if (title.length > 0) {
       block.quoteTitle = title;
     }
@@ -573,6 +602,9 @@ export class CookedHtmlParser {
     }
     if (category) {
       block.quoteCategory = category;
+    }
+    if (isReply) {
+      block.quoteIsReply = true;
     }
     return block;
   }
