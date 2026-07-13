@@ -120,6 +120,9 @@ export interface TopicDetail {
   viewCount?: number;
   createdAt?: string;
   posts: TopicPost[];
+  // 主题作者(楼主)的用户 id:topic.json 的 details.created_by.id(回退顶层 user_id)。
+  // 楼层作者 id 等于此值时,该楼是楼主发的,右下角渲染「TOPIC OWNER」标记。
+  createdById?: number;
   lastReadPostNumber?: number;
   highestPostNumber?: number;
   unreadPosts?: number;

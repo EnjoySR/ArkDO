@@ -53,6 +53,10 @@ export struct TopicPostItem {
   // @Watch:reporting/read 变化时开/停"呼吸"定时器(见 syncBreathing)。
   @ObjectLink @Watch('onPostStateChanged') post: TopicPost;
   lastReadPostNumber: number = -1;
+  // 主题作者(楼主)用户 id:页面从 topic.json 的 created_by 下发。本楼作者 id 等于此值时,
+  // 正文与操作栏之间右下角渲染「TOPIC OWNER」标记(对齐官网 .cooked::after 效果)。
+  // @Prop:主题级值,页面首次拿到后稳定;<=0 表示未知,不标。
+  @Prop topicCreatedById: number = -1;
   // 本楼是进入时快照的"第一条未读楼":顶部渲染"上次访问"红色分隔线(对齐官网 last visit 线)。
   // 普通 prop:锚楼由页面在楼层创建前确定且不再变化,无需响应式。
   showLastVisitedLine: boolean = false;
@@ -165,6 +169,19 @@ export struct TopicPostItem {
             })
           }
 
+          // 楼主标记:本楼作者是主题作者时,正文末尾右下角渲染「TOPIC OWNER」,悬在操作栏正上方。
+          // 对齐官网 div.topic-owner .cooked::after(小号、斜体、加粗、#00AEFF、右浮动)。
+          if (this.isTopicOwner()) {
+            Text('TOPIC OWNER')
+              .width('100%')
+              .textAlign(TextAlign.End)
+              .fontSize(13)
+              .fontStyle(FontStyle.Italic)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#00AEFF')
+              .margin({ top: 10 })
+          }
+
           this.PostFooter()
         }
         .width('100%')
@@ -179,7 +196,7 @@ export struct TopicPostItem {
       }
       .width('100%')
       // 上下留白由外层持有(高亮背景通栏);左右留白下放到内层正文区,给红线让出通栏空间。
-      .padding({ top: 12, bottom: 12 })
+      .padding({ top: 12, bottom: 0 })
       // 锚楼底边交给红线接管,撤掉灰线,避免红线上方再压一条灰线成双。
       .border({
         width: { bottom: this.showLastVisitedLine ? 0 : 1 },
@@ -212,11 +229,11 @@ export struct TopicPostItem {
         .layoutWeight(1)
     }
     .width('100%')
-    // 底部放置:与上方 footer 拉开间距。红线是"横线+『上次访问』文字"一行,横线在行内垂直居中,
-    // 单靠外层 padding.bottom=0 贴底后,横线仍离楼底约半行文字高(~8vp);负的 bottom margin 抵消这半行,
-    // 把横线真正压到楼底"已读|未读"分界线上。-8 是按 fontSize 12 行高估算,可按实测微调。
+    // 脱离布局流(不占楼层高度):position 绝对定位到外层 Column 底边(bottom:0=红线底边贴楼底),
+    // 再 translate 相对自身下移 50% → 整条线中心正好落在楼底"已读|未读"分界线上,横跨两楼交界。
     // 已在正文留白层之外,width('100%')即通栏,无需再做左右补偿。
-    .margin({ top: 12, bottom: -8 })
+    .position({ left: 0, bottom: 0 })
+    .translate({ y: '50%' })
   }
 
   @Builder
@@ -1128,6 +1145,11 @@ export struct TopicPostItem {
   // 本楼「被回复」:reply_count > 0 时,底部显示被回复数量 + chevron。
   private hasReplies(): boolean {
     return this.post.replyCount !== undefined && this.post.replyCount > 0;
+  }
+
+  // 本楼是否楼主发的:主题作者 id 已知(>0)且等于本楼作者 id。用于渲染「TOPIC OWNER」标记。
+  private isTopicOwner(): boolean {
+    return this.topicCreatedById > 0 && this.post.author?.id === this.topicCreatedById;
   }
 
   // 展开/收起被回复列表。首次点击:按钮上转圈加载,加载成功后才展开(不先展开再加载,

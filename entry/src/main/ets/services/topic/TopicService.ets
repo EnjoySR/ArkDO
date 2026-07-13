@@ -69,6 +69,18 @@ interface DiscourseTopicDetail {
   unread_posts?: number;
   user_badges?: DiscourseUserBadges;
   accepted_answers?: DiscourseAcceptedAnswer[];
+  // 主题作者(楼主)用户 id:优先 details.created_by.id,回退顶层 user_id。
+  user_id?: number;
+  details?: DiscourseTopicDetailsField;
+}
+
+// topic.json 顶层 details:此处只取 created_by(楼主),其余字段暂不消费。
+interface DiscourseTopicDetailsField {
+  created_by?: DiscourseCreatedBy;
+}
+
+interface DiscourseCreatedBy {
+  id?: number;
 }
 
 interface DiscoursePostStream {
@@ -824,12 +836,22 @@ export class TopicService {
       viewCount: sourceTopic.views,
       createdAt: sourceTopic.created_at,
       posts: this.mapPosts(sourceTopic.post_stream?.posts, this.buildBadgeIconMap(sourceTopic.user_badges)),
+      createdById: this.mapCreatedById(sourceTopic),
       lastReadPostNumber: typeof sourceTopic.last_read_post_number === 'number' ? sourceTopic.last_read_post_number : undefined,
       highestPostNumber: typeof sourceTopic.highest_post_number === 'number' ? sourceTopic.highest_post_number : undefined,
       unreadPosts: typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined,
       stream: this.mapStream(sourceTopic.post_stream?.stream),
       acceptedAnswers: this.mapAcceptedAnswers(sourceTopic.accepted_answers)
     };
+  }
+
+  // 楼主 id:优先 details.created_by.id,回退顶层 user_id;两者皆缺返回 undefined(不标 TOPIC OWNER)。
+  private mapCreatedById(sourceTopic: DiscourseTopicDetail): number | undefined {
+    const createdById: number | undefined = sourceTopic.details?.created_by?.id;
+    if (typeof createdById === 'number') {
+      return createdById;
+    }
+    return typeof sourceTopic.user_id === 'number' ? sourceTopic.user_id : undefined;
   }
 
   // discourse-solved:采纳答案数组 → AcceptedAnswer 列表;缺 post_number 的条目丢弃(跳楼无落点)。

@@ -191,6 +191,7 @@ export struct TopicDetailPage {
       LazyForEach(this.dataSource, (post: TopicPost) => {
         TopicPostItem({
           post: post,
+          topicCreatedById: this.detail?.createdById ?? -1,
           lastReadPostNumber: this.detail?.lastReadPostNumber ?? -1,
           showLastVisitedLine: post.id === this.lastVisitedAnchorPostId && this.lastVisitedAnchorPostId > 0,
           flashTargetPostId: this.flashTargetPostId,
