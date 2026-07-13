@@ -484,23 +484,33 @@ export struct PostRichContent {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        // 折叠开关:一张 chevron-down 绕中心旋转——折叠 0°、展开 180°(转到底即朝上)。
-        // 用旋转而非换图:既拿到动画,又绕开「FaIconView.icon 普通成员改属性不刷新」的坑。
-        // 点击按需拉取被引用楼层全文并展开;拉取失败(status 3)后隐藏。外包 padding 放大命中区。
+        // 折叠开关:拉取全文中(status 1)显示 loading 转圈,取代 chevron;否则一张 chevron-down 绕中心
+        // 旋转——折叠 0°、展开 180°(转到底即朝上)。用旋转而非换图:既拿到动画,又绕开「FaIconView.icon
+        // 普通成员改属性不刷新」的坑。点击按需拉取并展开;拉取失败(status 3)后整体隐藏。外包 padding 放大命中区。
         if (block.quotePostNumber && block.quotePostNumber > 0 && this.quoteFullStatus(path) !== 3) {
-          Row() {
-            // 角度随展开态变;旋转动画统一由 toggleQuote 的 animateTo 驱动(不再自带 .animation,避免同属性双驱动)。
-            FaIconView({ icon: this.faIconOf('chevron-down'), color: $r('app.color.text_tertiary'), iconSize: 16 })
-              .rotate({ angle: this.isQuoteExpanded(path) ? 180 : 0 })
+          if (this.quoteFullStatus(path) === 1) {
+            Row() {
+              LoadingProgress()
+                .width(16)
+                .height(16)
+                .color($r('app.color.text_tertiary'))
+            }
+            .padding(6)
+          } else {
+            Row() {
+              // 角度随展开态变;旋转动画统一由 toggleQuote 的 animateTo 驱动(不再自带 .animation,避免同属性双驱动)。
+              FaIconView({ icon: this.faIconOf('chevron-down'), color: $r('app.color.text_tertiary'), iconSize: 16 })
+                .rotate({ angle: this.isQuoteExpanded(path) ? 180 : 0 })
+            }
+            .padding(6)
+            .onClick(() => this.toggleQuote(block, path))
           }
-          .padding(6)
-          .onClick(() => this.toggleQuote(block, path))
         }
 
-        // 跳转:同帖回复引用 → arrow-up(往上定位本帖楼层);跨帖引用 → chevron-right(打开另一个帖子)。
+        // 跳转:同帖回复引用 → arrow-up(往上定位本帖楼层);跨帖引用 → arrow-right(打开另一个帖子)。
         Row() {
           FaIconView({
-            icon: this.faIconOf(block.quoteIsReply ? 'arrow-up' : 'chevron-right'),
+            icon: this.faIconOf(block.quoteIsReply ? 'arrow-up' : 'arrow-right'),
             color: $r('app.color.text_tertiary'),
             iconSize: 16
           })
