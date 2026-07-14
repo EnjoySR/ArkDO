@@ -14,7 +14,15 @@ const PREF_KEY_ID_SEQ: string = 'doh_id_seq';
 // 之后用户仍可自行改回 AUTO。
 const PREF_KEY_MIGRATED_SECURE: string = 'doh_migrated_secure_v1';
 
-/** 系统内置默认 DoH:不可删除,首次启动种子数据,也是删除 active 后的兜底。 */
+/**
+ * 内置 DoH:不可删除,首次启动种子数据,也是删除 active 后的兜底。
+ * 两条内置项都恒在列表中(缺失自动补回):edge 为默认激活项(装机即用),arkdo 为备用预设。
+ */
+export const DOH_EDGE_ID: string = 'builtin-edge';
+const DOH_EDGE_NAME: string = 'Linux.do 优选';
+const DOH_EDGE_URL: string = 'https://edge.47258.xyz/linuxdo';
+
+// 保留原 id 兼容旧安装(旧版持久化里 active/列表都引用它);现降为第二预设。
 export const DOH_BUILTIN_ID: string = 'builtin-default';
 const DOH_BUILTIN_NAME: string = '系统默认';
 const DOH_BUILTIN_URL: string = 'https://arkdo.ddd.oaifree.com/query-dns';
@@ -51,10 +59,10 @@ export class DohManager {
       const store: preferences.Preferences = DohManager.getStore(context);
       const rawServers: string = store.getSync(PREF_KEY_SERVERS, '') as string;
       if (rawServers.length === 0) {
-        // 首次启动:种子内置默认 + 默认开启 + AUTO 模式。
-        const seed: DohServer[] = [DohManager.builtinServer()];
+        // 首次启动:种子两条内置项(edge 置顶为默认激活 + arkdo 备用)+ 默认开启。
+        const seed: DohServer[] = DohManager.builtinServers();
         store.putSync(PREF_KEY_SERVERS, JSON.stringify(seed));
-        store.putSync(PREF_KEY_ACTIVE_ID, DOH_BUILTIN_ID);
+        store.putSync(PREF_KEY_ACTIVE_ID, DOH_EDGE_ID);
         store.putSync(PREF_KEY_ENABLED, true);
         // 防污染用途默认 SECURE_ONLY:AUTO(Chromium AUTOMATIC)对自定义 DoH 保守,实测
         // 仍以 useHttpDns:0 走污染系统 DNS;SECURE_ONLY 强制所有解析走 DoH。
@@ -82,19 +90,19 @@ export class DohManager {
       const store: preferences.Preferences = DohManager.getStore(context);
       const raw: string = store.getSync(PREF_KEY_SERVERS, '') as string;
       const list: DohServer[] = DohManager.parseServers(raw);
-      return list.length > 0 ? list : [DohManager.builtinServer()];
+      return list.length > 0 ? list : DohManager.builtinServers();
     } catch (err) {
       Log.e(`${LOG_TAG} read servers failed: ${JSON.stringify(err)}`);
-      return [DohManager.builtinServer()];
+      return DohManager.builtinServers();
     }
   }
 
   static getActiveId(context: common.Context): string {
     try {
       const store: preferences.Preferences = DohManager.getStore(context);
-      return store.getSync(PREF_KEY_ACTIVE_ID, DOH_BUILTIN_ID) as string;
+      return store.getSync(PREF_KEY_ACTIVE_ID, DOH_EDGE_ID) as string;
     } catch (err) {
-      return DOH_BUILTIN_ID;
+      return DOH_EDGE_ID;
     }
   }
 
@@ -169,7 +177,7 @@ export class DohManager {
 
   /** 删除自定义服务器;内置项拒删。若删的是当前选中项,回退到内置默认并重新下发。 */
   static removeServer(context: common.Context, id: string): void {
-    if (id === DOH_BUILTIN_ID) {
+    if (id === DOH_BUILTIN_ID || id === DOH_EDGE_ID) {
       return;
     }
     try {
@@ -177,7 +185,7 @@ export class DohManager {
       const servers: DohServer[] = DohManager.getServers(context).filter((s: DohServer) => s.id !== id);
       store.putSync(PREF_KEY_SERVERS, JSON.stringify(servers));
       if (DohManager.getActiveId(context) === id) {
-        store.putSync(PREF_KEY_ACTIVE_ID, DOH_BUILTIN_ID);
+        store.putSync(PREF_KEY_ACTIVE_ID, DOH_EDGE_ID);
       }
       store.flush();
     } catch (err) {
@@ -208,6 +216,15 @@ export class DohManager {
 
   // ==================== 私有辅助 ====================
 
+  private static edgeServer(): DohServer {
+    return {
+      id: DOH_EDGE_ID,
+      name: DOH_EDGE_NAME,
+      url: DOH_EDGE_URL,
+      builtin: true
+    };
+  }
+
   private static builtinServer(): DohServer {
     return {
       id: DOH_BUILTIN_ID,
@@ -215,6 +232,11 @@ export class DohManager {
       url: DOH_BUILTIN_URL,
       builtin: true
     };
+  }
+
+  // 两条内置项,edge 置顶为默认激活项、arkdo 备用。种子/兜底统一走这里。
+  private static builtinServers(): DohServer[] {
+    return [DohManager.edgeServer(), DohManager.builtinServer()];
   }
 
   // 解析持久化 JSON:逐项校验字段类型,内置项缺失时补回并置顶,防止被误删/篡改后没有默认项。
@@ -226,7 +248,7 @@ export class DohManager {
     try {
       const parsed: Object = JSON.parse(raw) as Object;
       if (!Array.isArray(parsed)) {
-        return [DohManager.builtinServer()];
+        return DohManager.builtinServers();
       }
       const arr: object[] = parsed as object[];
       for (const item of arr) {
@@ -243,11 +265,17 @@ export class DohManager {
       }
     } catch (err) {
       Log.e(`${LOG_TAG} parse servers failed: ${JSON.stringify(err)}`);
-      return [DohManager.builtinServer()];
+      return DohManager.builtinServers();
     }
+    // 补回缺失的内置项:先补 arkdo 置顶,再补 edge 置顶,最终顺序 edge → arkdo → 其它。
+    // 对旧安装(仅有 arkdo)升级后即出现 edge 预设;对新装二者都已在 seed 里,这里是无操作。
     const hasBuiltin: boolean = result.some((s: DohServer) => s.id === DOH_BUILTIN_ID);
     if (!hasBuiltin) {
       result.unshift(DohManager.builtinServer());
+    }
+    const hasEdge: boolean = result.some((s: DohServer) => s.id === DOH_EDGE_ID);
+    if (!hasEdge) {
+      result.unshift(DohManager.edgeServer());
     }
     return result;
   }
