@@ -150,6 +150,9 @@ export struct RootTabPage {
         bridge: this.bridge,
         onReady: () => {
           this.handleArkWebReady();
+        },
+        onLoadFailed: () => {
+          this.handleArkWebLoadFailed();
         }
       })
       // 公式离屏引擎:仅在有含数学公式的帖子打开时(refCount>0)才挂载,离开后空闲销毁。
@@ -577,6 +580,19 @@ export struct RootTabPage {
     if (context) {
       this.bridge.setDownloadContext(context);
     }
+    this.checkCurrentUser();
+  }
+
+  // 宿主首屏加载失败(DoH 关 + 无代理导致 linux.do 不可达):强制解锁 UI 进入降级可导航态——
+  // 首页跳出"准备环境中"、汉堡菜单出现、头像退化为可点的人像入口,用户得以进设置页开 DoH/代理自救。
+  // 不必干等 DNS/连接超时(可长达 30s+)。开启 DoH 后 SessionEventBus 触发宿主重载,成功即走 onReady
+  // 正常刷新列表与登录态(reloadBaseUrl 已改判 isControllerAttached,首屏失败后仍能重载)。
+  private handleArkWebLoadFailed(): void {
+    if (this.isArkWebReady) {
+      return;
+    }
+    Log.i(`${LOG_TAG} ArkWeb host load failed: unblock UI so user can reach DoH settings`);
+    this.isArkWebReady = true;
     this.checkCurrentUser();
   }
 
