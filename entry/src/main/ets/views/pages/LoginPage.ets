@@ -7,6 +7,10 @@ import { WebSessionManager } from '../../services/web/WebSessionManager';
 const LOG_TAG: string = '[ArkDO][Login]';
 const CHALLENGE_POLL_INTERVAL_MS: number = 1000;
 const MAX_CHALLENGE_POLL_COUNT: number = 90;
+// 登录态轮询:Discourse SPA 登录成功走客户端路由跳转(pushState),不触发 onPageEnd,
+// 单靠 URL 判定会漏检。改盯登录令牌 cookie `_t`(登出时无、登录后下发)兜住这条路径。
+const LOGIN_POLL_INTERVAL_MS: number = 800;
+const AUTH_COOKIE_NAME: string = '_t';
 
 @Component
 export struct LoginPage {
@@ -16,14 +20,22 @@ export struct LoginPage {
   private challengePollTimer: number = -1;
   private challengePollCount: number = 0;
   private hasReloadedAfterChallenge: boolean = false;
+  // 登录态轮询:检测 `_t` cookie 从"无"变"有"即判定登录成功;单次守卫防与 onPageEnd 路径重复触发。
+  private loginPollTimer: number = -1;
+  private initialAuthCookiePresent: boolean = false;
+  private hasSignaledLoginSuccess: boolean = false;
 
   aboutToAppear(): void {
     webview.WebviewController.initializeWebEngine();
     WebSessionManager.configureCookieAccess('LoginPage');
+    // 记录进入登录页时的登录令牌基线(常态为无),只在其后新出现时才判成功,避免误触发。
+    this.initialAuthCookiePresent = WebSessionManager.hasCookie(AUTH_COOKIE_NAME);
+    this.startLoginCookiePolling();
   }
 
   aboutToDisappear(): void {
     this.stopChallengeCookiePolling();
+    this.stopLoginCookiePolling();
   }
 
   build() {
@@ -60,9 +72,7 @@ export struct LoginPage {
           WebSessionManager.saveCookies('LoginPage');
           this.logCfClearanceSnapshot('pageEnd');
           if (this.isLikelyLoggedInUrl(event.url)) {
-            Log.i(`${LOG_TAG} login success detected url=${event.url}`);
-            this.stopChallengeCookiePolling();
-            this.onLoginSuccess();
+            this.signalLoginSuccess('pageEnd', event.url);
           }
         })
         .onErrorReceive((event: OnErrorReceiveEvent) => {
@@ -99,6 +109,41 @@ export struct LoginPage {
       return false;
     }
     return true;
+  }
+
+  // 登录态 cookie 轮询:登录页开着期间每 800ms 查一次 `_t`;新出现即判登录成功。
+  // Discourse SPA 登录成功不必然触发 onPageEnd,这是补齐检测的主路径。页面关闭/成功即停。
+  private startLoginCookiePolling(): void {
+    if (this.loginPollTimer >= 0) {
+      return;
+    }
+    this.loginPollTimer = setInterval(() => {
+      const hasAuthCookie: boolean = WebSessionManager.hasCookie(AUTH_COOKIE_NAME);
+      if (hasAuthCookie && !this.initialAuthCookiePresent) {
+        this.signalLoginSuccess('cookiePoll', '');
+      }
+    }, LOGIN_POLL_INTERVAL_MS);
+  }
+
+  private stopLoginCookiePolling(): void {
+    if (this.loginPollTimer < 0) {
+      return;
+    }
+    clearInterval(this.loginPollTimer);
+    this.loginPollTimer = -1;
+  }
+
+  // 登录成功统一出口:单次守卫,停掉两路轮询、落盘 cookie,再通知上层(关登录页 + 刷新会话)。
+  private signalLoginSuccess(source: string, url: string): void {
+    if (this.hasSignaledLoginSuccess) {
+      return;
+    }
+    this.hasSignaledLoginSuccess = true;
+    Log.i(`${LOG_TAG} login success signaled source=${source} url=${url}`);
+    this.stopLoginCookiePolling();
+    this.stopChallengeCookiePolling();
+    WebSessionManager.saveCookies('LoginPage');
+    this.onLoginSuccess();
   }
 
   private startChallengeCookiePolling(): void {

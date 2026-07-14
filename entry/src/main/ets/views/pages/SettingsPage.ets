@@ -25,6 +25,8 @@ const CARD_GAP: number = 12;
 export struct SettingsPage {
   onBack: () => void = () => {};
   onOpenDoh: () => void = () => {};
+  // 打开站内 Web 页:关于弹框里"开发者 @JoeyYin"跳 linux.do 个人资料页复用此链路,由 RootTabPage 注入。
+  onOpenWeb: (url: string, title?: string) => void = () => {};
   // 主动过盾:通知 RootTabPage 打开交互式 Cloudflare 验证页(唯一能真正拿到新 cf_clearance 的路径)。
   onActiveChallenge: () => void = () => {};
   @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
@@ -46,6 +48,18 @@ export struct SettingsPage {
   @State private draggingIndex: number = -1;
   @State private dragOffsetY: number = 0;
   @State private hoverIndex: number = -1;
+  // 关于 ArkDO 弹框:含可点的"开发者 @JoeyYin"链接,纯文本 AlertDialog 做不到,故用 CustomDialog。
+  // onOpenDeveloper 闭包内惰性读 this.onOpenWeb——字段初始化此刻父注入的 prop 尚为空壳,须调用时再取。
+  private aboutDialogController: CustomDialogController = new CustomDialogController({
+    builder: AboutDialog({
+      onOpenDeveloper: () => {
+        this.onOpenWeb('https://linux.do/u/joeyyin/', 'JoeyYin');
+      }
+    }),
+    alignment: DialogAlignment.Center,
+    customStyle: true,
+    autoCancel: true
+  });
 
   aboutToAppear(): void {
     this.readAppVersion();
@@ -124,7 +138,9 @@ export struct SettingsPage {
                 this.onActiveChallenge();
               })
               this.HairlineInset()
-              this.SettingCell($r('sys.symbol.info_circle'), '关于 ArkDO', this.getVersionLabel(), undefined)
+              this.SettingCell($r('sys.symbol.info_circle'), '关于 ArkDO', this.getVersionLabel(), () => {
+                this.aboutDialogController.open();
+              })
             }
             .cardStyle()
             .margin({ top: 0 })
@@ -722,5 +738,76 @@ export struct SettingsPage {
     } catch (err) {
       Log.i(`${LOG_TAG} toast failed: ${message}`);
     }
+  }
+}
+
+// 关于 ArkDO 信息框:应用名 + 简介 + 版本(运行时读 bundleManager)+ 可点开发者链接 + 关闭。
+// 版本自读而非由父按值传入,规避 CustomDialogController 字段初始化按值捕获空版本号。
+@CustomDialog
+struct AboutDialog {
+  controller?: CustomDialogController;
+  onOpenDeveloper: () => void = () => {};
+  @State private version: string = '';
+
+  aboutToAppear(): void {
+    try {
+      const info: bundleManager.BundleInfo =
+        bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      this.version = info.versionName;
+    } catch (err) {
+      Log.i(`${LOG_TAG} about dialog read version failed`);
+    }
+  }
+
+  build() {
+    Column() {
+      Text('ArkDO')
+        .fontSize(22)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+
+      Text('Linux.do 第三方鸿蒙客户端')
+        .fontSize(13)
+        .fontColor($r('app.color.text_secondary'))
+        .margin({ top: 8 })
+
+      Text(this.version.length > 0 ? `版本 v${this.version}` : '版本 —')
+        .fontSize(13)
+        .fontColor($r('app.color.text_faint'))
+        .margin({ top: 14 })
+
+      Row() {
+        Text('开发者 ')
+          .fontSize(14)
+          .fontColor($r('app.color.text_secondary'))
+        Text('@JoeyYin')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.ld_accent'))
+          .onClick(() => {
+            this.controller?.close();
+            this.onOpenDeveloper();
+          })
+      }
+      .margin({ top: 6 })
+
+      Button('关闭')
+        .fontSize(15)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .backgroundColor($r('app.color.surface_muted'))
+        .width('100%')
+        .height(44)
+        .borderRadius(22)
+        .margin({ top: 24 })
+        .onClick(() => {
+          this.controller?.close();
+        })
+    }
+    .width('82%')
+    .padding({ left: 24, right: 24, top: 28, bottom: 20 })
+    .backgroundColor($r('app.color.surface_card'))
+    .borderRadius(20)
+    .alignItems(HorizontalAlign.Center)
   }
 }

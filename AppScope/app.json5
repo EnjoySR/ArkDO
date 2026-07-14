@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.joeyyin.arkdo",
     "vendor": "example",
-    "versionCode": 1000000,
-    "versionName": "1.0.0",
+    "versionCode": 900000,
+    "versionName": "0.9.0",
     "icon": "$media:layered_image",
     "label": "$string:app_name"
   }

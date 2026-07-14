@@ -220,7 +220,14 @@ export struct ProfilePage {
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
           .margin({ left: 14 })
-          this.ChevronIcon()
+          // 箭头也可点:与头像/昵称同跳 linux.do 官方个人资料页(站内 Web),补齐信息区可点区域。
+          // 仍逐个子元素挂 onClick 而非外层 Row——外层无 onClick 才不与信任等级药丸的点击冒泡冲突。
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+            .fontSize(14)
+            .fontColor([$r('app.color.text_faint')])
+            .onClick(() => {
+              this.openUserWebPage('', this.getDisplayName());
+            })
         }
         .width('100%')
         .padding({ left: CARD_PADDING, right: CARD_PADDING, top: CARD_PADDING, bottom: 6 })

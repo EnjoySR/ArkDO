@@ -354,6 +354,9 @@ export struct RootTabPage {
           onBack: () => {
             this.popNavigation();
           },
+          onOpenWeb: (url: string, title?: string) => {
+            this.openWebPage(url, title);
+          },
           onOpenDoh: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DOH_SETTINGS, buildDohSettingsRouteParam('settings')));
           },
