@@ -8,7 +8,9 @@ export enum AppRouteName {
   NOTIFICATIONS = 'notifications',
   BOOKMARKS = 'bookmarks',
   ACTIVITY = 'activity',
-  BADGES = 'badges'
+  BADGES = 'badges',
+  // 双栏(平板横屏)下右详情栏的空占位:未选帖子时垫在栈底,让右栏不空白。仅宽屏使用。
+  PLACEHOLDER = 'placeholder'
 }
 
 export interface TopicDetailRouteParam {

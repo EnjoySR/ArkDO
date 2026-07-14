@@ -22,11 +22,17 @@ import { TopicCategory } from '../../models/Topic';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { MathRenderService, MathImage } from '../../services/content/MathRenderService';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
+import { APP_IS_WIDE_STORAGE_KEY } from '../../common/utils/BreakpointManager';
+import { display } from '@kit.ArkUI';
 
 const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
 // 不撑满栏宽，避免小表情被 .width('100%') 拉成大方块。
 const SMALL_IMAGE_MAX: number = 48;
+
+// 宽屏(平板横屏)阅读场景下正文大图的最大显示宽度(vp)。取 ≈ 手机基准内容宽(~350)×1.5,
+// 满足上架规范「平板图片放大不超过直板机 1.5 倍」。手机 / 窄屏永不使用此值。
+const WIDE_IMAGE_MAX_WIDTH: number = 525;
 // 表格每列固定宽度(vp):列宽统一才能让上下行的列对齐(ArkUI 无法在横向 Scroll 里自动等宽)。
 // 单元格文字在此宽度内自动换行;总宽超过栏宽时由外层横向 Scroll 左右滑动。
 const TABLE_COL_WIDTH: number = 132;
@@ -98,6 +104,12 @@ export struct PostRichContent {
   @State private renderablePolls: Poll[] = [];
   // 当前是否深色渲染(ThemeManager 维护):公式位图 colorFilter 矩阵按它切换,资源色不受影响。
   @StorageProp(APP_IS_DARK_STORAGE_KEY) private appIsDark: boolean = false;
+  // 宽屏标志:平板横屏双栏时正文大图启用「居中 + 宽度封顶 + 按屏高限高」的合规渲染。
+  // 手机、平板竖屏恒为 false,大图走原有 width('100%') 左对齐渲染,一字未改。
+  @StorageProp(APP_IS_WIDE_STORAGE_KEY) private appIsWide: boolean = false;
+  // 宽屏大图的高度上限(vp),惰性计算并缓存:取 min(520, 3/5 屏高),既满足详情页内容型
+  // 「不超过 3/5 屏高」的占比建议,又保证绝不比手机现状(520)更高。
+  private cachedWideImageMaxHeight: number = 0;
   @State private expandedDisclosures: string[] = [];
   // 已展开的话题/回复引用卡路径(默认折叠,显示 blockquote 预览;展开显示被引用楼层全文)。
   @State private expandedQuotes: string[] = [];
@@ -863,11 +875,30 @@ export struct PostRichContent {
     }
   }
 
+  // 宽屏大图高度上限(vp),惰性计算并缓存。min(520, 3/5 屏高):display 若在横屏正确回报较矮的
+  // 屏高则用 3/5 占比(更合规);若回报异常偏大则被 520 兜住,绝不比手机现状更高。
+  private wideImageMaxHeight(): number {
+    if (this.cachedWideImageMaxHeight > 0) {
+      return this.cachedWideImageMaxHeight;
+    }
+    let result: number = 520;
+    try {
+      const disp: display.Display = display.getDefaultDisplaySync();
+      const heightVp: number = disp.height / disp.densityPixels;
+      result = Math.min(520, Math.round(heightVp * 3 / 5));
+    } catch (err) {
+      Log.e(`${LOG_TAG} wideImageMaxHeight failed: ${JSON.stringify(err)}`);
+    }
+    this.cachedWideImageMaxHeight = result;
+    return result;
+  }
+
   @Builder
   private ImageBlock(block: RichBlock, marginTop: number) {
     Column() {
       if (this.isSmallImage(block)) {
         // 小图（如 emoji、图标）：按 cooked 自带的真实尺寸显示，左对齐、不撑满、不显示 alt
+        // 手机 / 宽屏一致,不动。
         Image(block.src ? block.src : '')
           .width(block.width ? block.width : 20)
           .height(block.height ? block.height : 20)
@@ -876,7 +907,36 @@ export struct PostRichContent {
           .onClick(() => {
             this.openImageLink(block);
           })
+      } else if (this.appIsWide) {
+        // 宽屏(平板横屏)阅读场景:大图居中 + 宽度封顶(≤手机基准×1.5,防止铺满宽栏被放大)
+        //  + 按屏高限高。手机 / 窄屏永不进此分支。
+        Row() {
+          if (this.hasImageSize(block)) {
+            Image(block.src ? block.src : '')
+              .width('100%')
+              .aspectRatio(this.getImageAspectRatio(block))
+              .constraintSize({ maxWidth: WIDE_IMAGE_MAX_WIDTH, maxHeight: this.wideImageMaxHeight() })
+              .objectFit(ImageFit.Contain)
+              .backgroundColor($r('app.color.fill_subtle'))
+              .onClick(() => {
+                this.openImageLink(block);
+              })
+          } else {
+            Image(block.src ? block.src : '')
+              .width('100%')
+              .height(260)
+              .constraintSize({ maxWidth: WIDE_IMAGE_MAX_WIDTH })
+              .objectFit(ImageFit.Contain)
+              .backgroundColor($r('app.color.fill_subtle'))
+              .onClick(() => {
+                this.openImageLink(block);
+              })
+          }
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
       } else if (this.hasImageSize(block)) {
+        // 手机 / 窄屏:原逻辑,一字未改(width 100% + maxHeight 520,靠外层 Column 左对齐)。
         Image(block.src ? block.src : '')
           .width('100%')
           .aspectRatio(this.getImageAspectRatio(block))

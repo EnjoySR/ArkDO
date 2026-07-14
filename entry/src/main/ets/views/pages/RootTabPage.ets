@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { APP_IS_WIDE_STORAGE_KEY, BreakpointManager } from '../../common/utils/BreakpointManager';
 import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
@@ -19,6 +20,7 @@ import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { LoginGate } from '../../services/session/LoginGate';
 import { ArkWebHost } from '../components/ArkWebHost';
 import { MathRenderHost } from '../components/MathRenderHost';
+import { ImageViewer, ViewerImage } from '../components/ImageViewer';
 import { ensureFaIconsLoaded } from '../components/FaIcon';
 import { ensureTagIconsLoaded } from '../components/TagIconRegistry';
 import { CfChallengePage } from './CfChallengePage';
@@ -51,6 +53,14 @@ export struct RootTabPage {
   @State private activeSheet: RootSheet = RootSheet.NONE;
   // 公式离屏引擎挂载门控:由 MathRenderService.retain/release 经 AppStorage 翻转。
   @StorageProp('mathHostActive') private mathHostActive: boolean = false;
+  // 宽屏标志(平板横屏 / 大屏):驱动 Navigation 双栏 Split;手机、平板竖屏恒为 false 走单栏 Stack。
+  // @Watch 在宽<->窄切换(旋转)时同步右栏空占位:进宽屏且空栈时垫占位,回窄屏时移除占位。
+  @StorageProp(APP_IS_WIDE_STORAGE_KEY) @Watch('onWideChanged') private appIsWide: boolean = false;
+  // 图片浏览器提到根级渲染:双栏下必须盖满整窗(否则只占右详情栏),旋转时随根 Stack 重排。
+  // 由详情页经 onOpenImages 回调冒泡上来触发,统一在这里开关。
+  @State private showImageViewer: boolean = false;
+  @State private viewerImages: ViewerImage[] = [];
+  @State private viewerStartIndex: number = 0;
   @State private isArkWebReady: boolean = false;
   @State private currentUser?: User = undefined;
   @State private isCheckingSession: boolean = false;
@@ -76,6 +86,8 @@ export struct RootTabPage {
 
   aboutToAppear(): void {
     this.ensureIconSymbolsLoaded();
+    // 冷启动即在宽屏(平板横屏)时,给空的右详情栏垫上占位(@Watch 只在切换时触发,首值需手动同步)。
+    this.syncWidePlaceholder();
     // 头像缓存单例注入 host bridge:UserAvatar 深层嵌套拿不到 bridge,统一经它取图(过 SNI 封锁)。
     AvatarImageCache.getInstance().attachBridge(this.bridge);
     if (!this.challengeRecovery) {
@@ -160,11 +172,31 @@ export struct RootTabPage {
         MathRenderHost()
       }
       this.RootNavigation()
+
+      // 图片浏览器:根 Stack 顶层,越过 Navigation 分栏盖满整窗(双栏下也全屏,旋转随根重排)。
+      if (this.showImageViewer) {
+        ImageViewer({
+          images: this.viewerImages,
+          startIndex: this.viewerStartIndex,
+          onClose: () => {
+            this.closeImageViewer();
+          }
+        })
+          // 入场/退场:纯淡入淡出,由 open/close 的 animateTo 驱动。
+          .transition(
+            TransitionEffect.OPACITY.animation({ duration: 220, curve: Curve.EaseOut })
+          )
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    // 根 Stack 铺满整窗,其实测宽度即窗口宽度:布局驱动断点,首帧与旋转/分屏都会触发。
+    // 宽度过阈值(840vp)→ appIsWide 置真 → Navigation 切双栏。比 mediaquery 更可靠。
+    .onAreaChange((_oldValue: Area, newValue: Area) => {
+      BreakpointManager.applyWidth(newValue.width as number);
+    })
     .bindSheet($$this.isSheetVisible, this.RootSheetBuilder, {
       // CF 交互式挑战需要尽量完整的视口(半屏+圆角+露底会被 Turnstile 视作可疑),且过盾中途
       // 不该被误滑关,故 CHALLENGE 用满高全屏、去拖动条;登录 sheet 维持 90% 底部弹层。
@@ -192,6 +224,13 @@ export struct RootTabPage {
     .width('100%')
     .height('100%')
     .hideTitleBar(true)
+    // 显式驱动分栏:仅宽屏(平板横屏)双栏 Split,手机 / 平板竖屏单栏 Stack。
+    // 不用默认 Auto——其 520vp 阈值会把平板竖屏也切成双栏。手机恒 Stack,与现状一致。
+    .mode(this.appIsWide ? NavigationMode.Split : NavigationMode.Stack)
+    // 左列表栏宽(仅 Split 生效,Stack/手机下忽略):
+    //  ① 调宽列表,读着不挤;② 须 ≥ 分区抽屉宽度(288),否则抽屉滑出会溢进右详情栏。
+    //  想微调列表宽度只改这一个数即可。
+    .navBarWidth(420)
     .navDestination(this.NavDestinationBuilder)
   }
 
@@ -205,6 +244,10 @@ export struct RootTabPage {
           isArkWebReady: this.isArkWebReady,
           onBack: () => {
             this.popNavigation();
+          },
+          // 图片预览上抛到根级渲染:双栏下才能盖满整窗、旋转正常。
+          onOpenImages: (images: ViewerImage[], startIndex: number) => {
+            this.openImageViewer(images, startIndex);
           },
           onOpenLink: (url: string) => {
             this.handleOpenLink(url);
@@ -399,6 +442,26 @@ export struct RootTabPage {
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
       .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.PLACEHOLDER) {
+      // 双栏右详情栏的空占位:仅在宽屏未选帖子时垫在栈底,让右栏显示品牌空态而非系统默认空白。
+      NavDestination() {
+        Column() {
+          Text('ArkDO')
+            .fontSize(30)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_secondary'))
+          Text('从左侧选择一个帖子开始阅读')
+            .fontSize(15)
+            .fontColor($r('app.color.text_tertiary'))
+            .margin({ top: 12 })
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor($r('app.color.page_bg'))
+      }
+      .hideTitleBar(true)
+      .backgroundColor($r('app.color.page_bg'))
     } else {
       NavDestination() {
         Column() {
@@ -571,6 +634,40 @@ export struct RootTabPage {
 
   private popNavigation(): void {
     this.navPathStack.pop();
+  }
+
+  // 宽<->窄切换时的右栏占位同步:
+  //  · 宽屏(Split)且内容栈为空 → 垫入 PLACEHOLDER 当栈底,右栏显示品牌空态而非系统空白;
+  //    垫在栈底后,后续打开的帖子 push 在其上,返回到底即回到占位,不会退成空白。
+  //  · 窄屏(Stack / 手机)→ 移除所有 PLACEHOLDER,保证手机返回栈干净、绝不出现占位页。
+  private onWideChanged(): void {
+    this.syncWidePlaceholder();
+  }
+
+  private syncWidePlaceholder(): void {
+    if (this.appIsWide) {
+      if (this.navPathStack.size() === 0) {
+        // 无动画压入,避免占位页出现时的推入动效。
+        this.navPathStack.pushPathByName(AppRouteName.PLACEHOLDER, undefined, false);
+      }
+    } else {
+      this.navPathStack.removeByName(AppRouteName.PLACEHOLDER);
+    }
+  }
+
+  // 图片浏览器开关:详情页经 onOpenImages 回调冒泡上来触发。animateTo 驱动 .transition 淡入/淡出。
+  private openImageViewer(images: ViewerImage[], startIndex: number): void {
+    this.viewerImages = images;
+    this.viewerStartIndex = startIndex;
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+      this.showImageViewer = true;
+    });
+  }
+
+  private closeImageViewer(): void {
+    this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
+      this.showImageViewer = false;
+    });
   }
 
   private handleArkWebReady(): void {

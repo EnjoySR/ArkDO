@@ -16,7 +16,7 @@ import { LoadStateView } from '../components/LoadStateView';
 import { TopicDetailHeader } from '../components/TopicDetailHeader';
 import { TopicSummaryCard } from '../components/TopicSummaryCard';
 import { TopicPostItem } from '../components/TopicPostItem';
-import { ImageViewer, ViewerImage } from '../components/ImageViewer';
+import { ViewerImage } from '../components/ImageViewer';
 import { CommentInputBar, REPLY_BLUE } from '../components/CommentInputBar';
 import { ComposerWindowGuard } from '../components/ComposerWindowGuard';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
@@ -72,10 +72,6 @@ export struct TopicDetailPage {
   // List 重建开关:翻转值使 build 里的 if/else 换分支,同一帧销毁旧 List、全新重建
   // (新 List 挂新 PostDataSource 实例 + initialIndex 生效)。这是原地换窗不经过加载页的关键。
   @State private listEpochEven: boolean = true;
-  // 图片浏览器在页面级渲染（放在页面根 Stack 顶层，避免被 List 裁剪、且响应式正常）
-  @State private showImageViewer: boolean = false;
-  @State private viewerImages: ViewerImage[] = [];
-  @State private viewerStartIndex: number = 0;
   // 顶部摘要(标题/分类/标签)是否可见:滑出视口后,头部由"帖子详情"切换为显示帖子标题与分类标签行。
   @State private summaryVisible: boolean = true;
   // 当前视口首楼的楼号:驱动右缘 scrubber 的滑块位置(onScrollIndex 持续更新)。
@@ -121,6 +117,8 @@ export struct TopicDetailPage {
   );
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   onBack: () => void = () => {};
+  // 图片预览上抛给根组件渲染:双栏(平板横屏)下须盖满整窗而非仅右详情栏,故提到 RootTabPage 根级。
+  onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击上抛给根导航:站内帖子链接跳原生详情,其余打开通用 WebView。
   onOpenLink: (url: string) => void = () => {};
   private categoryIndex: CategoryIndex = new CategoryIndex();
@@ -214,7 +212,7 @@ export struct TopicDetailPage {
           // 采纳答案面板只挂一楼:非一楼下发空数组,免得每个 item 都持有整份数据。
           acceptedAnswers: post.postNumber === 1 ? (this.detail?.acceptedAnswers ?? []) : [],
           onOpenImages: (images: ViewerImage[], startIndex: number) => {
-            this.openImageViewer(images, startIndex);
+            this.onOpenImages(images, startIndex);
           },
           onOpenLink: (url: string) => {
             this.onOpenLink(url);
@@ -431,20 +429,6 @@ export struct TopicDetailPage {
       .position({ x: '50%', y: 72 })
       .markAnchor({ x: '50%', y: 0 })
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
-    }
-
-    if (this.showImageViewer) {
-      ImageViewer({
-        images: this.viewerImages,
-        startIndex: this.viewerStartIndex,
-        onClose: () => {
-          this.closeImageViewer();
-        }
-      })
-        // 入场/退场：纯淡入淡出（不缩放，黑底不变小，只是颜色渐显/渐隐）；由 open/close 的 animateTo 驱动
-        .transition(
-          TransitionEffect.OPACITY.animation({ duration: 220, curve: Curve.EaseOut })
-        )
     }
 
     // 评论输入浮层:内联挂在根 Stack 顶层(而非 contentCover),这样组件 getLastWindow 拿到主窗口、
@@ -784,21 +768,6 @@ export struct TopicDetailPage {
       return posts[posts.length - 1].postNumber;
     }
     return this.postCount;
-  }
-
-  private openImageViewer(images: ViewerImage[], startIndex: number): void {
-    this.viewerImages = images;
-    this.viewerStartIndex = startIndex;
-    // animateTo 驱动 .transition 播放淡入入场
-    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
-      this.showImageViewer = true;
-    });
-  }
-
-  private closeImageViewer(): void {
-    this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
-      this.showImageViewer = false;
-    });
   }
 
   private async loadTopicDetail(): Promise<void> {

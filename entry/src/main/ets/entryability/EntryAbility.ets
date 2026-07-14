@@ -5,6 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
 import { ThemeManager } from '../common/theme/ThemeManager';
+import { BreakpointManager } from '../common/utils/BreakpointManager';
 import { DohManager } from '../services/network/DohManager';
 import { FileLogger } from '../services/logging/FileLogger';
 import { AppStateEventBus } from '../services/session/AppStateEventBus';
@@ -29,6 +30,8 @@ export default class EntryAbility extends UIAbility {
     // 避免已登录用户在首个会话检查回来前被误判为游客(阅读追踪不启动、写操作被拦)。
     LoginGate.initPersist();
     ThemeManager.init(this.context);
+    // 响应式断点监听:决定平板横屏双栏 / 竖屏单栏,须早于首页渲染写入初始值。手机恒为非宽屏。
+    BreakpointManager.init();
     // setHttpDns 只有在 Web 引擎初始化之后才生效(引擎网络服务需先就绪),故须先显式
     // initializeWebEngine 再下发 DoH;且早于任何页面,确保宿主 webview 首次解析
     // linux.do 就走 DoH,规避被污染的系统 DNS。否则请求会以 useHttpDns:0 走系统 DNS 超时。
