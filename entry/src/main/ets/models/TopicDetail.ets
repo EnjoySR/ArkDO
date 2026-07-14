@@ -136,6 +136,9 @@ export interface TopicDetail {
   stream?: number[];
   // discourse-solved 采纳答案面板数据源;无解或非问答帖为 undefined/空数组。
   acceptedAnswers?: AcceptedAnswer[];
+  // 当前用户是否已收藏该主题(topic.json 顶层 bookmarked)。为真时摘要卡与导航头标题行首
+  // 内联灰色书签标记,排在已解决勾选框之前。
+  bookmarked?: boolean;
   // linux.do shared issue（"俺也一样 / 我也遇到"）:一楼下方那枚举手按钮。注意不是 discourse-topic-voting——
   // topic-voting 的 can_vote/user_voted/vote_count 在本站恒为 false/0,真源是下面这组 shared_issue 字段。
   // shared_issue_visible:是否渲染按钮。

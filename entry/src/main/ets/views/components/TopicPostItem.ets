@@ -4,6 +4,7 @@ import { AcceptedAnswer, Poll, PollVoteResult, PostBoost, PostReaction, SharedIs
 import { CookedHtmlParser, RichInlineNode, RichInlineType } from '../../services/content/CookedHtmlParser';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { ReactionMutation } from '../../services/topic/ReactionMutation';
+import { BookmarkToggleResult } from '../../services/topic/PostActions';
 import { getReactionEmoji, REACTION_ORDER } from './EmojiRegistry';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { getEmojiUrl } from './EmojiUrlRegistry';
@@ -96,8 +97,8 @@ export struct TopicPostItem {
   onLoadReplies: (post: TopicPost) => Promise<TopicPost[] | null> = () => Promise.resolve(null);
   // 点「更多」展开区:拷贝该楼永久链接、书签 toggle。均上抛给页面(页面持有 bridge/slug/剪贴板)。
   onCopyPostLink: (post: TopicPost) => void = () => {};
-  // 书签 toggle 上抛页面发网络,返回操作后的最终收藏态(失败=回滚后的原态),用于校正本地显示。
-  onToggleBookmark: (post: TopicPost) => Promise<boolean> = () => Promise.resolve(false);
+  // 书签 toggle 上抛页面发网络,返回该楼与主题级最终态;本组件只取 postBookmarked 校正本地显示。
+  onToggleBookmark: (post: TopicPost) => Promise<BookmarkToggleResult> = () => Promise.resolve({ postBookmarked: false } as BookmarkToggleResult);
   // linux.do shared issue（"俺也一样"）。仅一楼(postNumber===1)且 shared_issue_visible 时,页面下发 sharedIssueVisible=true。
   // 计数/已点态是话题级值(不在 @Observed post 上),按 memory objectlink-state-source 用本组件自身 @State 驱动显示才稳。
   sharedIssueVisible: boolean = false;
@@ -915,10 +916,10 @@ export struct TopicPostItem {
       }
       this.bookmarkLoading = true;
       Log.i(`[ARKDO][Bookmark] tap postId=${this.post.id} bookmarkedLocal=${this.bookmarkedLocal} postBookmarked=${this.post.bookmarked} bookmarkId=${this.post.bookmarkId}`);
-      this.onToggleBookmark(this.post).then((finalState: boolean) => {
-        this.bookmarkedLocal = finalState;
+      this.onToggleBookmark(this.post).then((result: BookmarkToggleResult) => {
+        this.bookmarkedLocal = result.postBookmarked;
         this.bookmarkLoading = false;
-        Log.i(`[ARKDO][Bookmark] reconcile postId=${this.post.id} finalState=${finalState}`);
+        Log.i(`[ARKDO][Bookmark] reconcile postId=${this.post.id} postBookmarked=${result.postBookmarked} topicBookmarked=${result.topicBookmarked}`);
       });
     })
   }

@@ -29,6 +29,15 @@ export struct TopicListItem {
           // 断开,导致半截蓝色背景留在上一行;换成   后药丸不可拆,断行只发生在它前面的引导空格,
           // 整个药丸连背景一起下移到新行。
           Text() {
+            // 书签:已收藏时标题最前内联灰色书签标记(烘 #919191 专用 SVG,同已解决走 ImageSpan 内联)。
+            // 排在已解决勾选框之前。
+            if (this.topic.bookmarked === true) {
+              ImageSpan($rawfile('fa_icons/bookmark-gray.svg'))
+                .width(15)
+                .height(15)
+                .margin({ right: 5 })
+                .verticalAlign(ImageSpanAlignment.CENTER)
+            }
             // 已解决:标题行首内联绿色勾选框标记(烘 #090 专用 SVG,ImageSpan 内联随标题文字换行同排)。
             if (this.topic.hasAcceptedAnswer === true) {
               ImageSpan($rawfile('fa_icons/far-square-check-green.svg'))

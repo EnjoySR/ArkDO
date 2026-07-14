@@ -36,6 +36,7 @@ interface DiscourseTopic {
   highest_post_number?: number;
   posters?: DiscoursePoster[];
   has_accepted_answer?: boolean;
+  bookmarked?: boolean;
 }
 
 interface DiscoursePoster {
@@ -74,6 +75,7 @@ interface DiscourseTopicDetail {
   accepted_answers?: DiscourseAcceptedAnswer[];
   // 主题作者(楼主)用户 id:优先 details.created_by.id,回退顶层 user_id。
   user_id?: number;
+  bookmarked?: boolean;
   details?: DiscourseTopicDetailsField;
   // linux.do shared issue（"俺也一样"）:一楼下方举手按钮的真源(非 topic-voting)。
   shared_issue_visible?: boolean;
@@ -226,6 +228,13 @@ interface DiscourseSharedIssueResponse {
 interface DiscourseBookmarkResponse {
   success?: string;
   id?: number;
+}
+
+// DELETE /bookmarks/<id>.json 的响应:{ success:"OK", topic_bookmarked:bool }。
+// topic_bookmarked = 取消这个书签后,该主题下是否仍有其它书签(主题级书签图标的权威真源)。
+interface DiscourseBookmarkDeleteResponse {
+  success?: string;
+  topic_bookmarked?: boolean;
 }
 
 // POST /posts 的响应外壳:真正的楼层在 post 字段里,不在顶层。
@@ -710,12 +719,31 @@ export class TopicService {
   }
 
   // 书签:取消某个书签。DELETE /bookmarks/<bookmarkId>.json,无 body。响应 { success:"OK", topic_bookmarked:bool }。
-  async removeBookmark(bookmarkId: number, topicId: number): Promise<NetworkResult<string>> {
+  // 返回 data = topic_bookmarked(取消后主题是否仍有书签),供标题书签图标即时联动;解析不出时 data=undefined。
+  async removeBookmark(bookmarkId: number, topicId: number): Promise<NetworkResult<boolean>> {
     const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
-    return this.bridge.deleteForm(`/bookmarks/${bookmarkId}.json`, '', {
+    const response: NetworkResult<string> = await this.bridge.deleteForm(`/bookmarks/${bookmarkId}.json`, '', {
       notifyChallenge: true,
       referrer: referrer
     });
+    if (!response.success) {
+      return this.forwardFailure<boolean>(response);
+    }
+    // 删除本身已成功;尽力解析 topic_bookmarked,拿不到就返回 undefined 交由上层降级(不猜)。
+    if (response.data === undefined) {
+      return { success: true, statusCode: response.statusCode, challengeState: response.challengeState, data: undefined };
+    }
+    try {
+      const wrapper: DiscourseBookmarkDeleteResponse = JSON.parse(response.data) as DiscourseBookmarkDeleteResponse;
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: typeof wrapper.topic_bookmarked === 'boolean' ? wrapper.topic_bookmarked : undefined
+      };
+    } catch (error) {
+      return { success: true, statusCode: response.statusCode, challengeState: response.challengeState, data: undefined };
+    }
   }
 
   private getFeedPath(feedKey: string, page: number): string {
@@ -774,6 +802,7 @@ export class TopicService {
       topic.lastReadPostNumber = typeof sourceTopic.last_read_post_number === 'number' ? sourceTopic.last_read_post_number : undefined;
       topic.highestPostNumber = typeof sourceTopic.highest_post_number === 'number' ? sourceTopic.highest_post_number : undefined;
       topic.hasAcceptedAnswer = sourceTopic.has_accepted_answer === true;
+      topic.bookmarked = sourceTopic.bookmarked === true;
       topic.author = this.findOriginalPoster(sourceTopic, sourceUsers);
       topics.push(topic);
     }
@@ -886,6 +915,7 @@ export class TopicService {
       unreadPosts: typeof sourceTopic.unread_posts === 'number' ? sourceTopic.unread_posts : undefined,
       stream: this.mapStream(sourceTopic.post_stream?.stream),
       acceptedAnswers: this.mapAcceptedAnswers(sourceTopic.accepted_answers),
+      bookmarked: sourceTopic.bookmarked === true,
       sharedIssueVisible: sourceTopic.shared_issue_visible === true,
       canCreateSharedIssue: sourceTopic.can_create_shared_issue === true,
       userCreatedSharedIssue: sourceTopic.user_created_shared_issue === true,

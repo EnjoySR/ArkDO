@@ -8,7 +8,7 @@ import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { LoginGate } from '../../services/session/LoginGate';
 import { TopicReadController } from '../../services/reading/TopicReadController';
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
-import { PostActions } from '../../services/topic/PostActions';
+import { BookmarkToggleResult, PostActions } from '../../services/topic/PostActions';
 import { PostDataSource } from '../../services/topic/PostDataSource';
 import { PostStreamPager } from '../../services/topic/PostStreamPager';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
@@ -38,7 +38,10 @@ const SUCCESS_TOAST_DELAY_MS: number = 350;
 
 @Component
 export struct TopicDetailPage {
-  @State private detail: TopicDetail | undefined = undefined;
+  @State @Watch('syncTopicBookmarkFromDetail') private detail: TopicDetail | undefined = undefined;
+  // 标题书签图标的独立驱动态:detail 是 interface 的 @State,改字段不触发重渲染,故用基元 @State 镜像。
+  // detail 整体加载/替换时经 @Watch 从 detail.bookmarked 同步;楼层 toggle 收藏后由回调直接改写实现即时联动。
+  @State private topicBookmarked: boolean = false;
   // 楼层真源:LazyForEach 数据源,增删经精准通知(maintainVisibleContentPosition 依赖)。
   // postCount 镜像总数驱动条件 UI(@State 观测不到 dataSource 内部变化),变更后须手动同步。
   private dataSource: PostDataSource = new PostDataSource();
@@ -198,7 +201,8 @@ export struct TopicDetailPage {
           parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
           tags: this.getTags(),
           metaText: this.getTopicMetaText(),
-          solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0
+          solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0,
+          bookmarked: this.topicBookmarked
         })
       }
 
@@ -251,7 +255,16 @@ export struct TopicDetailPage {
             this.postActions.copyPostLink(targetPost);
           },
           onToggleBookmark: (targetPost: TopicPost) => {
-            return this.postActions.toggleBookmark(targetPost);
+            return this.postActions.toggleBookmark(targetPost).then((result: BookmarkToggleResult) => {
+              // 主题级态确定时(加书签必 true;取消取接口 topic_bookmarked),即时联动标题书签图标。
+              if (result.topicBookmarked !== undefined) {
+                this.topicBookmarked = result.topicBookmarked;
+                if (this.detail !== undefined) {
+                  this.detail.bookmarked = result.topicBookmarked;
+                }
+              }
+              return result;
+            });
           },
           // "俺也一样"(shared issue):话题级功能,只对 shared_issue_visible 的一楼下发有效值,其余楼不渲染。
           sharedIssueVisible: post.postNumber === 1 && (this.detail?.sharedIssueVisible ?? false),
@@ -337,6 +350,7 @@ export struct TopicDetailPage {
         parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
         tags: this.getTags(),
         solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0,
+        bookmarked: this.topicBookmarked,
         onBack: () => {
           this.onBack();
         }
@@ -968,6 +982,11 @@ export struct TopicDetailPage {
       return title;
     }
     return this.param.title;
+  }
+
+  // detail 整体加载/替换时,把主题级书签态同步到独立驱动的 topicBookmarked(标题书签图标的真源)。
+  private syncTopicBookmarkFromDetail(): void {
+    this.topicBookmarked = this.detail?.bookmarked === true;
   }
 
   private getTopicMetaText(): string {

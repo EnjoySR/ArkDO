@@ -15,6 +15,8 @@ export struct TopicDetailHeader {
   @Prop tags: TopicTag[] = [];
   // 已解决(有采纳答案):滚动后的帖子标题(图层 B)行首内联绿色 far-square-check 标记,与顶部摘要卡一致。
   @Prop solved: boolean = false;
+  // 已收藏:图层 B 帖子标题最前内联灰色书签标记,排在已解决勾选框之前。
+  @Prop bookmarked: boolean = false;
   onBack: () => void = () => {};
 
   build() {
@@ -50,6 +52,14 @@ export struct TopicDetailHeader {
         Column({ space: 2 }) {
           // 已解决时行首内联绿色勾选框标记(同摘要卡:烘 #090 的专用 SVG,ImageSpan 内联随文字排)。
           Text() {
+            // 书签排在已解决之前:烘 #919191 专用 SVG,ImageSpan 内联随文字排。
+            if (this.bookmarked) {
+              ImageSpan($rawfile('fa_icons/bookmark-gray.svg'))
+                .width(15)
+                .height(15)
+                .margin({ right: 5 })
+                .verticalAlign(ImageSpanAlignment.CENTER)
+            }
             if (this.solved) {
               ImageSpan($rawfile('fa_icons/far-square-check-green.svg'))
                 .width(15)

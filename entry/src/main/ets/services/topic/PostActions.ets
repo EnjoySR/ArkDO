@@ -13,6 +13,15 @@ export type ToastFn = (message: string, duration: number) => void;
 export type TopicContextFn = () => number;
 export type BridgeFn = () => JsonNetworkClient;
 
+// 书签 toggle 结果:
+// postBookmarked —— 该楼操作后的最终收藏态(失败=回滚后原态),子组件用它校正本地显示 @State。
+// topicBookmarked —— 主题级最终态(详情页驱动标题书签图标);undefined 表示本次无法确定(失败/拿不到权威值),
+//                    详情页遇 undefined 时不改动标题图标。
+export interface BookmarkToggleResult {
+  postBookmarked: boolean;
+  topicBookmarked?: boolean;
+}
+
 // 楼层动作胶水:表情回应 / 投票 / 撤票 / 拷贝链接 / 书签,统一"发网络 + 失败回滚 + toast"闭环。
 // 乐观更新直接写 @Observed 的 TopicPost/Poll,由 @ObjectLink 精准重渲染,不经页面 @State。
 // 全部依赖(bridge/toast/主题 id/slug)都经闭包惰性读取:页面在字段初始化器里创建本类时,
@@ -122,12 +131,12 @@ export class PostActions {
     });
   }
 
-  // 书签 toggle:post.bookmarked/bookmarkId 为网络侧真源,发网络+失败回滚;返回操作后的最终收藏态,
-  // 交给子组件校正本地显示 @State(子组件负责乐观翻转与重渲染)。带 [ARKDO][Bookmark] 日志便于排查。
-  async toggleBookmark(post: TopicPost): Promise<boolean> {
+  // 书签 toggle:post.bookmarked/bookmarkId 为网络侧真源,发网络+失败回滚;返回该楼与主题级最终态,
+  // 交给子组件校正本地显示 @State、详情页联动标题书签图标。带 [ARKDO][Bookmark] 日志便于排查。
+  async toggleBookmark(post: TopicPost): Promise<BookmarkToggleResult> {
     // 未登录:拦截并弹登录页,不做乐观更新也不发请求(收藏/书签)。
     if (!LoginGate.ensureLoggedIn()) {
-      return post.bookmarked === true;
+      return { postBookmarked: post.bookmarked === true, topicBookmarked: undefined };
     }
     const topicId: number = this.resolveTopicId(post);
     const service: TopicService = new TopicService(this.getBridge());
@@ -138,30 +147,36 @@ export class PostActions {
     if (wasBookmarked && prevId !== undefined) {
       post.bookmarked = false;
       post.bookmarkId = undefined;
-      const result: NetworkResult<string> = await service.removeBookmark(prevId, topicId);
-      Log.i(`[ARKDO][Bookmark] remove result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState}`);
+      const result: NetworkResult<boolean> = await service.removeBookmark(prevId, topicId);
+      Log.i(`[ARKDO][Bookmark] remove result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState} topicBookmarked=${result.data}`);
       if (result.success) {
         this.toast('已取消收藏', 1500);
-      } else {
-        post.bookmarked = true;
-        post.bookmarkId = prevId;
-        this.toast('取消收藏失败', 1500);
+        Log.i(`[ARKDO][Bookmark] toggle end postId=${post.id} finalBookmarked=${post.bookmarked} bookmarkId=${post.bookmarkId}`);
+        // 主题级态优先用接口权威值;拿不到时退化为 false(视为取消了主题内唯一书签,刷新时以真源纠正)。
+        return { postBookmarked: false, topicBookmarked: result.data !== undefined ? result.data : false };
       }
-    } else {
       post.bookmarked = true;
-      const result: NetworkResult<number> = await service.addBookmark(post.id, topicId);
-      Log.i(`[ARKDO][Bookmark] add result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState} id=${result.data}`);
-      if (result.success && result.data !== undefined) {
-        post.bookmarkId = result.data;
-        this.toast('已收藏', 1500);
-      } else {
-        post.bookmarked = false;
-        post.bookmarkId = undefined;
-        this.toast('收藏失败', 1500);
-      }
+      post.bookmarkId = prevId;
+      this.toast('取消收藏失败', 1500);
+      Log.i(`[ARKDO][Bookmark] toggle end postId=${post.id} finalBookmarked=${post.bookmarked} bookmarkId=${post.bookmarkId}`);
+      return { postBookmarked: true, topicBookmarked: undefined };
     }
+
+    post.bookmarked = true;
+    const result: NetworkResult<number> = await service.addBookmark(post.id, topicId);
+    Log.i(`[ARKDO][Bookmark] add result postId=${post.id} success=${result.success} status=${result.statusCode} challenge=${result.challengeState} id=${result.data}`);
+    if (result.success && result.data !== undefined) {
+      post.bookmarkId = result.data;
+      this.toast('已收藏', 1500);
+      Log.i(`[ARKDO][Bookmark] toggle end postId=${post.id} finalBookmarked=${post.bookmarked} bookmarkId=${post.bookmarkId}`);
+      // 新增任一楼层书签 → 主题必然有书签。
+      return { postBookmarked: true, topicBookmarked: true };
+    }
+    post.bookmarked = false;
+    post.bookmarkId = undefined;
+    this.toast('收藏失败', 1500);
     Log.i(`[ARKDO][Bookmark] toggle end postId=${post.id} finalBookmarked=${post.bookmarked} bookmarkId=${post.bookmarkId}`);
-    return post.bookmarked === true;
+    return { postBookmarked: false, topicBookmarked: undefined };
   }
 
   // 主题 id:优先楼层自带,缺失时用页面 detail 兜底。

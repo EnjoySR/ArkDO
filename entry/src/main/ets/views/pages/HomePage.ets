@@ -220,7 +220,10 @@ export struct HomePage {
                   this.handleUnreadBadgeClick(selectedTopic);
                 }
               })
-            }, (topic: Topic) => topic.id.toString())
+              // key 纳入 bookmarked:相同 id 时 ForEach 复用旧子组件、不把 @ObjectLink 换到刷新后的新实例,
+              // 收藏后回列表刷新图标不更新。把书签态并入 key,变化时强制重建该行绑新实例。
+              // unread 走「同实例改字段 + @Observed 通知」路径,无需进 key。
+            }, (topic: Topic) => `${topic.id}_${topic.bookmarked === true ? 1 : 0}`)
 
             if (this.topics.length > 0) {
               ListItem() {
