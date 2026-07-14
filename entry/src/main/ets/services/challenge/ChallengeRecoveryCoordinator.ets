@@ -2,6 +2,9 @@ import { Log } from '../logging/Log';
 import { ArkWebNetworkBridge } from '../network/ArkWebNetworkBridge';
 import { WebSessionManager } from '../web/WebSessionManager';
 import { ChallengeResolutionProbe } from './ChallengeResolutionProbe';
+import { ChallengeRecoveryEventBus, ChallengeRecoveryState } from './ChallengeRecoveryEventBus';
+
+export { ChallengeRecoveryState };
 
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
 // 探测节拍与上限:每 2s 用 /latest.json 探一次是否放行(权威判定,不看可能残留的 cf_clearance);
@@ -11,13 +14,6 @@ const RELOAD_RETRY_AT_POLL: number = 6;
 const MAX_POLL: number = 12;
 // 恢复成功后的冷却期:期间吞掉新挑战信号,杜绝"探测放行→重试请求→CF 抖动又拦→再弹"的弹跳。
 const COOLDOWN_MS: number = 30000;
-
-export enum ChallengeRecoveryState {
-  IDLE = 0,
-  RESOLVING = 1,
-  AWAITING_SHEET = 2,
-  COOLDOWN = 3
-}
 
 // CF 挑战恢复协调器:收到挑战信号后,优先在后台重载 host webview 让挑战 JS 静默跑通拿 cf_clearance,
 // 用接口探测判定是否放行;两次重载仍不通才升级到交互弹窗。状态机吞掉恢复中/冷却中的重复信号。
@@ -45,6 +41,12 @@ export class ChallengeRecoveryCoordinator {
     return this.state;
   }
 
+  // 统一状态迁移出口:落值并广播,让首页空态在"静默中/终态"间跟随切换。
+  private setState(next: ChallengeRecoveryState): void {
+    this.state = next;
+    ChallengeRecoveryEventBus.notifyState(next);
+  }
+
   // 组件销毁时清理计时器。
   dispose(): void {
     this.reset();
@@ -66,6 +68,19 @@ export class ChallengeRecoveryCoordinator {
     this.enterCooldown();
   }
 
+  // 首页"手动验证"按钮:用户主动接管。停掉后台轮询并直接升级到可见弹窗,
+  // 后台与前台过验从此互斥,杜绝"弹窗开着后台又探通刷新"的双刷竞态。
+  // 冷却期(刚过验完)无活跃挑战,不接管,交回调用方走普通刷新。
+  forceEscalate(): boolean {
+    if (this.state === ChallengeRecoveryState.COOLDOWN || this.state === ChallengeRecoveryState.AWAITING_SHEET) {
+      Log.i(`${DIAG_TAG} stage=recoveryManualIgnored state=${this.state}`);
+      return false;
+    }
+    Log.i(`${DIAG_TAG} stage=recoveryManualEscalate state=${this.state}`);
+    this.escalate();
+    return true;
+  }
+
   // 用户手动关闭兜底弹窗且未解决:回到空闲,下次挑战再试。
   notifySheetDismissed(): void {
     if (this.state === ChallengeRecoveryState.AWAITING_SHEET) {
@@ -75,7 +90,7 @@ export class ChallengeRecoveryCoordinator {
   }
 
   private startRecovery(source: string): void {
-    this.state = ChallengeRecoveryState.RESOLVING;
+    this.setState(ChallengeRecoveryState.RESOLVING);
     this.pollCount = 0;
     Log.i(`${DIAG_TAG} stage=recoveryStart source=${source}`);
     this.reloadHost('attempt1');
@@ -129,17 +144,17 @@ export class ChallengeRecoveryCoordinator {
   private escalate(): void {
     Log.i(`${DIAG_TAG} stage=recoveryEscalate attempts=${this.pollCount}`);
     this.clearPollTimer();
-    this.state = ChallengeRecoveryState.AWAITING_SHEET;
+    this.setState(ChallengeRecoveryState.AWAITING_SHEET);
     this.onEscalateToSheet();
   }
 
   private enterCooldown(): void {
-    this.state = ChallengeRecoveryState.COOLDOWN;
+    this.setState(ChallengeRecoveryState.COOLDOWN);
     this.clearCooldownTimer();
     Log.i(`${DIAG_TAG} stage=recoveryCooldownStart ms=${COOLDOWN_MS}`);
     this.cooldownTimer = setTimeout(() => {
       this.cooldownTimer = -1;
-      this.state = ChallengeRecoveryState.IDLE;
+      this.setState(ChallengeRecoveryState.IDLE);
       Log.i(`${DIAG_TAG} stage=recoveryCooldownEnd`);
     }, COOLDOWN_MS);
   }
@@ -148,7 +163,7 @@ export class ChallengeRecoveryCoordinator {
     this.clearPollTimer();
     this.clearCooldownTimer();
     this.pollCount = 0;
-    this.state = ChallengeRecoveryState.IDLE;
+    this.setState(ChallengeRecoveryState.IDLE);
   }
 
   private clearPollTimer(): void {

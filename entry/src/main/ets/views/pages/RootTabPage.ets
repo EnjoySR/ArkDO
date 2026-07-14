@@ -8,6 +8,7 @@ import { Topic } from '../../models/Topic';
 import { User } from '../../models/User';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
 import { ChallengeRecoveryCoordinator } from '../../services/challenge/ChallengeRecoveryCoordinator';
+import { ChallengeRecoveryEventBus } from '../../services/challenge/ChallengeRecoveryEventBus';
 import { AuthService } from '../../services/auth/AuthService';
 import { NotificationService } from '../../services/notification/NotificationService';
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
@@ -69,6 +70,7 @@ export struct RootTabPage {
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeDownload?: () => void = undefined;
   private unsubscribeRequireLogin?: () => void = undefined;
+  private unsubscribeManualChallenge?: () => void = undefined;
   // 挑战恢复协调器:优先后台静默过盾,失败才弹窗。惰性创建(需闭包引用本组件方法)。
   private challengeRecovery?: ChallengeRecoveryCoordinator = undefined;
 
@@ -109,6 +111,12 @@ export struct RootTabPage {
         this.openLoginPage();
       });
     }
+    // 首页"手动验证"按钮:停后台静默恢复并直接弹可见验证页。
+    if (!this.unsubscribeManualChallenge) {
+      this.unsubscribeManualChallenge = ChallengeRecoveryEventBus.subscribeManual(() => {
+        this.challengeRecovery?.forceEscalate();
+      });
+    }
   }
 
   aboutToDisappear(): void {
@@ -129,6 +137,10 @@ export struct RootTabPage {
     if (this.unsubscribeRequireLogin) {
       this.unsubscribeRequireLogin();
       this.unsubscribeRequireLogin = undefined;
+    }
+    if (this.unsubscribeManualChallenge) {
+      this.unsubscribeManualChallenge();
+      this.unsubscribeManualChallenge = undefined;
     }
   }
 
