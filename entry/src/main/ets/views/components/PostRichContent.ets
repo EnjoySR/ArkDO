@@ -57,10 +57,20 @@ interface MathNode {
 }
 
 // 引用卡展开时被引用楼层全文的按需加载态。status:1 加载中 / 2 已加载 / 3 失败(拿不到)。
+// 引用卡按需拉取被引用楼层全文的加载态。
+enum QuoteFullStatus {
+  IDLE = 0,      // 未拉取(默认)
+  LOADING = 1,   // 拉取中(chevron 换成 loading 转圈)
+  LOADED = 2,    // 已拉到全文(可展开,blocks 已缓存)
+  FAILED = 3     // 拉取失败(隐藏 chevron)
+}
+
 class QuoteFullState {
   path: string = '';
-  status: number = 0;
+  status: QuoteFullStatus = QuoteFullStatus.IDLE;
   html: string = '';
+  // 全文解析结果缓存:status=2 到手时解析一次,展开态每次重绘直接复用,避免每帧全量重解析(长引用/含公式时掉帧)。
+  blocks: RichBlock[] = [];
 }
 
 @Component
@@ -105,13 +115,18 @@ export struct PostRichContent {
   private mathRequested: Set<string> = new Set();
   // 本帖是否已 retain 公式引擎(有公式才 retain,离开时 release)。
   private mathRetained: boolean = false;
+  // 组件是否仍挂载:异步续体(如引用卡拉全文的 .then)跨越网络往返落地时,组件可能已被 LazyForEach 回收
+  // 或返回上一页销毁;续体前置守卫,避免在已卸载组件上 getUIContext().animateTo(null) 抛异常/无效写 @State。
+  private isActive: boolean = false;
 
   aboutToAppear(): void {
+    this.isActive = true;
     this.renderablePolls = this.polls;
     this.prepareMath();
   }
 
   aboutToDisappear(): void {
+    this.isActive = false;
     if (this.mathRetained) {
       this.mathRetained = false;
       MathRenderService.getInstance().release();
@@ -487,8 +502,8 @@ export struct PostRichContent {
         // 折叠开关:拉取全文中(status 1)显示 loading 转圈,取代 chevron;否则一张 chevron-down 绕中心
         // 旋转——折叠 0°、展开 180°(转到底即朝上)。用旋转而非换图:既拿到动画,又绕开「FaIconView.icon
         // 普通成员改属性不刷新」的坑。点击按需拉取并展开;拉取失败(status 3)后整体隐藏。外包 padding 放大命中区。
-        if (block.quotePostNumber && block.quotePostNumber > 0 && this.quoteFullStatus(path) !== 3) {
-          if (this.quoteFullStatus(path) === 1) {
+        if (block.quotePostNumber && block.quotePostNumber > 0 && this.quoteFullStatus(path) !== QuoteFullStatus.FAILED) {
+          if (this.quoteFullStatus(path) === QuoteFullStatus.LOADING) {
             Row() {
               LoadingProgress()
                 .width(16)
@@ -570,26 +585,26 @@ export struct PostRichContent {
     this.expandedQuotes = next;
   }
 
-  private quoteFullStatus(path: string): number {
+  private quoteFullStatus(path: string): QuoteFullStatus {
     for (let i: number = 0; i < this.quoteFulls.length; i++) {
       if (this.quoteFulls[i].path === path) {
         return this.quoteFulls[i].status;
       }
     }
-    return 0;
+    return QuoteFullStatus.IDLE;
   }
 
-  private quoteFullHtmlCached(path: string): string {
+  private quoteFullBlocksCached(path: string): RichBlock[] {
     for (let i: number = 0; i < this.quoteFulls.length; i++) {
       if (this.quoteFulls[i].path === path) {
-        return this.quoteFulls[i].html;
+        return this.quoteFulls[i].blocks;
       }
     }
-    return '';
+    return [];
   }
 
   // 写入某路径的加载态(重建数组触发刷新)。
-  private setQuoteFull(path: string, status: number, html: string): void {
+  private setQuoteFull(path: string, status: QuoteFullStatus, html: string): void {
     const next: QuoteFullState[] = [];
     for (let i: number = 0; i < this.quoteFulls.length; i++) {
       if (this.quoteFulls[i].path !== path) {
@@ -600,6 +615,10 @@ export struct PostRichContent {
     entry.path = path;
     entry.status = status;
     entry.html = html;
+    // 全文到手(LOADED)即解析一次并缓存,后续重绘经 quoteBodyBlocks 直接复用,不再每帧 parse。
+    if (status === QuoteFullStatus.LOADED && html.length > 0) {
+      entry.blocks = CookedHtmlParser.parse(html);
+    }
     next.push(entry);
     this.quoteFulls = next;
   }
@@ -616,29 +635,35 @@ export struct PostRichContent {
       this.animateQuote(() => this.setQuoteExpanded(path, false));
       return;
     }
-    const status: number = this.quoteFullStatus(path);
-    if (status === 2) {
+    const status: QuoteFullStatus = this.quoteFullStatus(path);
+    if (status === QuoteFullStatus.LOADED) {
       this.animateQuote(() => this.setQuoteExpanded(path, true)); // 已缓存:单次 animateTo 展开
       return;
     }
-    if (status === 1) {
+    if (status === QuoteFullStatus.LOADING) {
       return; // 正在加载,忽略重复点击
     }
     // 加载中先不展开(避免与到手时的 animateTo 二次冲突);全文到手后一次 animateTo 展开+落全文。
-    this.setQuoteFull(path, 1, '');
+    this.setQuoteFull(path, QuoteFullStatus.LOADING, '');
     const topicId: number = block.quoteTopicId ? block.quoteTopicId : 0;
     const postNumber: number = block.quotePostNumber ? block.quotePostNumber : 0;
     this.onResolveQuotedPost(topicId, postNumber).then((html: string) => {
+      if (!this.isActive) {
+        return; // 拉取期间组件已卸载(滑出视口回收/返回上一页):不碰 UI,避免 animateTo(null)/无效写 @State。
+      }
       if (html.length > 0) {
         this.animateQuote(() => {
-          this.setQuoteFull(path, 2, html);
+          this.setQuoteFull(path, QuoteFullStatus.LOADED, html);
           this.setQuoteExpanded(path, true);
         });
       } else {
-        this.setQuoteFull(path, 3, ''); // 拉不到:不展开,chevron 随即隐藏
+        this.setQuoteFull(path, QuoteFullStatus.FAILED, ''); // 拉不到:不展开,chevron 随即隐藏
       }
     }).catch(() => {
-      this.setQuoteFull(path, 3, '');
+      if (!this.isActive) {
+        return;
+      }
+      this.setQuoteFull(path, QuoteFullStatus.FAILED, '');
     });
   }
 
@@ -653,10 +678,10 @@ export struct PostRichContent {
 
   // 引用卡正文:展开且已拿到全文 → 被引用楼层全文;否则(折叠 / 加载中) → aside 内 blockquote 截断预览。
   private quoteBodyBlocks(block: RichBlock, path: string): RichBlock[] {
-    if (this.isQuoteExpanded(path) && this.quoteFullStatus(path) === 2) {
-      const full: string = this.quoteFullHtmlCached(path);
-      if (full.length > 0) {
-        return CookedHtmlParser.parse(full);
+    if (this.isQuoteExpanded(path) && this.quoteFullStatus(path) === QuoteFullStatus.LOADED) {
+      const blocks: RichBlock[] = this.quoteFullBlocksCached(path);
+      if (blocks.length > 0) {
+        return blocks;
       }
     }
     return CookedHtmlParser.parse(block.text ? block.text : '');

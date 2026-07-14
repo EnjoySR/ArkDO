@@ -13,6 +13,7 @@ import { ViewerImage } from './ImageViewer';
 import { UserAvatar } from './UserAvatar';
 import { AcceptedAnswerPanel } from './AcceptedAnswerPanel';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
+import { LoginGate } from '../../services/session/LoginGate';
 
 const LIKE_RED: string = '#EF4444';
 // 昵称后徽章图标(FontAwesome 单色)统一染金色,明暗底皆成立;与站点徽章展示一致。
@@ -100,6 +101,9 @@ export struct TopicPostItem {
   // linux.do shared issue（"俺也一样"）。仅一楼(postNumber===1)且 shared_issue_visible 时,页面下发 sharedIssueVisible=true。
   // 计数/已点态是话题级值(不在 @Observed post 上),按 memory objectlink-state-source 用本组件自身 @State 驱动显示才稳。
   sharedIssueVisible: boolean = false;
+  // can_create_shared_issue:当前用户能否点。已登录但为 false(楼主/无权者)→ 按钮置灰禁用,避免点了必被服务端拒;
+  // 未登录同样为 false,但仍须可点以走登录拦截,故禁用仅在「已登录」时生效(见 meTooDisabled)。
+  sharedIssueCanCreate: boolean = false;
   sharedIssueCount: number = 0;
   sharedIssueCreated: boolean = false;
   // "俺也一样" toggle(纯翻转端点,不需传目标态):上抛页面发网络,返回服务端权威新态 { created, count } 覆盖本地;null=失败回滚。
@@ -178,7 +182,9 @@ export struct TopicPostItem {
               onJumpToPost: this.onJumpToPost,
               onOpenImages: this.onOpenImages,
               onOpenLink: this.onOpenLink,
-              onResolveMedia: this.onResolveMedia
+              onResolveMedia: this.onResolveMedia,
+              onJumpToQuote: this.onJumpToQuote,
+              onResolveQuotedPost: this.onResolveQuotedPost
             })
           }
 
@@ -666,9 +672,17 @@ export struct TopicPostItem {
     .border({ width: 1, color: $r('app.color.me_too_border') })
     .borderRadius(4)
     .margin({ top: 12 })
+    // 已登录但无权:置灰 + .enabled(false) 同时拦截 onClick,无权者点了不发请求(避免服务端拒→失败 toast)。
+    .opacity(this.meTooDisabled() ? 0.45 : 1)
+    .enabled(!this.meTooDisabled())
     .onClick(() => {
       this.toggleMeToo();
     })
+  }
+
+  // 已登录且无权(canCreate=false,如楼主)禁用「俺也一样」;未登录不禁用——点击须能触发登录拦截引导登录。
+  private meTooDisabled(): boolean {
+    return LoginGate.isLoggedIn() && !this.sharedIssueCanCreate;
   }
 
   // 按钮文字:未点"俺也一样";已点在其后追加英文括号计数"俺也一样(N)"。

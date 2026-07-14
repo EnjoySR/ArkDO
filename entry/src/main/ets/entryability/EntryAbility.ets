@@ -12,6 +12,7 @@ import { LINUXDO_FA_SYMBOLS_RAWFILE, loadFaIconsFromRawContent } from '../views/
 import { LINUXDO_TAG_ICONS_RAWFILE, loadTagIconsFromRawContent } from '../views/components/TagIconRegistry';
 import { LINUXDO_EMOJIS_RAWFILE, loadEmojiUrlsFromRawContent } from '../views/components/EmojiUrlRegistry';
 import { ArkWebNetworkBridge } from '../services/network/ArkWebNetworkBridge';
+import { LoginGate } from '../services/session/LoginGate';
 
 const DOMAIN = 0x0000;
 
@@ -24,6 +25,9 @@ export default class EntryAbility extends UIAbility {
     // 计时锚点①:应用启动。与首页帖子列表开始加载的日志配对,测量冷启动到首屏拉取的耗时。
     Log.i(`[ArkDO][Startup] stage=appOnCreate ts=${Date.now()}`);
     this.registerCrashHandler();
+    // 登录态镜像绑定磁盘,须早于任何页面读取 AppStorage:冷启动即恢复上次登录态,
+    // 避免已登录用户在首个会话检查回来前被误判为游客(阅读追踪不启动、写操作被拦)。
+    LoginGate.initPersist();
     ThemeManager.init(this.context);
     // setHttpDns 只有在 Web 引擎初始化之后才生效(引擎网络服务需先就绪),故须先显式
     // initializeWebEngine 再下发 DoH;且早于任何页面,确保宿主 webview 首次解析

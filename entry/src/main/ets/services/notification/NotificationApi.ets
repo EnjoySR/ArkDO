@@ -232,8 +232,12 @@ export class NotificationApi {
     if (type === T_REPLIED) {
       return { iconId: 'reply', iconColor: C_REPLY, actionText: '回复了你', hasActor: true };
     }
-    if (type === T_POSTED || type === T_WATCHING_CATEGORY_OR_TAG) {
+    if (type === T_POSTED) {
       return { iconId: 'discourse-bell-exclamation', iconColor: C_REPLY, actionText: '回复了主题', hasActor: true };
+    }
+    // 关注版块/标签下有新主题:永远指向一楼新主题,文案区别于 T_POSTED(回复),与 T_WATCHING_FIRST_POST 一致。
+    if (type === T_WATCHING_CATEGORY_OR_TAG) {
+      return { iconId: 'discourse-bell-exclamation', iconColor: C_REPLY, actionText: '发布了新主题', hasActor: true };
     }
     if (type === T_MENTIONED) {
       return { iconId: 'at', iconColor: C_MENTION, actionText: '提到了你', hasActor: true };

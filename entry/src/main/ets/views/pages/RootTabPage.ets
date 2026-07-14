@@ -466,6 +466,11 @@ export struct RootTabPage {
   }
 
   private openLoginPage(): void {
+    // 弹层已开(CF 挑战/上一轮兜底)时不打断:与 openChallengeSheet/challenge-required 守卫一致。
+    // 新接入的全局 LoginGate.requestLogin 可从任意深层页触发,防止覆盖正在进行的静默过盾。
+    if (this.isSheetVisible) {
+      return;
+    }
     this.activeSheet = RootSheet.LOGIN;
     this.isSheetVisible = true;
   }

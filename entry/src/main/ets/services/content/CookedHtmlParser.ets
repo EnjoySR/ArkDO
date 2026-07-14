@@ -586,7 +586,10 @@ export class CookedHtmlParser {
       type: RichBlockType.TOPIC_QUOTE,
       text: preview,
       quoteTopicId: topicId,
-      quotePostNumber: postNumber > 0 ? postNumber : 1
+      // 缺 data-post(如 [quote="user, topic:123"] 只带话题不带楼层)保持 0,不兜底成 1:
+      // 否则展开 chevron 仍显示,一点会拉到该话题主楼(1楼)当"被引用全文",与卡片预览的引用片段不符。
+      // 0 会让渲染层(quotePostNumber > 0)不显示展开箭头,只保留跳转,从根上避免拉错楼。
+      quotePostNumber: postNumber
     };
     if (avatarUrl.length > 0) {
       block.quoteAvatarUrl = avatarUrl;

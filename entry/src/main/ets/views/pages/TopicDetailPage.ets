@@ -126,6 +126,7 @@ export struct TopicDetailPage {
   private categoryIndex: CategoryIndex = new CategoryIndex();
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
+  private unsubscribeLoginState?: () => void = undefined;
   // 已读追踪控制器:计时上报、已读水位、错峰翻已读、离开时回传列表页,全部由它托管。
   // 用闭包读取 detail 与数据源当前楼层数组(分页后数组会变,不能捕获快照)。
   private readController: TopicReadController = new TopicReadController(
@@ -137,6 +138,15 @@ export struct TopicDetailPage {
     if (!this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged = SessionEventBus.subscribe((version: number) => {
         this.handleSessionChanged(version);
+      });
+    }
+
+    // 详情已加载后才登录(首装/登出后在本页触发登录)时,startReadingTrackerIfNeeded 的一次性调用
+    // 已错过。登录态翻真时补启一次(startIfNeeded 内有 started 幂等守卫,已启动则空转);此信号严格
+    // 对齐 setLoggedIn 写入,回调里 isLoggedIn 必为 true,不同于早于写入的 SessionEventBus。
+    if (!this.unsubscribeLoginState) {
+      this.unsubscribeLoginState = LoginGate.subscribeBecameLoggedIn(() => {
+        this.startReadingTrackerIfNeeded();
       });
     }
 
@@ -162,6 +172,11 @@ export struct TopicDetailPage {
     if (this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged();
       this.unsubscribeSessionChanged = undefined;
+    }
+
+    if (this.unsubscribeLoginState) {
+      this.unsubscribeLoginState();
+      this.unsubscribeLoginState = undefined;
     }
 
     // 清掉待触发的退出全屏计时器;若仍处于全屏(评论浮层未正常关闭),兜底还原布局。
@@ -242,6 +257,7 @@ export struct TopicDetailPage {
           },
           // "俺也一样"(shared issue):话题级功能,只对 shared_issue_visible 的一楼下发有效值,其余楼不渲染。
           sharedIssueVisible: post.postNumber === 1 && (this.detail?.sharedIssueVisible ?? false),
+          sharedIssueCanCreate: this.detail?.canCreateSharedIssue ?? false,
           sharedIssueCount: post.postNumber === 1 ? (this.detail?.sharedIssueCount ?? 0) : 0,
           sharedIssueCreated: post.postNumber === 1 ? (this.detail?.userCreatedSharedIssue ?? false) : false,
           onToggleSharedIssue: (): Promise<SharedIssueResult | null> => {

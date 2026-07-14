@@ -22,6 +22,9 @@ export struct AcceptedAnswerPanel {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   onOpenLink: (url: string) => void = () => {};
   onResolveMedia: (url: string) => Promise<string> = () => Promise.reject(new Error('媒体下载未接入'));
+  // 答案正文里的引用卡展开/跳转,与正常楼层一致透传;缺则 PostRichContent 落空实现,展开转圈即消失、跳转无反应。
+  onJumpToQuote: (topicId: number, postNumber: number, fallbackUrl: string) => void = () => {};
+  onResolveQuotedPost: (topicId: number, postNumber: number) => Promise<string> = () => Promise.resolve('');
 
   build() {
     if (this.answers.length > 0) {
@@ -55,7 +58,9 @@ export struct AcceptedAnswerPanel {
             onJumpToPost: this.onJumpToPost,
             onOpenImages: this.onOpenImages,
             onOpenLink: this.onOpenLink,
-            onResolveMedia: this.onResolveMedia
+            onResolveMedia: this.onResolveMedia,
+            onJumpToQuote: this.onJumpToQuote,
+            onResolveQuotedPost: this.onResolveQuotedPost
           })
         }, (answer: AcceptedAnswer) => `${answer.postNumber}`)
       }
@@ -92,6 +97,8 @@ struct AcceptedAnswerCard {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   onOpenLink: (url: string) => void = () => {};
   onResolveMedia: (url: string) => Promise<string> = () => Promise.reject(new Error('媒体下载未接入'));
+  onJumpToQuote: (topicId: number, postNumber: number, fallbackUrl: string) => void = () => {};
+  onResolveQuotedPost: (topicId: number, postNumber: number) => Promise<string> = () => Promise.resolve('');
 
   aboutToAppear(): void {
     this.collapsed = this.initiallyCollapsed;
@@ -144,6 +151,8 @@ struct AcceptedAnswerCard {
                 onOpenImages: this.onOpenImages,
                 onOpenLink: this.onOpenLink,
                 onResolveMedia: this.onResolveMedia,
+                onJumpToQuote: this.onJumpToQuote,
+                onResolveQuotedPost: this.onResolveQuotedPost,
                 polls: []
               })
                 .width('100%')
