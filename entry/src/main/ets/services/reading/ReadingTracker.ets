@@ -15,6 +15,11 @@ const AJAX_FAILURE_DELAYS: number[] = [5000, 10000, 20000, 40000];
 const ALLOWED_AJAX_FAILURES: number[] = [405, 429, 500, 501, 502, 503, 504];
 // 单次上报常在 1s 内返回,"呼吸"窗口太短会看不清;保证至少完整来回一次(变浅再变回,700ms×2)再收尾。
 const MIN_REPORTING_VISIBLE_MS: number = 1400;
+// ── 攒批上报间隔(可调)──────────────────────────────────────────────
+// 看到未读楼即起闪(pending),但 POST /topics/timings 压到每隔这么久才合并提交一次,
+// 大幅降低 timings 请求频次 → 降低触发 CF 全局 429 速率盾的概率。
+// 后期调参验证多少最合适就改这一个值(单位 ms)。
+const REPORT_BATCH_INTERVAL_MS: number = 5000;
 
 export type ReportTimingsFn =
   (topicId: number, timings: Map<number, number>, topicTime: number) => Promise<NetworkResult<string>>;
@@ -47,6 +52,11 @@ export class ReadingTracker {
   private consolidated: ConsolidatedTiming[] = [];
   private ajaxFailures: number = 0;
   private blockSendingTill: number = 0;
+  // 上次实际发出上报的时间戳:用于把 rush(看到新楼即发)节流为每 REPORT_BATCH_INTERVAL_MS 一批。
+  private lastReportAt: number = 0;
+  // 本次浏览已"看到并已起闪"的未读楼层:避免每个 tick 对同一楼重复发起闪烁;
+  // 上报成功后该楼进 readPosts,由 readPosts 过滤接管(不再起闪)。
+  private seenBlinking: Set<number> = new Set();
   private intervalId: number = -1;
   // running:start 到 stop 之间为 true(即使后台暂停也保持 true);
   // paused:前台恢复/后台暂停的开关,决定 tick 循环是否在跑。
@@ -65,6 +75,10 @@ export class ReadingTracker {
     const now: number = Date.now();
     this.lastTick = now;
     this.lastScrolled = now;
+    // 进帖子首批立即发一次(尽快建立已读水位),之后才进入 REPORT_BATCH_INTERVAL_MS 攒批。
+    // 把 lastReportAt 置于一个攒批周期之前 → 首个 tick 的 batchDue 即为 true,首批马上发;
+    // 发完 flush 会把 lastReportAt 归位到当前,后续 rush 就正常按 5 秒攒批了。
+    this.lastReportAt = now - REPORT_BATCH_INTERVAL_MS;
     this.running = true;
     this.paused = false;
     this.startInterval();
@@ -169,6 +183,8 @@ export class ReadingTracker {
     this.consolidated = [];
     this.ajaxFailures = 0;
     this.blockSendingTill = 0;
+    this.lastReportAt = now;
+    this.seenBlinking.clear();
   }
 
   private tick(): void {
@@ -191,7 +207,10 @@ export class ReadingTracker {
       }
     });
 
-    if (!this.inProgress && (this.lastFlush > NEXT_FLUSH_MS || rush)) {
+    // rush(看到新楼)不再"下一秒立即发",而是攒到距上次上报满 REPORT_BATCH_INTERVAL_MS 才发一批;
+    // 60s 常规兜底(lastFlush > NEXT_FLUSH_MS)不受攒批门闩限制。
+    const batchDue: boolean = (now - this.lastReportAt) >= REPORT_BATCH_INTERVAL_MS;
+    if (!this.inProgress && (this.lastFlush > NEXT_FLUSH_MS || (rush && batchDue))) {
       this.flush();
     }
     if (!this.inProgress) {
@@ -200,9 +219,18 @@ export class ReadingTracker {
 
     if (this.hasFocus) {
       this.topicTime += diff;
+      const newlySeen: number[] = [];
       for (const postNumber of this.onscreen) {
         const current: number = this.timings.get(postNumber) ?? 0;
         this.timings.set(postNumber, current + diff);
+        // 看到未读楼即起闪(pending 提交),不等到网络请求真正发出才闪。已读楼(readPosts)跳过。
+        if (!this.readPosts.has(postNumber) && !this.seenBlinking.has(postNumber)) {
+          this.seenBlinking.add(postNumber);
+          newlySeen.push(postNumber);
+        }
+      }
+      if (newlySeen.length > 0) {
+        this.setReporting(newlySeen, true);
       }
     }
   }
@@ -214,7 +242,9 @@ export class ReadingTracker {
         this.totalTimings.set(postNumber, 0);
       }
       const total: number = this.totalTimings.get(postNumber) ?? 0;
-      if (time > 0 && total < MAX_TRACKING_TIME_MS) {
+      // 已确认已读的楼层(readPosts:服务端已读 + 已成功上报)不再重复上报——
+      // 来回滚动让它们重回视口也不会再发 timings,避免冗余请求喂出速率盾。
+      if (time > 0 && total < MAX_TRACKING_TIME_MS && !this.readPosts.has(postNumber)) {
         this.totalTimings.set(postNumber, total + time);
         newTimings.set(postNumber, time);
       }
@@ -229,6 +259,8 @@ export class ReadingTracker {
     });
 
     if (highestSeen > 0) {
+      // 记录本批发出时刻:下一次 rush 攒批从这里重新计 REPORT_BATCH_INTERVAL_MS。
+      this.lastReportAt = Date.now();
       this.consolidate(newTimings, this.topicTime);
       this.sendNextConsolidatedTiming();
       this.topicTime = 0;

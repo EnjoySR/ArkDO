@@ -10,9 +10,6 @@ const PREF_KEY_ACTIVE_ID: string = 'doh_active_id';
 const PREF_KEY_ENABLED: string = 'doh_enabled';
 const PREF_KEY_MODE: string = 'doh_mode';
 const PREF_KEY_ID_SEQ: string = 'doh_id_seq';
-// 一次性迁移标记:把早期版本种下的 auto 翻成 secure_only(AUTO 实测不走 DoH)。只跑一次,
-// 之后用户仍可自行改回 AUTO。
-const PREF_KEY_MIGRATED_SECURE: string = 'doh_migrated_secure_v1';
 
 /**
  * 内置 DoH:不可删除,首次启动种子数据,也是删除 active 后的兜底。
@@ -64,19 +61,10 @@ export class DohManager {
         store.putSync(PREF_KEY_SERVERS, JSON.stringify(seed));
         store.putSync(PREF_KEY_ACTIVE_ID, DOH_EDGE_ID);
         store.putSync(PREF_KEY_ENABLED, true);
-        // 防污染用途默认 SECURE_ONLY:AUTO(Chromium AUTOMATIC)对自定义 DoH 保守,实测
-        // 仍以 useHttpDns:0 走污染系统 DNS;SECURE_ONLY 强制所有解析走 DoH。
+        // 默认 SECURE_ONLY:强制所有解析走 DoH,首屏不踩污染系统 DNS(AUTO 冷启动会先踩、卡 ~12s)。
+        // challenges.cloudflare.com 的覆盖问题改由"过盾期间临时借用 AUTO"解决(见 applyTransientMode)。
         store.putSync(PREF_KEY_MODE, DohResolveMode.SECURE_ONLY);
-        store.putSync(PREF_KEY_MIGRATED_SECURE, true);
         store.flush();
-      }
-      // 一次性迁移:早期安装种下的 auto 翻成 secure_only(AUTO 不走 DoH),仅执行一次。
-      const migrated: boolean = store.getSync(PREF_KEY_MIGRATED_SECURE, false) as boolean;
-      if (!migrated) {
-        store.putSync(PREF_KEY_MODE, DohResolveMode.SECURE_ONLY);
-        store.putSync(PREF_KEY_MIGRATED_SECURE, true);
-        store.flush();
-        Log.i(`${LOG_TAG} migrated doh_mode -> secure_only`);
       }
     } catch (err) {
       Log.e(`${LOG_TAG} init store failed: ${JSON.stringify(err)}`);
@@ -211,6 +199,29 @@ export class DohManager {
       Log.i(`${LOG_TAG} setHttpDns mode=${mode} name=${active.name}`);
     } catch (err) {
       Log.e(`${LOG_TAG} setHttpDns failed: ${JSON.stringify(err)}`);
+    }
+  }
+
+  /**
+   * 临时(不落盘)把引擎 DNS 模式改成指定 mode,用当前选中的 server。用于"过盾期间借用 AUTO":
+   * SECURE_ONLY 下定制 DoH 不覆盖 challenges.cloudflare.com 会 ERR_FAILED;过盾时临时切 AUTO 允许该域
+   * 回退系统 DNS(CF 任播域基本不被污染、解得快),linux.do 仍走 DoH。过盾结束调 applyActive() 还原。
+   * 不写 preferences,用户持久化设置不变;此时已非冷启动、DoH 探测早完成,故无首屏那 12s 卡顿。
+   */
+  static applyTransientMode(context: common.Context, mode: DohResolveMode): void {
+    const enabled: boolean = DohManager.isEnabled(context);
+    const active: DohServer = DohManager.getActiveServer(context);
+    if (!enabled || active.url.length === 0) {
+      // DoH 已关闭:全程系统 DNS,challenges.cloudflare.com 本就能解,无需介入。
+      return;
+    }
+    try {
+      const secureMode: webview.SecureDnsMode =
+        mode === DohResolveMode.SECURE_ONLY ? webview.SecureDnsMode.SECURE_ONLY : webview.SecureDnsMode.AUTO;
+      webview.WebviewController.setHttpDns(secureMode, active.url);
+      Log.i(`${LOG_TAG} setHttpDns transient mode=${mode} name=${active.name}`);
+    } catch (err) {
+      Log.e(`${LOG_TAG} setHttpDns transient failed: ${JSON.stringify(err)}`);
     }
   }
 

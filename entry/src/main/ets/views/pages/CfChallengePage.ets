@@ -201,8 +201,15 @@ export struct CfChallengePage {
   }
 
   // 挑战脚本资源加载失败时隔 2s 重载挑战页(限 3 次),赌该域下一次可达。
+  // 但仅限"控件还没出现"时:控件一旦出现(用户可能正在点勾选框),Turnstile 会自行重试它的子资源/遥测,
+  // 我们再整页 refresh 只会把用户的点击进度和控件状态清零,且对"该域时通时不通"毫无帮助(还是同一个域)。
+  // 实测(log.txt):控件出现后那几次 refresh 对过盾零贡献,盾最终仍靠 404 过掉。故控件出现后一律不刷。
   private retryOnChallengeResourceFailure(url: string): void {
     if (this.hasResolved || this.safeUrlLabel(url) !== 'cloudflare_challenge_resource') {
+      return;
+    }
+    if (this.sawChallengeWidget) {
+      this.logDiagnostic('challengeResourceNoRefresh', 'widgetSeen');
       return;
     }
     if (this.challengeReloadCount >= MAX_CHALLENGE_RELOADS) {

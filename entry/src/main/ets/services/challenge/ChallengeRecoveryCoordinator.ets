@@ -7,11 +7,13 @@ import { ChallengeRecoveryEventBus, ChallengeRecoveryState } from './ChallengeRe
 export { ChallengeRecoveryState };
 
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
-// 探测节拍与上限:每 2s 用 /latest.json 探一次是否放行(权威判定,不看可能残留的 cf_clearance);
-// 第 6 次(~12s)仍未过则再重载一次 host;第 12 次(~24s)仍未过则升级到交互弹窗。
+// 探测节拍与上限:每 2s 用 /latest.json 探一次是否放行(权威判定,不看可能残留的 cf_clearance)。
+// 自动盾(managed)一般重载后几秒内就静默跑通,所以窗口不必长;交互盾(需点勾选框)静默永远过不了,
+// 越早升级弹窗越好。故:第 3 次(~6s)仍未过则再重载一次 host;第 6 次(~12s)仍未过则升级到交互弹窗。
+// (这几个值是"给自动盾的静默宽限"与"交互盾少干等"之间的取舍点,后期调参改这里。)
 const PROBE_INTERVAL_MS: number = 2000;
-const RELOAD_RETRY_AT_POLL: number = 6;
-const MAX_POLL: number = 12;
+const RELOAD_RETRY_AT_POLL: number = 3;
+const MAX_POLL: number = 6;
 // 恢复成功后的冷却期:期间吞掉新挑战信号,杜绝"探测放行→重试请求→CF 抖动又拦→再弹"的弹跳。
 const COOLDOWN_MS: number = 30000;
 
@@ -25,16 +27,48 @@ export class ChallengeRecoveryCoordinator {
   private onRecovered: () => void;
   // 静默两次失败后调用:打开交互式挑战弹窗兜底。
   private onEscalateToSheet: () => void;
+  // 过盾窗口开始/结束回调:让上层临时借用/还原 DoH 的 AUTO 模式(解 challenges.cloudflare.com)。
+  private onWindowBegin?: () => void;
+  private onWindowEnd?: () => void;
+  // 窗口活动标志:保证 begin/end 各只触发一次、且 end 不早于 begin。
+  private windowActive: boolean = false;
   private pollTimer: number = -1;
   private cooldownTimer: number = -1;
   private pollCount: number = 0;
   private probing: boolean = false;
 
-  constructor(bridge: ArkWebNetworkBridge, onRecovered: () => void, onEscalateToSheet: () => void) {
+  constructor(bridge: ArkWebNetworkBridge, onRecovered: () => void, onEscalateToSheet: () => void,
+    onWindowBegin?: () => void, onWindowEnd?: () => void) {
     this.bridge = bridge;
     this.probe = new ChallengeResolutionProbe(bridge);
     this.onRecovered = onRecovered;
     this.onEscalateToSheet = onEscalateToSheet;
+    this.onWindowBegin = onWindowBegin;
+    this.onWindowEnd = onWindowEnd;
+  }
+
+  // 过盾窗口开始:只触发一次,让上层临时借用 AUTO(解 challenges.cloudflare.com)。
+  private beginWindow(): void {
+    if (this.windowActive) {
+      return;
+    }
+    this.windowActive = true;
+    const fn: (() => void) | undefined = this.onWindowBegin;
+    if (fn) {
+      fn();
+    }
+  }
+
+  // 过盾窗口结束(成功进冷却 / 关闭放弃 / 销毁):还原持久化的 DoH 模式。幂等,可反复调用。
+  private endWindow(): void {
+    if (!this.windowActive) {
+      return;
+    }
+    this.windowActive = false;
+    const fn: (() => void) | undefined = this.onWindowEnd;
+    if (fn) {
+      fn();
+    }
   }
 
   getState(): ChallengeRecoveryState {
@@ -93,6 +127,8 @@ export class ChallengeRecoveryCoordinator {
     this.setState(ChallengeRecoveryState.RESOLVING);
     this.pollCount = 0;
     Log.i(`${DIAG_TAG} stage=recoveryStart source=${source}`);
+    // 先借用 AUTO 再重载 host:让接下来 host/弹窗里对 challenges.cloudflare.com 的请求能回退系统 DNS。
+    this.beginWindow();
     this.reloadHost('attempt1');
     this.startPolling();
   }
@@ -149,6 +185,8 @@ export class ChallengeRecoveryCoordinator {
   }
 
   private enterCooldown(): void {
+    // 过盾已结束(成功):还原持久化 DoH 模式,回到 SECURE_ONLY 稳态。
+    this.endWindow();
     this.setState(ChallengeRecoveryState.COOLDOWN);
     this.clearCooldownTimer();
     Log.i(`${DIAG_TAG} stage=recoveryCooldownStart ms=${COOLDOWN_MS}`);
@@ -160,6 +198,8 @@ export class ChallengeRecoveryCoordinator {
   }
 
   private reset(): void {
+    // 放弃/关闭/销毁也算窗口结束:还原持久化 DoH 模式,避免 AUTO 泄漏到正常浏览期。
+    this.endWindow();
     this.clearPollTimer();
     this.clearCooldownTimer();
     this.pollCount = 0;

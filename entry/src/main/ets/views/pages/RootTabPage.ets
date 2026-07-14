@@ -15,6 +15,7 @@ import { NotificationService } from '../../services/notification/NotificationSer
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { AvatarImageCache } from '../../services/network/AvatarImageCache';
+import { DohManager, DohResolveMode } from '../../services/network/DohManager';
 import { NetworkResult, NetworkErrorCode, ChallengeState } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { LoginGate } from '../../services/session/LoginGate';
@@ -99,6 +100,14 @@ export struct RootTabPage {
         },
         () => {
           this.openChallengeSheet();
+        },
+        () => {
+          // 过盾窗口开始:临时借用 AUTO,让 challenges.cloudflare.com 回退系统 DNS 解出来(不落盘)。
+          DohManager.applyTransientMode(getContext(this), DohResolveMode.AUTO);
+        },
+        () => {
+          // 过盾结束:还原用户持久化的 DoH 设置(通常 SECURE_ONLY),不让 AUTO 泄漏到正常浏览。
+          DohManager.applyActive(getContext(this));
         }
       );
     }
