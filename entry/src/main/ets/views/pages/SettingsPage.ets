@@ -143,7 +143,6 @@ export struct SettingsPage {
               })
             }
             .cardStyle()
-            .margin({ top: 0 })
 
             this.FeedGroup()
 
