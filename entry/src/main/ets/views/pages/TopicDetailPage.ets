@@ -17,7 +17,7 @@ import { TopicDetailHeader } from '../components/TopicDetailHeader';
 import { TopicSummaryCard } from '../components/TopicSummaryCard';
 import { TopicPostItem } from '../components/TopicPostItem';
 import { ViewerImage } from '../components/ImageViewer';
-import { CommentInputBar, REPLY_BLUE } from '../components/CommentInputBar';
+import { CommentInputBar, NO_MAX_CHARS, REPLY_BLUE } from '../components/CommentInputBar';
 import { ComposerWindowGuard } from '../components/ComposerWindowGuard';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { TopicScrubber } from '../components/TopicScrubber';
@@ -35,6 +35,8 @@ const SHOW_LOADING_CAPSULE: boolean = false;
 // 提交成功的 toast 延后到浮层完全收场(遮罩淡出 220ms、退全屏 240ms、键盘收起约 270ms)之后再弹,
 // 否则 toast 存活期横跨键盘收起与退全屏两次布局变化,会被重新锚定而在屏幕上跳一下。
 const SUCCESS_TOAST_DELAY_MS: number = 350;
+// boost 正文上限:服务端 16 字,超一个字就是不带原因的 422({"failed":"FAILED"}),故在客户端先拦。
+const BOOST_MAX_CHARS: number = 16;
 
 @Component
 export struct TopicDetailPage {
@@ -452,6 +454,8 @@ export struct TopicDetailPage {
         placeholder: this.composerPlaceholder,
         // boost 是「起飞」「感谢佬」这类短文本,放开最短字数下限;普通回复仍用默认 16。
         minChars: this.boostTargetPostId > 0 ? 1 : 16,
+        // boost 服务端上限 16 字,超了只回 {"failed":"FAILED"} 的 422;回复不限(NO_MAX_CHARS)。
+        maxChars: this.boostTargetPostId > 0 ? BOOST_MAX_CHARS : NO_MAX_CHARS,
         onClose: () => {
           this.showComposer = false;
           this.replyTargetPostNumber = 0;

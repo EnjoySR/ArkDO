@@ -10,6 +10,8 @@ const INPUT_MIN_HEIGHT: number = 44;
 const INPUT_MAX_HEIGHT: number = 120;
 // 输入框获取焦点用的 id：挂载后 requestFocus 弹出软键盘。
 const INPUT_FOCUS_ID: string = 'arkdoCommentInput';
+// maxChars 取该值表示不限字数（回复走这条）。
+export const NO_MAX_CHARS: number = 0;
 
 // 键盘上方的评论输入浮层（由 TopicDetailPage 直接内联挂在页面根 Stack 顶层）：
 // - 内联渲染 → getLastWindow 拿到的就是主窗口，能稳定收到键盘事件；监听 avoidAreaChange
@@ -25,6 +27,9 @@ export struct CommentInputBar {
   // 正文最短字数：少于该值不允许提交。评论默认 16（对齐 Discourse 最短回复），
   // boost 这类短文本由页面传入更小的值（如 1）。
   minChars: number = 16;
+  // 正文最长字数：NO_MAX_CHARS 表示不限（回复走这条）。boost 服务端上限 16，超出会被 422
+  // 打回且不带原因，只能在客户端先拦住。
+  maxChars: number = NO_MAX_CHARS;
   // 返回 true 表示提交成功（浮层随即清空并关闭）；false 表示失败（保留内容供重试）。
   onSubmit: (text: string, typingMs: number, composerMs: number) => Promise<boolean> =
     (text: string, typingMs: number, composerMs: number) => Promise.resolve(false);
@@ -39,6 +44,8 @@ export struct CommentInputBar {
   // 浮层出现的时刻 / 首次输入的时刻，用于回填 composer_open / typing 时长（对齐官方遥测字段）。
   private appearTimeMs: number = 0;
   private firstTypeTimeMs: number = 0;
+  // 上一次 onChange 时是否已超上限：用于只在「刚超出」的那一下弹提示。
+  private wasOverMaxChars: boolean = false;
   // 绑定 this，方便 off 时传入同一引用注销。监听键盘避让区变化拿键盘高度（本机已验证有效）。
   private onAvoidAreaChange: (data: window.AvoidAreaOptions) => void = (data: window.AvoidAreaOptions) => {
     if (data.type === window.AvoidAreaType.TYPE_KEYBOARD) {
@@ -101,8 +108,22 @@ export struct CommentInputBar {
     return this.text.trim().length;
   }
 
+  private overMaxChars(): boolean {
+    return this.maxChars > NO_MAX_CHARS && this.trimmedLength() > this.maxChars;
+  }
+
+  // 超出上限时提示。不硬顶输入（硬顶会静默吞字，用户不知道发生了什么），改为让字打进来再告知，
+  // 由发送按钮置灰 + submit() 兜底拦住提交。每次「由未超变超」才弹一次，连着多打不会刷屏。
+  private warnIfOverMaxChars(): void {
+    const over: boolean = this.overMaxChars();
+    if (over && !this.wasOverMaxChars) {
+      this.showToast(`最多 ${this.maxChars} 个字`, 1500);
+    }
+    this.wasOverMaxChars = over;
+  }
+
   private canSubmit(): boolean {
-    return !this.isSubmitting && this.trimmedLength() >= this.minChars;
+    return !this.isSubmitting && this.trimmedLength() >= this.minChars && !this.overMaxChars();
   }
 
   private async submit(): Promise<void> {
@@ -114,6 +135,12 @@ export struct CommentInputBar {
       // 少于最短字数：提示还差多少字，不提交。
       const need: number = this.minChars - trimmed.length;
       this.showToast(`至少还需 ${need} 个字`, 1500);
+      return;
+    }
+    if (this.overMaxChars()) {
+      // 超出最长字数：提示需删掉多少字，不提交（服务端只会回不带原因的 422）。
+      const over: number = trimmed.length - this.maxChars;
+      this.showToast(`超出 ${over} 个字，最多 ${this.maxChars} 字`, 1500);
       return;
     }
     this.isSubmitting = true;
@@ -168,6 +195,7 @@ export struct CommentInputBar {
               if (this.firstTypeTimeMs === 0 && value.length > 0) {
                 this.firstTypeTimeMs = Date.now();
               }
+              this.warnIfOverMaxChars();
             })
         }
         .layoutWeight(1)
