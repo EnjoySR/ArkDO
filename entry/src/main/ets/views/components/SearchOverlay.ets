@@ -346,7 +346,7 @@ export struct SearchOverlay {
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = -1;
-      this.runSearch(value, true);
+      this.runSearch(true);
     }, DEBOUNCE_MS);
   }
 
@@ -358,7 +358,7 @@ export struct SearchOverlay {
       return;
     }
     this.saveHistory(term);
-    this.runSearch(this.query, true);
+    this.runSearch(true);
   }
 
   private handleResultClick(topic: Topic): void {
@@ -370,7 +370,7 @@ export struct SearchOverlay {
   private applyHistoryTerm(term: string): void {
     this.query = term;
     this.saveHistory(term);
-    this.runSearch(term, true);
+    this.runSearch(true);
     // 点历史词已选定搜索目标,收起键盘让位给结果列表(不再 focusInput 弹键盘)。
     this.hideKeyboard();
   }
@@ -384,9 +384,9 @@ export struct SearchOverlay {
     }
   }
 
-  private async runSearch(term: string, reset: boolean): Promise<void> {
-    const trimmed: string = term.trim();
-    if (trimmed.length < MIN_TERM_LEN) {
+  private async runSearch(reset: boolean): Promise<void> {
+    const term: string = this.trimmedQuery();
+    if (term.length < MIN_TERM_LEN) {
       return;
     }
     if (!this.isArkWebReady) {
@@ -404,14 +404,14 @@ export struct SearchOverlay {
       this.errorMessage = '';
       this.requiresChallenge = false;
       this.hasSearched = true;
-      // 高亮词按本次搜索词定格(不随后续输入漂移)。
-      this.highlights = this.parseHighlights(trimmed);
+      // 高亮词按本次搜索词定格(不随后续输入漂移;高级语法会被 parseHighlights 过滤掉)。
+      this.highlights = this.parseHighlights(term);
     } else {
       this.isLoadingMore = true;
     }
 
     const service: TopicService = new TopicService(this.bridge);
-    const result: NetworkResult<SearchResult> = await service.search(trimmed, page);
+    const result: NetworkResult<SearchResult> = await service.search(term, page);
 
     // 过期响应(用户已改词/翻页)直接丢弃。
     if (seq !== this.searchSeq) {
@@ -458,7 +458,7 @@ export struct SearchOverlay {
     if (this.isSearching || this.isLoadingMore || !this.hasMore || this.results.length === 0) {
       return;
     }
-    this.runSearch(this.query, false);
+    this.runSearch(false);
   }
 
   private resetResults(): void {
