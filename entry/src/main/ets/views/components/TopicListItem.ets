@@ -4,6 +4,12 @@ import { RelativeTime } from '../../common/utils/RelativeTime';
 import { TopicMetadataBadges } from './TopicBadges';
 import { UserAvatar } from './UserAvatar';
 
+// 摘要高亮分段:hit 为命中词(染品牌色),否则普通文本。
+interface BlurbSegment {
+  text: string;
+  hit: boolean;
+}
+
 @Component
 export struct TopicListItem {
   // @ObjectLink 绑定 @Observed 的 Topic:点击已读 / 返回同步未读数时精准触发本行重渲染。
@@ -14,6 +20,8 @@ export struct TopicListItem {
   onTopicClick: (topic: Topic) => void = () => {};
   // 有未读回复时整行点击走这里:直跳详情页第一条未读楼(无未读则走 onTopicClick 从头打开)。
   onUnreadBadgeClick: (topic: Topic) => void = () => {};
+  // 搜索场景高亮词(空格拆分的普通关键词):在 searchBlurb 摘要里把命中词染色。普通 feed 传空。
+  searchHighlights: string[] = [];
 
   build() {
     ListItem() {
@@ -46,7 +54,16 @@ export struct TopicListItem {
                 .margin({ right: 5 })
                 .verticalAlign(ImageSpanAlignment.CENTER)
             }
-            Span(this.topic.title)
+            // 标题:搜索场景把命中词染品牌色(逐段拆 Span);普通 feed 保持单 Span 不变。
+            if (this.searchHighlights.length > 0) {
+              ForEach(this.titleSegments(), (seg: BlurbSegment, index: number) => {
+                Span(seg.text)
+                  .fontColor(seg.hit ? $r('app.color.brand') : $r('app.color.text_primary'))
+                  .fontWeight(seg.hit ? FontWeight.Medium : FontWeight.Regular)
+              }, (seg: BlurbSegment, index: number) => `t${index}`)
+            } else {
+              Span(this.topic.title)
+            }
             if (this.hasUnreadBadge()) {
               // 无背景的普通空格作外间距兼唯一可断点:药丸整体在此换行,不会被拆。
               Span('  ')
@@ -68,6 +85,22 @@ export struct TopicListItem {
           .fontWeight(FontWeight.Regular)
           .fontColor($r('app.color.text_primary'))
           .width('100%')
+
+          // 搜索命中摘要:标题下一行灰字,命中词染品牌色。仅搜索结果(topic.searchBlurb 有值)显示。
+          if (this.topic.searchBlurb !== undefined && this.topic.searchBlurb.length > 0) {
+            Text() {
+              ForEach(this.blurbSegments(), (seg: BlurbSegment, index: number) => {
+                Span(seg.text)
+                  .fontColor(seg.hit ? $r('app.color.brand') : $r('app.color.text_secondary'))
+                  .fontWeight(seg.hit ? FontWeight.Medium : FontWeight.Regular)
+              }, (seg: BlurbSegment, index: number) => `${index}`)
+            }
+            .fontSize(13)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+            .margin({ top: 4 })
+          }
 
           // 分类 / 标签 与 时间同一行:徽标占剩余宽度可横向滚动,时间固定在最右侧。
           if (this.hasBadges() || this.getRelativeTime().length > 0) {
@@ -118,6 +151,56 @@ export struct TopicListItem {
 
   private hasUnreadBadge(): boolean {
     return this.topic.unreadPosts !== undefined && this.topic.unreadPosts > 0;
+  }
+
+  private blurbSegments(): BlurbSegment[] {
+    return this.segmentsOf(this.topic.searchBlurb ?? '');
+  }
+
+  private titleSegments(): BlurbSegment[] {
+    return this.segmentsOf(this.topic.title);
+  }
+
+  // 把文本按高亮词切成 [普通/命中] 分段:大小写不敏感,逐字符找最早出现的任一命中词。标题/摘要共用。
+  private segmentsOf(text: string): BlurbSegment[] {
+    if (text.length === 0) {
+      return [];
+    }
+    const terms: string[] = [];
+    for (let i: number = 0; i < this.searchHighlights.length; i++) {
+      const term: string = this.searchHighlights[i];
+      if (term.length > 0) {
+        terms.push(term.toLowerCase());
+      }
+    }
+    if (terms.length === 0) {
+      return [{ text: text, hit: false }];
+    }
+
+    const lower: string = text.toLowerCase();
+    const segments: BlurbSegment[] = [];
+    let cursor: number = 0;
+    while (cursor < text.length) {
+      let bestPos: number = -1;
+      let bestLen: number = 0;
+      for (let i: number = 0; i < terms.length; i++) {
+        const pos: number = lower.indexOf(terms[i], cursor);
+        if (pos >= 0 && (bestPos < 0 || pos < bestPos)) {
+          bestPos = pos;
+          bestLen = terms[i].length;
+        }
+      }
+      if (bestPos < 0) {
+        segments.push({ text: text.slice(cursor), hit: false });
+        break;
+      }
+      if (bestPos > cursor) {
+        segments.push({ text: text.slice(cursor, bestPos), hit: false });
+      }
+      segments.push({ text: text.slice(bestPos, bestPos + bestLen), hit: true });
+      cursor = bestPos + bestLen;
+    }
+    return segments;
   }
 
   private getRelativeTime(): string {

@@ -2,13 +2,14 @@ import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 import { common } from '@kit.AbilityKit';
 import { Log } from '../../services/logging/Log';
-import { Topic } from '../../models/Topic';
-import { RelativeTime } from '../../common/utils/RelativeTime';
+import { Topic, TopicCategory } from '../../models/Topic';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SearchResult, TopicService } from '../../services/topic/TopicService';
 import { SearchHistoryStore } from '../../services/search/SearchHistoryStore';
+import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
+import { TopicListItem } from './TopicListItem';
 
 const LOG_TAG: string = '[ArkDO][Search]';
 // 搜索输入框焦点 id:挂载后 requestFocus 弹软键盘。
@@ -37,6 +38,11 @@ export struct SearchOverlay {
   @State private query: string = '';
   @State private results: Topic[] = [];
   @State private history: string[] = [];
+  // 分类树:结果项复用 TopicListItem 渲染分类/标签徽标时按 categoryId 查名。
+  @State private categories: TopicCategory[] = [];
+  // 当前搜索词拆出的普通高亮词(去掉 in:/#/@ 等高级语法),用于摘要命中染色。
+  @State private highlights: string[] = [];
+  private categoryIndex: CategoryIndex = new CategoryIndex();
   @State private isSearching: boolean = false;
   @State private isLoadingMore: boolean = false;
   @State private hasMore: boolean = false;
@@ -55,7 +61,17 @@ export struct SearchOverlay {
     // 输入框在顶、键盘在底:用系统 RESIZE 让结果区自动收缩,顶部搜索条不被顶走。
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     this.history = SearchHistoryStore.load(this.hostContext());
+    this.loadCategories();
     this.focusInput();
+  }
+
+  // 加载分类树(结果项徽标用);通常 HomePage 已加载并缓存,这里 loadIfNeeded 快速返回。
+  private async loadCategories(): Promise<void> {
+    const loaded: TopicCategory[] | null =
+      await this.categoryIndex.loadIfNeeded(this.bridge, this.isArkWebReady, this.categories.length > 0, LOG_TAG);
+    if (loaded) {
+      this.categories = loaded;
+    }
   }
 
   aboutToDisappear(): void {
@@ -233,7 +249,18 @@ export struct SearchOverlay {
     Stack() {
       List() {
         ForEach(this.results, (topic: Topic) => {
-          this.ResultItem(topic)
+          TopicListItem({
+            topic: topic,
+            category: CategoryIndex.find(this.categories, topic.categoryId),
+            parentCategory: CategoryIndex.findParent(this.categories, topic.categoryId),
+            searchHighlights: this.highlights,
+            onTopicClick: (selected: Topic) => {
+              this.handleResultClick(selected);
+            },
+            onUnreadBadgeClick: (selected: Topic) => {
+              this.handleResultClick(selected);
+            }
+          })
         }, (topic: Topic) => `${topic.id}`)
 
         if (this.results.length > 0) {
@@ -309,44 +336,6 @@ export struct SearchOverlay {
     .align(Alignment.TopStart)
   }
 
-  @Builder
-  private ResultItem(topic: Topic) {
-    ListItem() {
-      Column() {
-        Text(topic.title)
-          .fontSize(17)
-          .fontColor($r('app.color.text_primary'))
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-
-        if (topic.searchBlurb !== undefined && topic.searchBlurb.length > 0) {
-          Text(topic.searchBlurb)
-            .fontSize(13)
-            .fontColor($r('app.color.text_secondary'))
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%')
-            .margin({ top: 4 })
-        }
-
-        if (this.resultTime(topic).length > 0) {
-          Text(this.resultTime(topic))
-            .fontSize(12)
-            .fontColor($r('app.color.text_tertiary'))
-            .margin({ top: 4 })
-        }
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .padding({ top: 12, bottom: 12 })
-      .border({ width: { bottom: 1 }, color: $r('app.color.border') })
-      .onClick(() => {
-        this.handleResultClick(topic);
-      })
-    }
-  }
-
   // 输入变化:更新词、防抖后发起搜索;清空/过短时回到历史态。
   private handleQueryChanged(value: string): void {
     this.query = value;
@@ -415,6 +404,8 @@ export struct SearchOverlay {
       this.errorMessage = '';
       this.requiresChallenge = false;
       this.hasSearched = true;
+      // 高亮词按本次搜索词定格(不随后续输入漂移)。
+      this.highlights = this.parseHighlights(trimmed);
     } else {
       this.isLoadingMore = true;
     }
@@ -522,8 +513,22 @@ export struct SearchOverlay {
     return this.query.trim();
   }
 
-  private resultTime(topic: Topic): string {
-    return RelativeTime.fromNow(topic.lastPostedAt);
+  // 从搜索词拆出普通高亮词:去掉高级语法(in:title / category: / #版块 / @用户 / -排除)。
+  private parseHighlights(term: string): string[] {
+    const parts: string[] = term.split(/\s+/);
+    const out: string[] = [];
+    for (let i: number = 0; i < parts.length; i++) {
+      const p: string = parts[i];
+      if (p.length < 2 || p.indexOf(':') >= 0) {
+        continue;
+      }
+      const head: string = p.charAt(0);
+      if (head === '#' || head === '@' || head === '-' || head === '+') {
+        continue;
+      }
+      out.push(p);
+    }
+    return out;
   }
 
   private hostContext(): common.Context {

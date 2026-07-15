@@ -300,12 +300,17 @@ interface DiscourseSearchResponse {
 }
 
 // 命中楼层:topic_id 指回其主题,blurb 是带 <span class="search-highlight"> 的摘要 HTML。
+// 作者字段用于兜底:search 的 topics 常不带 posters,用命中楼作者补 topic.author 出头像。
 interface DiscourseSearchPost {
   id?: number;
   topic_id?: number;
   post_number?: number;
   blurb?: string;
   created_at?: string;
+  user_id?: number;
+  username?: string;
+  name?: string;
+  avatar_template?: string;
 }
 
 // grouped_search_result:post_ids 给出命中楼层的相关度排序;more_full_page_results 为真表示还有下一页。
@@ -905,6 +910,15 @@ export class TopicService {
       seen.add(post.topic_id);
       if (typeof post.blurb === 'string' && post.blurb.length > 0) {
         topic.searchBlurb = this.htmlToPlainText(post.blurb);
+      }
+      // topics 没给作者时,用命中楼作者兜底(出头像)。
+      if (topic.author === undefined && typeof post.username === 'string' && post.username.length > 0) {
+        topic.author = {
+          id: typeof post.user_id === 'number' ? post.user_id : 0,
+          username: post.username,
+          displayName: post.name,
+          avatarTemplate: post.avatar_template
+        };
       }
       ordered.push(topic);
     }
