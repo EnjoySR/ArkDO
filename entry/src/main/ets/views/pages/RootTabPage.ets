@@ -22,6 +22,7 @@ import { LoginGate } from '../../services/session/LoginGate';
 import { ArkWebHost } from '../components/ArkWebHost';
 import { MathRenderHost } from '../components/MathRenderHost';
 import { ImageViewer, ViewerImage } from '../components/ImageViewer';
+import { SEARCH_OVERLAY_BACK_TICK_KEY, SEARCH_OVERLAY_VISIBLE_KEY, SearchOverlay } from '../components/SearchOverlay';
 import { ensureFaIconsLoaded } from '../components/FaIcon';
 import { ensureTagIconsLoaded } from '../components/TagIconRegistry';
 import { CfChallengePage } from './CfChallengePage';
@@ -62,6 +63,10 @@ export struct RootTabPage {
   @State private showImageViewer: boolean = false;
   @State private viewerImages: ViewerImage[] = [];
   @State private viewerStartIndex: number = 0;
+  // 帖子搜索浮层:根 Stack 顶层内联渲染(不进 Navigation 栈),由首页搜索图标触发。
+  @State private showSearchOverlay: boolean = false;
+  // 系统返回键信号:浮层不进导航栈,返回键由 Index @Entry 拦截并 bump 此计数,这里监听后关闭浮层。
+  @StorageProp(SEARCH_OVERLAY_BACK_TICK_KEY) @Watch('onSearchBackTick') private searchBackTick: number = 0;
   @State private isArkWebReady: boolean = false;
   @State private currentUser?: User = undefined;
   @State private isCheckingSession: boolean = false;
@@ -194,6 +199,25 @@ export struct RootTabPage {
           // 入场/退场:纯淡入淡出,由 open/close 的 animateTo 驱动。
           .transition(
             TransitionEffect.OPACITY.animation({ duration: 220, curve: Curve.EaseOut })
+          )
+      }
+
+      // 帖子搜索浮层:根 Stack 顶层,从当前页融合展开(淡入,由 open/close 的 animateTo 驱动)。
+      if (this.showSearchOverlay) {
+        SearchOverlay({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          onClose: () => {
+            this.closeSearch();
+          },
+          onOpenTopic: (topic: Topic) => {
+            // 先关浮层再进详情:详情页正常 push 滑入,返回即回到首页(浮层已关)。
+            this.closeSearch();
+            this.openTopicDetail(topic);
+          }
+        })
+          .transition(
+            TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.EaseOut })
           )
       }
     }
@@ -540,6 +564,9 @@ export struct RootTabPage {
       onOpenNotifications: () => {
         this.navPathStack.pushPath(new NavPathInfo(AppRouteName.NOTIFICATIONS, buildNotificationsRouteParam('homeBell')));
       },
+      onOpenSearch: () => {
+        this.openSearch();
+      },
       onTopicClick: (topic: Topic) => {
         this.openTopicDetail(topic);
       },
@@ -680,6 +707,29 @@ export struct RootTabPage {
     this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
       this.showImageViewer = false;
     });
+  }
+
+  // 搜索浮层开关:animateTo 驱动 .transition 淡入/淡出;同时镜像可见态到 AppStorage,
+  // 供 Index @Entry 的 onBackPress 判断是否拦截系统返回键。
+  private openSearch(): void {
+    AppStorage.setOrCreate(SEARCH_OVERLAY_VISIBLE_KEY, true);
+    this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+      this.showSearchOverlay = true;
+    });
+  }
+
+  private closeSearch(): void {
+    AppStorage.setOrCreate(SEARCH_OVERLAY_VISIBLE_KEY, false);
+    this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseIn }, () => {
+      this.showSearchOverlay = false;
+    });
+  }
+
+  // 系统返回键(Index 拦截后 bump tick):浮层开着就关掉它。
+  private onSearchBackTick(): void {
+    if (this.showSearchOverlay) {
+      this.closeSearch();
+    }
   }
 
   private handleArkWebReady(): void {

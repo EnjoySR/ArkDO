@@ -283,6 +283,38 @@ export interface TopicPage {
   hasMore: boolean;
 }
 
+// 搜索结果页:topics 已按相关度(grouped_search_result.post_ids 顺序)排好,每项可带 searchBlurb 命中摘要。
+export interface SearchResult {
+  topics: Topic[];
+  page: number;
+  hasMore: boolean;
+}
+
+// /search.json 响应外壳:命中楼层在 posts、其主题元数据在 topics、命中作者在 users,
+// 排序与"是否有下一页"在 grouped_search_result。
+interface DiscourseSearchResponse {
+  posts?: DiscourseSearchPost[];
+  topics?: DiscourseTopic[];
+  users?: DiscourseUser[];
+  grouped_search_result?: DiscourseGroupedSearchResult;
+}
+
+// 命中楼层:topic_id 指回其主题,blurb 是带 <span class="search-highlight"> 的摘要 HTML。
+interface DiscourseSearchPost {
+  id?: number;
+  topic_id?: number;
+  post_number?: number;
+  blurb?: string;
+  created_at?: string;
+}
+
+// grouped_search_result:post_ids 给出命中楼层的相关度排序;more_full_page_results 为真表示还有下一页。
+interface DiscourseGroupedSearchResult {
+  post_ids?: number[];
+  more_full_page_results?: boolean;
+  term?: string;
+}
+
 export class TopicService {
   private bridge: JsonNetworkClient;
 
@@ -321,6 +353,33 @@ export class TopicService {
   // 某版块分页:/c/{slug}/{id}/l/latest.json,同为 topic_list.topics 结构。
   async getCategoryTopicsPage(category: TopicCategory, page: number): Promise<NetworkResult<TopicPage>> {
     return this.getTopicListPage(this.getCategoryPath(category, page), page);
+  }
+
+  // 搜索帖子:整页搜索 /search.json?q=<词>&page=<页>。type_filter 默认即 topic(搜主题/帖子),
+  // 内容过滤靠 q 里的高级语法(in:title / category: / order: 等,由调用方拼进 term)。
+  // page 从 1 起(Discourse 首页可省 page;上限 10);响应结构与 topic_list 不同,单独解析。
+  async search(term: string, page: number): Promise<NetworkResult<SearchResult>> {
+    const trimmed: string = term.trim();
+    const suffix: string = page > 1 ? `&page=${page}` : '';
+    const path: string = `/search.json?q=${encodeURIComponent(trimmed)}${suffix}`;
+    const response: NetworkResult<string> = await this.bridge.getJson(path);
+    if (!response.success) {
+      return this.forwardFailure<SearchResult>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<SearchResult>(response.statusCode, response.challengeState, 'Linux.do 搜索响应为空。');
+    }
+    try {
+      const payload: DiscourseSearchResponse = JSON.parse(response.data) as DiscourseSearchResponse;
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: this.mapSearch(payload, page)
+      };
+    } catch (error) {
+      return this.unexpectedResponse<SearchResult>(response.statusCode, response.challengeState, 'Linux.do 搜索响应不是有效 JSON。');
+    }
   }
 
   private async getTopicListPage(path: string, page: number): Promise<NetworkResult<TopicPage>> {
@@ -807,6 +866,65 @@ export class TopicService {
       topics.push(topic);
     }
     return topics;
+  }
+
+  // /search.json → SearchResult:按 grouped_search_result.post_ids 的相关度顺序,把命中楼层关联回其主题。
+  // 同一主题多楼命中只取首次(最相关那条),blurb 去标签后挂到 topic.searchBlurb;topics 缺失的命中丢弃。
+  private mapSearch(payload: DiscourseSearchResponse, page: number): SearchResult {
+    const grouped: DiscourseGroupedSearchResult | undefined = payload.grouped_search_result;
+    const postIds: number[] = grouped && Array.isArray(grouped.post_ids) ? grouped.post_ids : [];
+
+    // 命中楼层按 id 建索引(取 topic_id 与 blurb)。
+    const postById: Map<number, DiscourseSearchPost> = new Map();
+    const sourcePosts: DiscourseSearchPost[] = payload.posts ?? [];
+    for (let index: number = 0; index < sourcePosts.length; index++) {
+      const post: DiscourseSearchPost = sourcePosts[index];
+      if (typeof post.id === 'number') {
+        postById.set(post.id, post);
+      }
+    }
+
+    // 主题元数据复用 latest 的 mapTopics(带作者/标签),按 id 建索引。
+    const mappedTopics: Topic[] = this.mapTopics(payload.topics ?? [], payload.users);
+    const topicById: Map<number, Topic> = new Map();
+    for (let index: number = 0; index < mappedTopics.length; index++) {
+      topicById.set(mappedTopics[index].id, mappedTopics[index]);
+    }
+
+    const seen: Set<number> = new Set();
+    const ordered: Topic[] = [];
+    for (let index: number = 0; index < postIds.length; index++) {
+      const post: DiscourseSearchPost | undefined = postById.get(postIds[index]);
+      if (!post || typeof post.topic_id !== 'number' || seen.has(post.topic_id)) {
+        continue;
+      }
+      const topic: Topic | undefined = topicById.get(post.topic_id);
+      if (!topic) {
+        continue;
+      }
+      seen.add(post.topic_id);
+      if (typeof post.blurb === 'string' && post.blurb.length > 0) {
+        topic.searchBlurb = this.htmlToPlainText(post.blurb);
+      }
+      ordered.push(topic);
+    }
+
+    // 兜底:某些响应只给 topics 不给 post_ids(如按标题命中),按 topics 原序补齐,避免结果空白。
+    if (ordered.length === 0) {
+      for (let index: number = 0; index < mappedTopics.length; index++) {
+        const topic: Topic = mappedTopics[index];
+        if (!seen.has(topic.id)) {
+          seen.add(topic.id);
+          ordered.push(topic);
+        }
+      }
+    }
+
+    return {
+      topics: ordered,
+      page: page,
+      hasMore: grouped ? grouped.more_full_page_results === true : false
+    };
   }
 
   private mapTags(sourceTags?: Object[]): TopicTag[] {

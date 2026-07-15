@@ -16,6 +16,7 @@ import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
 import { CategoryDrawer } from '../components/CategoryDrawer';
+import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -67,6 +68,7 @@ export struct HomePage {
   // 下拉刷新时通知宿主补查会话:上次会话检查被 CF 拦截时,右上角状态可能不真实。
   onSessionRecheck: () => void = () => {};
   onOpenNotifications: () => void = () => {};
+  onOpenSearch: () => void = () => {};
   onTopicClick: (topic: Topic) => void = () => {};
   // 按帖子 ID 直接跳转详情(通用入口,不依赖完整 Topic 对象)。
   onOpenTopicById: (topicId: number) => void = () => {};
@@ -184,6 +186,11 @@ export struct HomePage {
           }
 
           this.FeedTitle()
+
+        // 搜索入口:环境就绪后常驻(搜索匿名可用,不随登录态隐藏)。
+        if (this.isArkWebReady) {
+          this.SearchButton()
+        }
 
         // 仅在会话已确认且已登录时显示铃铛(未登录/未确认不出现)。
         if (this.hasCheckedSession && this.isLoggedIn) {
@@ -466,6 +473,28 @@ export struct HomePage {
     .onClick(() => {
       this.openDrawer();
     })
+  }
+
+  // 顶栏搜索入口:放大镜图标,点击从当前页融合展开搜索浮层(由 RootTabPage 承载)。
+  @Builder
+  private SearchButton() {
+    Button() {
+      FaIconView({ icon: this.searchIcon(), color: $r('app.color.text_primary'), iconSize: 20 })
+    }
+    .width(42)
+    .height(42)
+    .borderRadius(21)
+    .backgroundColor(Color.Transparent)
+    .padding(0)
+    .margin({ right: 4 })
+    .onClick(() => {
+      this.onOpenSearch();
+    })
+  }
+
+  private searchIcon(): FaIconDefinition {
+    const def: FaIconDefinition | undefined = getFaIcon('magnifying-glass');
+    return def ? def : { id: 'magnifying-glass', rawfilePath: 'fa_icons/magnifying-glass.svg' };
   }
 
   private jumpToTopic(topicId: number): void {

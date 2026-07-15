@@ -45,4 +45,7 @@ export class Topic {
   // 当前用户是否已收藏该主题(列表接口 topic 顶层 bookmarked)。为真时标题行首内联灰色书签标记,
   // 排在已解决勾选框之前。匿名/未读态可能为 null → 统一按 === true 判定。
   bookmarked?: boolean;
+  // 搜索结果专用:命中楼层的高亮摘要纯文本(/search.json 的 posts[].blurb 去标签)。
+  // 仅搜索列表填充,普通 feed 为 undefined,搜索结果项据此在标题下展示命中片段。
+  searchBlurb?: string;
 }
