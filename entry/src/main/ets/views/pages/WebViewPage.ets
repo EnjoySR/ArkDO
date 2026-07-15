@@ -1,5 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
+import { image } from '@kit.ImageKit';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 
 const LOG_TAG: string = '[ArkDO][WebViewPage]';
@@ -11,6 +12,9 @@ export struct WebViewPage {
   url: string = '';
   pageTitle: string = '';
   onBack: () => void = () => {};
+  // 引擎解析出页面 favicon 时回调。本页不关心它有什么用——是否留存由宿主决定
+  // (「我的站点」拿去缓存成站点图标,随手点开的帖子外链则直接丢弃)。
+  onFaviconReceived: (favicon: image.PixelMap) => void = () => {};
   private controller: webview.WebviewController = new webview.WebviewController();
   @State private displayTitle: string = '';
   @State private progress: number = 0;
@@ -53,6 +57,13 @@ export struct WebViewPage {
         })
         .onProgressChange((event: OnProgressChangeEvent) => {
           this.progress = event.newProgress;
+        })
+        // 引擎自己下载并解码的 favicon:走 ArkWeb 网络栈(吃 DoH)且不受 CORS 限制,
+        // 是被污染站点唯一能拿到图标的路径。同一页面可能回调多次(多个 <link rel=icon>),后到覆盖先到。
+        .onFaviconReceived((event: OnFaviconReceivedEvent) => {
+          if (event && event.favicon) {
+            this.onFaviconReceived(event.favicon);
+          }
         })
         .onPageEnd(() => {
           this.isLoading = false;

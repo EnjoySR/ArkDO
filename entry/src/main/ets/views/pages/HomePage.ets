@@ -15,6 +15,7 @@ import { NotificationEventBus, NotificationSnapshot } from '../../services/notif
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
+import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
 import { CategoryDrawer } from '../components/CategoryDrawer';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SEARCH_OVERLAY_VISIBLE_KEY, SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
@@ -55,6 +56,9 @@ export struct HomePage {
   @State private selectedFeedKey: string = FeedKey.LATEST;
   // 设置页启用且有序的可选入口 key(打开抽屉时刷新)。
   @State private enabledFeedKeys: string[] = [];
+  // 抽屉「我的站点」区:入口开关 + 要展示的站点(打开抽屉时与 enabledFeedKeys 一并刷新)。
+  @State private sitesEntryEnabled: boolean = true;
+  @State private drawerSites: SiteDef[] = [];
   // 头像铃铛未读数:由 NotificationEventBus 广播驱动(NotificationService 前台轮询产出)。
   @State private unreadNotifications: number = 0;
   private unsubscribeNotifications?: () => void = undefined;
@@ -77,6 +81,10 @@ export struct HomePage {
   onOpenTopicById: (topicId: number) => void = () => {};
   // 点未读徽标:带目标楼号打开详情,直接定位到第一条未读楼。
   onOpenTopicAtPost: (topic: Topic, postNumber: number) => void = () => {};
+  // 抽屉「我的站点」标题行:打开站点管理页。
+  onOpenSites: () => void = () => {};
+  // 抽屉站点行:打开该站点(走通用 WebView 页)。siteId 用于缓存该站 favicon。
+  onOpenSite: (url: string, title: string, siteId: string) => void = () => {};
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeTopicReadState?: () => void = undefined;
@@ -116,7 +124,7 @@ export struct HomePage {
         this.handleRecoveryStateChanged(state);
       });
     }
-    this.enabledFeedKeys = FeedPrefs.getEnabledKeys(getContext(this));
+    this.refreshDrawerPrefs();
     this.syncSessionVersion();
     if (this.isArkWebReady && this.topics.length === 0) {
       this.loadSiteMetadataIfNeeded();
@@ -392,6 +400,8 @@ export struct HomePage {
         categories: this.categories,
         isLoggedIn: this.isLoggedIn,
         enabledFeedKeys: this.enabledFeedKeys,
+        sitesEntryEnabled: this.sitesEntryEnabled,
+        sites: this.drawerSites,
         selectedFeedKey: this.selectedCategory ? '' : this.selectedFeedKey,
         selectedCategoryId: this.selectedCategory ? this.selectedCategory.id : 0,
         onSelectFeed: (feedKey: string) => {
@@ -402,6 +412,14 @@ export struct HomePage {
         },
         onRequireLogin: () => {
           this.handleDrawerRequireLogin();
+        },
+        onOpenSites: () => {
+          this.closeDrawer();
+          this.onOpenSites();
+        },
+        onOpenSite: (url: string, title: string, siteId: string) => {
+          this.closeDrawer();
+          this.onOpenSite(url, title, siteId);
         }
       })
         .width(DRAWER_WIDTH)
@@ -566,11 +584,19 @@ export struct HomePage {
     }
   }
 
-  // 打开抽屉前刷新一次启用入口(设置页可能刚改过),带滑入动画。
+  // 打开抽屉前刷新一次抽屉配置(设置页/站点管理页可能刚改过),带滑入动画。
   private openDrawer(): void {
-    this.enabledFeedKeys = FeedPrefs.getEnabledKeys(getContext(this));
+    this.refreshDrawerPrefs();
     this.drawerDragX = 0;
     this.animateDrawer(true);
+  }
+
+  // 抽屉配置统一重读:启用入口 + 站点入口开关 + 要展示的站点。
+  // 子页改完 pop 回来不会重建本页,靠每次开抽屉重读 preferences 拿最新值(无需 AppStorage tick)。
+  private refreshDrawerPrefs(): void {
+    this.enabledFeedKeys = FeedPrefs.getEnabledKeys(getContext(this));
+    this.sitesEntryEnabled = SitePrefs.isEntryEnabled(getContext(this));
+    this.drawerSites = SitePrefs.drawerSites(getContext(this));
   }
 
   private closeDrawer(): void {

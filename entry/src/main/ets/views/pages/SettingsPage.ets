@@ -5,6 +5,7 @@ import { FileLogger } from '../../services/logging/FileLogger';
 import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import { DohManager, DohServer } from '../../services/network/DohManager';
 import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
+import { SitePrefs } from '../../services/site/SitePrefs';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
 
@@ -45,6 +46,9 @@ export struct SettingsPage {
   @State private isExportingLog: boolean = false;
   // 首页内容入口:启用且有序的可选入口 key(不含恒在的最新)。
   @State private enabledFeeds: string[] = [];
+  // 抽屉「我的站点」区总开关。站点不是 feed(点它是 push 页面而非切内容流),故不并入
+  // feed_enabled_order 而用独立键:那个结构里空数组=全关,表达不了"默认开"。
+  @State private sitesEntryEnabled: boolean = true;
   // 拖动排序状态:draggingIndex=被拖行原始下标(-1 为未拖动);dragOffsetY=浮起行跟手位移;
   // hoverIndex=当前落位槽位(邻行据此实时让位)。松手后吸附到 hoverIndex 再提交顺序。
   @State private draggingIndex: number = -1;
@@ -69,6 +73,7 @@ export struct SettingsPage {
     this.refreshLogSize();
     this.refreshDohSummary();
     this.enabledFeeds = FeedPrefs.getEnabledKeys(getContext(this));
+    this.sitesEntryEnabled = SitePrefs.isEntryEnabled(getContext(this));
   }
 
   // NavDestination 重新可见(从 DoH 配置页 pop 回)时由 dohTick 变更触发,重读最新 DoH 摘要。
@@ -415,10 +420,41 @@ export struct SettingsPage {
           this.DisabledFeedRow(feed)
         }, (feed: FeedDef) => feed.key)
       }
+
+      // 我的站点:独立开关,不参与上面那套启用/排序(站点之间的排序在站点管理页里做)。
+      this.HairlineInset()
+      this.SitesEntryRow()
     }
     .cardStyle()
     .clip(true)
     .margin({ top: 0 })
+  }
+
+  @Builder
+  private SitesEntryRow() {
+    Row() {
+      Column() {
+        Text('我的站点')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text('在侧边栏显示站点入口')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.sitesEntryEnabled })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          this.setSitesEntryEnabled(isOn);
+        })
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
   }
 
   @Builder
@@ -731,6 +767,12 @@ export struct SettingsPage {
   private persistFeeds(keys: string[]): void {
     this.enabledFeeds = keys;
     FeedPrefs.setEnabledKeys(getContext(this), keys);
+  }
+
+  // 站点入口开关:首页每次开抽屉都重读 preferences,故写完即生效,无需通知首页。
+  private setSitesEntryEnabled(enabled: boolean): void {
+    this.sitesEntryEnabled = enabled;
+    SitePrefs.setEntryEnabled(getContext(this), enabled);
   }
 
   // ==================== 辅助 ====================

@@ -10,6 +10,7 @@ export enum AppRouteName {
   ACTIVITY = 'activity',
   BADGES = 'badges',
   READ_TOPICS = 'readTopics',
+  SITES = 'sites',
   // 双栏(平板横屏)下右详情栏的空占位:未选帖子时垫在栈底,让右栏不空白。仅宽屏使用。
   PLACEHOLDER = 'placeholder'
 }
@@ -43,6 +44,17 @@ export interface DohSettingsRouteParam {
 }
 
 export function buildDohSettingsRouteParam(source: string): DohSettingsRouteParam {
+  return {
+    source: source
+  };
+}
+
+// 站点管理页参数:站点全存在本地 preferences,页面自己读,只留来源标记。
+export interface SitesRouteParam {
+  source: string;
+}
+
+export function buildSitesRouteParam(source: string): SitesRouteParam {
   return {
     source: source
   };
@@ -144,9 +156,12 @@ export function buildNotificationsRouteParam(source: string): NotificationsRoute
 }
 
 // 通用 WebView 页参数:要打开的 URL 与可选标题(缺省时页面用域名兜底)。
+// siteId:从「我的站点」打开时带上,WEB 页据此把引擎交出的 favicon 缓存为该站点图标;
+// 帖子外链不带,favicon 直接丢弃(不给随手点开的外链留缓存文件)。
 export interface WebRouteParam {
   url: string;
   title?: string;
+  siteId?: string;
 }
 
 export function buildTopicDetailRouteParam(topicId: number, slug: string | undefined, title: string, targetPostNumber?: number, highlightTarget?: boolean): TopicDetailRouteParam {
@@ -165,10 +180,11 @@ export function buildProfileRouteParam(source: string): ProfileRouteParam {
   };
 }
 
-export function buildWebRouteParam(url: string, title?: string): WebRouteParam {
+export function buildWebRouteParam(url: string, title?: string, siteId?: string): WebRouteParam {
   return {
     url: url,
-    title: title
+    title: title,
+    siteId: siteId
   };
 }
 

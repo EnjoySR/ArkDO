@@ -1,7 +1,7 @@
 import { Log } from '../../services/logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { APP_IS_WIDE_STORAGE_KEY, BreakpointManager } from '../../common/utils/BreakpointManager';
-import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -16,6 +16,8 @@ import { NotificationService } from '../../services/notification/NotificationSer
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { AvatarImageCache } from '../../services/network/AvatarImageCache';
+import { SiteIconStore } from '../../services/site/SiteIconStore';
+import { image } from '@kit.ImageKit';
 import { DohManager, DohResolveMode } from '../../services/network/DohManager';
 import { NetworkResult, NetworkErrorCode, ChallengeState } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
@@ -33,6 +35,7 @@ import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
 import { SettingsPage, SETTINGS_DOH_TICK } from './SettingsPage';
 import { DohSettingsPage } from './DohSettingsPage';
+import { SitesPage, SITES_TICK } from './SitesPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { BookmarksPage } from './BookmarksPage';
 import { ActivityListPage } from './ActivityListPage';
@@ -300,6 +303,10 @@ export struct RootTabPage {
           pageTitle: (param as WebRouteParam).title ?? '',
           onBack: () => {
             this.popNavigation();
+          },
+          // 只有「我的站点」打开的页面才留 favicon(带 siteId);帖子外链的图标直接丢弃。
+          onFaviconReceived: (favicon: image.PixelMap) => {
+            this.cacheSiteFavicon((param as WebRouteParam).siteId, favicon);
           }
         })
       }
@@ -430,6 +437,26 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.SITES) {
+      NavDestination() {
+        SitesPage({
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenSite: (url: string, title: string, siteId: string) => {
+            this.openWebPage(url, title, siteId);
+          }
+        })
+      }
+      .hideTitleBar(true)
+      // 从站点的 WEB 页 pop 回来时本页重新可见,自增计数让站点页重读——favicon 此刻可能刚落盘。
+      .onShown(() => {
+        const prev: number = (AppStorage.get(SITES_TICK) as number | undefined) ?? 0;
+        AppStorage.setOrCreate(SITES_TICK, prev + 1);
+      })
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
       .backgroundColor($r('app.color.page_bg'))
@@ -604,6 +631,12 @@ export struct RootTabPage {
       },
       onOpenTopicAtPost: (topic: Topic, postNumber: number) => {
         this.openTopicDetailById(topic.id, topic.slug, topic.title, postNumber);
+      },
+      onOpenSites: () => {
+        this.navPathStack.pushPath(new NavPathInfo(AppRouteName.SITES, buildSitesRouteParam('drawer')));
+      },
+      onOpenSite: (url: string, title: string, siteId: string) => {
+        this.openWebPage(url, title, siteId);
       }
     })
     .width('100%')
@@ -692,12 +725,22 @@ export struct RootTabPage {
     }
   }
 
-  private openWebPage(url: string, title?: string): void {
+  private openWebPage(url: string, title?: string, siteId?: string): void {
     if (!url || url.length === 0) {
       return;
     }
     Log.i(`${LOG_TAG} open web page host=${url.replace(/^https?:\/\/([^\/?#]+).*$/i, '$1')}`);
-    this.navPathStack.pushPath(new NavPathInfo(AppRouteName.WEB, buildWebRouteParam(url, title)));
+    this.navPathStack.pushPath(new NavPathInfo(AppRouteName.WEB, buildWebRouteParam(url, title, siteId)));
+  }
+
+  // 缓存站点 favicon:仅对「我的站点」打开的页面(带 siteId)落盘,其余一律丢弃。
+  // 引擎每次加载都会回调,故站点换 logo 后下次打开即自动更新。失败只记日志——图标是锦上添花,
+  // 拿不到就回退默认图标,不该打扰用户。
+  private cacheSiteFavicon(siteId: string | undefined, favicon: image.PixelMap): void {
+    if (!siteId || siteId.length === 0) {
+      return;
+    }
+    SiteIconStore.save(getContext(this), siteId, favicon);
   }
 
   private popNavigation(): void {

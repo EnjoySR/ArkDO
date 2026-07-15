@@ -1,5 +1,6 @@
 import { TopicCategory } from '../../models/Topic';
 import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
+import { SiteDef } from '../../services/site/SitePrefs';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { getCategoryColor, getCategoryIcon, getCategoryLogo, resolveBadgeAssetUrl } from './TopicBadgeUtils';
 
@@ -15,8 +16,10 @@ interface CategoryRowParams {
 }
 
 /**
- * 首页版块抽屉:顶部内置入口区(最新 + 设置页启用的可选入口),下接可折叠的两级版块树。
+ * 首页版块抽屉:顶部内置入口区(最新 + 设置页启用的可选入口),中间我的站点区,下接可折叠的两级版块树。
  * 未登录时 readRestricted 版块与 requiresLogin 入口置灰加锁/隐藏。选中项高亮。
+ *
+ * 站点区刻意排在版块树之前:版块树很长,站点是高频入口,排它后面等于每次都要滚一段。
  */
 @Component
 export struct CategoryDrawer {
@@ -25,6 +28,10 @@ export struct CategoryDrawer {
   @Prop isLoggedIn: boolean = false;
   // 设置页启用且有序的可选入口 key(不含 latest)。
   @Prop enabledFeedKeys: string[] = [];
+  // 「我的站点」区是否显示(设置页开关);关掉后整区不渲染。
+  @Prop sitesEntryEnabled: boolean = true;
+  // 要展示的站点(已按 showInDrawer 过滤且有序);为空时只留标题行,点进管理页添加。
+  @Prop sites: SiteDef[] = [];
   // 当前选中的内置入口 key;选中的是某版块时传空串。
   @Prop selectedFeedKey: string = FeedKey.LATEST;
   // 当前选中版块 id;未选版块时为 0。
@@ -33,6 +40,10 @@ export struct CategoryDrawer {
   onSelectCategory: (category: TopicCategory) => void = () => {};
   // 点了受限版块/需登录入口:交给宿主拉起登录。
   onRequireLogin: () => void = () => {};
+  // 打开站点管理页。
+  onOpenSites: () => void = () => {};
+  // 打开某个站点(走通用 WebView 页,与帖子外链同一条链路)。siteId 用于缓存该站 favicon。
+  onOpenSite: (url: string, title: string, siteId: string) => void = () => {};
   @State private expandedIds: number[] = [];
 
   aboutToAppear(): void {
@@ -63,6 +74,20 @@ export struct CategoryDrawer {
             .strokeWidth(0.5)
             .color($r('app.color.border'))
             .margin({ left: 16, right: 16, top: 6, bottom: 6 })
+
+          // 我的站点区:标题行进管理页,下挂已开启显示的站点(点击直达,不经管理页)。
+          if (this.sitesEntryEnabled) {
+            this.SitesHeaderRow()
+            // key 并入 iconUri:favicon 是站点打开后才落盘的,id 不变会复用旧行、图标刷不上屏。
+            ForEach(this.sites, (site: SiteDef) => {
+              this.SiteRow(site)
+            }, (site: SiteDef) => `s${site.id}_${site.name}_${site.iconUri}`)
+
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('app.color.border'))
+              .margin({ left: 16, right: 16, top: 6, bottom: 6 })
+          }
 
           // 版块树:顶级版块 + (展开时)子版块
           ForEach(this.topLevelCategories(), (topCat: TopicCategory) => {
@@ -117,6 +142,89 @@ export struct CategoryDrawer {
     .backgroundColor(this.isFeedSelected(feed.key) ? $r('app.color.surface_muted') : Color.Transparent)
     .onClick(() => {
       this.onSelectFeed(feed.key);
+    })
+  }
+
+  // 「我的站点」标题行:前导图标撑出与版块行相同的 18+10 图标位,标题因此与版块名竖直对齐;
+  // 右侧 chevron 表明点进去是另一个页面。图标走 FaIcon 而非 sys.symbol——与版块行同一套图标系统,
+  // 线条粗细与视觉重量才对得上。
+  @Builder
+  private SitesHeaderRow() {
+    Row() {
+      Row() {
+        if (this.getSitesIcon()) {
+          FaIconView({
+            icon: this.getSitesIcon() as FaIconDefinition,
+            color: $r('app.color.text_secondary'),
+            iconSize: 15
+          })
+        }
+      }
+      .width(18)
+      .justifyContent(FlexAlign.Center)
+      .margin({ right: 10 })
+
+      Text('我的站点')
+        .fontSize(15)
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+
+      // 箭头容器与版块行的展开箭头同款几何(56 宽居中 + 右移贴边),两者竖直对齐。
+      // 这里不单独挂 onClick——整行都是「进管理页」,不像版块行那样需要独立热区。
+      Row() {
+        SymbolGlyph($r('sys.symbol.chevron_right'))
+          .fontSize(16)
+          .fontColor([$r('app.color.text_faint')])
+      }
+      .height('100%')
+      .width(56)
+      .margin({ right: -16 })
+      .justifyContent(FlexAlign.Center)
+    }
+    .width('100%')
+    .height(ROW_HEIGHT)
+    .padding({ left: 12, right: 16 })
+    .onClick(() => {
+      this.onOpenSites();
+    })
+  }
+
+  // 站点行:缩进一级(与子版块同款),点击直达站点。不做选中态——点它是 push 页面,回来抽屉已关。
+  @Builder
+  private SiteRow(site: SiteDef) {
+    Row() {
+      Row() {
+        if (site.iconUri.length > 0) {
+          // 抓到的 favicon 原样显示,不套 Template 染色——站点 logo 多是彩色的,染了就废了。
+          Image(site.iconUri)
+            .width(15)
+            .height(15)
+            .objectFit(ImageFit.Contain)
+            .borderRadius(3)
+        } else if (this.getLinkIcon()) {
+          FaIconView({
+            icon: this.getLinkIcon() as FaIconDefinition,
+            color: $r('app.color.text_faint'),
+            iconSize: 14
+          })
+        }
+      }
+      .width(18)
+      .justifyContent(FlexAlign.Center)
+      .margin({ right: 10 })
+
+      Text(site.name)
+        .fontSize(14)
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width('100%')
+    .height(ROW_HEIGHT)
+    .padding({ left: 28, right: 16 })
+    .onClick(() => {
+      this.onOpenSite(site.url, site.name, site.id);
     })
   }
 
@@ -295,5 +403,15 @@ export struct CategoryDrawer {
 
   private getLockIcon(): FaIconDefinition | undefined {
     return getFaIcon('lock');
+  }
+
+  // earth-americas:实心地球,15vp 下轮廓仍清晰(globe 是线框,经纬线在小尺寸会糊成一团)。
+  private getSitesIcon(): FaIconDefinition | undefined {
+    return getFaIcon('earth-americas');
+  }
+
+  // 站点未抓到 favicon 时的默认图标。
+  private getLinkIcon(): FaIconDefinition | undefined {
+    return getFaIcon('link');
   }
 }
