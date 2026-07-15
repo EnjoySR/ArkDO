@@ -1,10 +1,10 @@
 {
   "name": "entry",
   "version": "1.0.0",
-  "description": "Please describe the basic information.",
+  "description": "LINUX DO 社区的第三方 HarmonyOS 原生客户端",
   "main": "",
-  "author": "",
-  "license": "",
+  "author": "JoeyYin",
+  "license": "MIT",
   "dependencies": {
     "@rv/image-preview": "^2.1.3"
   },
