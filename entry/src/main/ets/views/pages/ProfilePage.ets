@@ -50,9 +50,11 @@ export struct ProfilePage {
   @Prop isCheckingSession: boolean = false;
   @Prop hasCheckedSession: boolean = false;
   onLoginClick: () => void = () => {};
-  // 打开站内 Web 页(私信/草稿等归档入口)与原生帖子详情,由 RootTabPage 注入。
+  // 打开站内 Web 页(草稿等尚未原生化的入口)与原生帖子详情,由 RootTabPage 注入。
   onOpenWeb: (url: string, title?: string) => void = () => {};
   onOpenTopic: (topicId: number, title: string, postNumber?: number) => void = () => {};
+  // 已读帖子列表(/read.json):当前登录用户读过的主题,无需用户名。
+  onOpenReadTopics: () => void = () => {};
   // 书签已原生化:进原生书签页而非 Web。
   onOpenBookmarks: (username: string) => void = () => {};
   // 用户动态列表(我的话题/回复/点赞/最近活动全部)已原生化:filter 见 UserActionType。
@@ -265,8 +267,9 @@ export struct ProfilePage {
 
       // 卡片 2:快捷入口
       Row() {
-        this.QuickEntry($r('sys.symbol.envelope'), '私信', this.getUnreadMessageCount(), true, false,
-          `/u/${this.getUsername()}/messages`)
+        this.QuickEntryNative($r('sys.symbol.eye'), '已读', false, () => {
+          this.onOpenReadTopics();
+        })
         this.QuickEntryNative($r('sys.symbol.bookmark'), '书签', false, () => {
           if (this.getUsername().length > 0) {
             this.onOpenBookmarks(this.getUsername());
@@ -907,11 +910,6 @@ export struct ProfilePage {
   private getRepliesLinkLabel(): string {
     const count: number | undefined = this.summaryStats?.postCount;
     return count !== undefined ? `我的回复 ${this.formatCount(count)} ›` : '我的回复 ›';
-  }
-
-  private getUnreadMessageCount(): number {
-    const count: number | undefined = this.accountUser.unreadHighPriorityNotifications;
-    return count !== undefined ? count : 0;
   }
 
   private getDraftCount(): number {

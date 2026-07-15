@@ -360,6 +360,13 @@ export class TopicService {
     return this.getTopicListPage(this.getCategoryPath(category, page), page);
   }
 
+  // 已读列表分页:/read.json 是 Discourse core 的 read 过滤器(网页版 /u/{用户名}/activity/read 的数据源),
+  // 只回当前登录用户读过的主题、按最近阅读排序,路径不带用户名。同为 topic_list.topics 结构,共用解析。
+  async getReadTopicsPage(page: number): Promise<NetworkResult<TopicPage>> {
+    const suffix: string = page > 0 ? `?page=${page}` : '';
+    return this.getTopicListPage(`/read.json${suffix}`, page);
+  }
+
   // 搜索帖子:整页搜索 /search.json?q=<词>&page=<页>。type_filter 默认即 topic(搜主题/帖子),
   // 内容过滤靠 q 里的高级语法(in:title / category: / order: 等,由调用方拼进 term)。
   // page 从 1 起(Discourse 首页可省 page;上限 10);响应结构与 topic_list 不同,单独解析。

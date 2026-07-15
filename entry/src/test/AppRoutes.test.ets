@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { AppRouteName, buildProfileRouteParam, buildTopicDetailRouteParam, isTopicDetailRouteParam, ProfileRouteParam, TopicDetailRouteParam } from '../main/ets/navigation/AppRoutes';
+import { AppRouteName, buildProfileRouteParam, buildReadTopicsRouteParam, buildTopicDetailRouteParam, isTopicDetailRouteParam, ProfileRouteParam, ReadTopicsRouteParam, TopicDetailRouteParam } from '../main/ets/navigation/AppRoutes';
 
 interface InvalidTopicIdRouteParam {
   topicId: string;
@@ -27,6 +27,13 @@ export default function appRoutesTest() {
       const param: ProfileRouteParam = buildProfileRouteParam('homeAvatar');
 
       expect(param.source).assertEqual('homeAvatar');
+    });
+
+    it('buildsReadTopicsRouteParam', 0, () => {
+      const param: ReadTopicsRouteParam = buildReadTopicsRouteParam('profile');
+
+      expect(param.source).assertEqual('profile');
+      expect(AppRouteName.READ_TOPICS).assertEqual('readTopics');
     });
 
     it('rejectsInvalidTopicDetailRouteParam', 0, () => {

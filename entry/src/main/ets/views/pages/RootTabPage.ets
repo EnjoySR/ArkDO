@@ -1,6 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import { APP_IS_WIDE_STORAGE_KEY, BreakpointManager } from '../../common/utils/BreakpointManager';
-import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -35,6 +35,7 @@ import { DohSettingsPage } from './DohSettingsPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { BookmarksPage } from './BookmarksPage';
 import { ActivityListPage } from './ActivityListPage';
+import { ReadTopicsPage } from './ReadTopicsPage';
 import { BadgesPage } from './BadgesPage';
 import { TopicDetailPage } from './TopicDetailPage';
 import { WebViewPage } from './WebViewPage';
@@ -340,6 +341,9 @@ export struct RootTabPage {
           onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
             this.openTopicDetailById(topicId, undefined, title, postNumber, postNumber !== undefined);
           },
+          onOpenReadTopics: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.READ_TOPICS, buildReadTopicsRouteParam('profile')));
+          },
           onOpenBookmarks: (username: string) => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.BOOKMARKS, buildBookmarksRouteParam(username)));
           },
@@ -437,6 +441,26 @@ export struct RootTabPage {
           },
           onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
             this.openTopicDetailById(topicId, undefined, title, postNumber, postNumber !== undefined);
+          }
+        })
+      }
+      .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.READ_TOPICS) {
+      NavDestination() {
+        ReadTopicsPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          onBack: () => {
+            this.popNavigation();
+          },
+          onTopicClick: (topic: Topic) => {
+            this.openTopicDetail(topic);
+          },
+          onOpenTopicAtPost: (topic: Topic, postNumber: number) => {
+            this.openTopicDetailById(topic.id, topic.slug, topic.title, postNumber);
           }
         })
       }

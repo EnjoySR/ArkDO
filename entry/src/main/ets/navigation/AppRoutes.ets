@@ -9,6 +9,7 @@ export enum AppRouteName {
   BOOKMARKS = 'bookmarks',
   ACTIVITY = 'activity',
   BADGES = 'badges',
+  READ_TOPICS = 'readTopics',
   // 双栏(平板横屏)下右详情栏的空占位:未选帖子时垫在栈底,让右栏不空白。仅宽屏使用。
   PLACEHOLDER = 'placeholder'
 }
@@ -59,6 +60,17 @@ export function buildLevelProgressRouteParam(isLoggedIn: boolean): LevelProgress
 
 export interface NotificationsRouteParam {
   source: string;
+}
+
+// 已读帖子列表参数:/read.json 取的就是当前登录用户,无需用户名,只留来源标记。
+export interface ReadTopicsRouteParam {
+  source: string;
+}
+
+export function buildReadTopicsRouteParam(source: string): ReadTopicsRouteParam {
+  return {
+    source: source
+  };
 }
 
 export interface BookmarksRouteParam {
