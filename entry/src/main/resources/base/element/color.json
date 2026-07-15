@@ -97,6 +97,10 @@
       "value": "#BDBDBD"
     },
     {
+      "name": "reaction_count_fg",
+      "value": "#888888"
+    },
+    {
       "name": "fill_subtle",
       "value": "#F3F4F6"
     },

@@ -386,7 +386,9 @@ export struct TopicPostItem {
 
               Text(`${this.post.reactionUsersCount}`)
                 .fontSize(16)
-                .fontColor($r('app.color.icon_muted'))
+                // 图标旁计数需过对比度 3:1:浅色下 icon_muted(#BDBDBD)对白底仅 1.88:1 不达标,
+                // 单列 reaction_count_fg(浅 #888888≈3.55:1),深色沿用原 icon_muted 值不变
+                .fontColor($r('app.color.reaction_count_fg'))
                 .margin({ left: 8 })
             }
             .alignItems(VerticalAlign.Center)

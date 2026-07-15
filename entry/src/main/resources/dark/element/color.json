@@ -97,6 +97,10 @@
       "value": "#5C626B"
     },
     {
+      "name": "reaction_count_fg",
+      "value": "#5C626B"
+    },
+    {
       "name": "fill_subtle",
       "value": "#23262C"
     },
