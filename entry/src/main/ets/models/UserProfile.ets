@@ -1,6 +1,7 @@
 // 个人中心数据模型:字段分别来自
 // /u/{username}.json(资料)、/u/{username}/summary.json(统计+徽章)、/user_actions.json(最近活动)。
 import { TopicTag } from './Topic';
+import { User } from './User';
 
 export interface UserProfileDetail {
   id: number;
@@ -73,6 +74,9 @@ export interface UserActivityItem {
   categoryId?: number;
   tags: TopicTag[];
   createdAt?: string;
+  // 该动作对应楼层的作者(user_actions 的 avatar_template/username/name);列表左侧出头像。
+  // 接口不返回 flair 字段,故头像无右下角标。
+  author?: User;
 }
 
 // 一页用户动态 + 是否还有更多(user_actions 按 offset 翻页)。

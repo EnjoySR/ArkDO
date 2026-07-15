@@ -1,15 +1,17 @@
 import { Log } from '../../services/logging/Log';
 import { TopicCategory } from '../../models/Topic';
-import { UserActionType, UserActivityItem, UserActivityPage } from '../../models/UserProfile';
+import { UserActivityItem, UserActivityPage } from '../../models/UserProfile';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { UserProfileService } from '../../services/user/UserProfileService';
-import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { TopicMetadataBadges } from '../components/TopicBadges';
+import { UserAvatar } from '../components/UserAvatar';
 
 const LOG_TAG: string = '[ArkDO][ActivityListPage]';
 const PAGE_PADDING: number = 16;
+// 楼层作者头像尺寸:比首页(48)略小,本页每行还带摘要,行更高,48 会显得头重。
+const AVATAR_SIZE: number = 40;
 
 // 通用用户动态列表:我的话题(filter=4)、我的回复(5)、我的点赞(1)、最近活动全部(4,5)。
 // 数据源统一为 /user_actions.json,按 offset 翻页。
@@ -156,38 +158,52 @@ export struct ActivityListPage {
     }
   }
 
-  // 单行:标题(回复带 ↩ 图标)+ 分类徽标 + 摘要(2 行)+ 时间。
+  // 单行(同官网 user-stream):头部「作者头像 + 标题 / 分类徽标 + 时间」,
+  // 摘要另起一段横跨整行、左缘与头像对齐(不缩进到头像右侧)。
   @Builder
   private ActivityRow(item: UserActivityItem) {
     Column() {
       Row() {
-        if (item.actionType === UserActionType.REPLY) {
-          FaIconView({
-            icon: this.faIcon('reply'),
-            iconSize: 13,
-            color: $r('app.color.text_faint')
-          })
-            .margin({ top: 3, right: 6 })
+        UserAvatar({ user: item.author, avatarSize: AVATAR_SIZE })
+          .margin({ right: 8 })
+
+        Column() {
+          Text(item.title)
+            .width('100%')
+            .fontSize(16)
+            .fontColor($r('app.color.text_primary'))
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+          // 分类 / 标签 与 时间同一行(对齐首页帖子列表):徽标占剩余宽度可横向滚动,时间固定在最右侧。
+          // 无徽标时用 Blank 占位把时间顶到右边。
+          Row() {
+            if (this.hasBadges(item)) {
+              TopicMetadataBadges({
+                category: this.getCategoryFor(item.categoryId),
+                parentCategory: this.getParentCategoryFor(item.categoryId),
+                tags: item.tags
+              })
+                .layoutWeight(1)
+            } else {
+              Blank()
+            }
+
+            Text(RelativeTime.fromNow(item.createdAt))
+              .fontSize(13)
+              .fontColor($r('app.color.text_secondary'))
+              .margin({ left: 8 })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+          .margin({ top: 5 })
         }
-        Text(item.title)
-          .fontSize(16)
-          .fontColor($r('app.color.text_primary'))
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
+      // 头像与标题顶对齐:标题占两行时头像不跟着垂直居中下沉。
       .alignItems(VerticalAlign.Top)
-
-      if (this.hasBadges(item)) {
-        TopicMetadataBadges({
-          category: this.getCategoryFor(item.categoryId),
-          parentCategory: this.getParentCategoryFor(item.categoryId),
-          tags: item.tags
-        })
-          .width('100%')
-          .margin({ top: 5 })
-      }
 
       if (item.excerpt.length > 0) {
         Text(item.excerpt)
@@ -197,17 +213,8 @@ export struct ActivityListPage {
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .lineHeight(21)
-          .margin({ top: 6 })
+          .margin({ top: 8 })
       }
-
-      Row() {
-        Blank()
-        Text(RelativeTime.fromNow(item.createdAt))
-          .fontSize(13)
-          .fontColor($r('app.color.text_faint'))
-      }
-      .width('100%')
-      .margin({ top: 8 })
     }
     .width('100%')
     .padding({ left: PAGE_PADDING, right: PAGE_PADDING, top: 12, bottom: 13 })
@@ -295,10 +302,5 @@ export struct ActivityListPage {
 
   private getParentCategoryFor(categoryId?: number): TopicCategory | undefined {
     return CategoryIndex.findParent(this.categories, categoryId);
-  }
-
-  private faIcon(name: string): FaIconDefinition {
-    const def: FaIconDefinition | undefined = getFaIcon(name);
-    return def ? def : { id: name, rawfilePath: '' };
   }
 }

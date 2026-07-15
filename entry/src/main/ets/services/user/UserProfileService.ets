@@ -97,6 +97,11 @@ interface DiscourseUserAction {
   title?: string;
   excerpt?: string;
   category_id?: number;
+  // 该动作对应楼层的作者。acting_* 是动作发起人,自己的活动流里二者同一人,取前者即可。
+  user_id?: number;
+  username?: string;
+  name?: string;
+  avatar_template?: string;
 }
 
 // 个人中心数据服务:资料 /u/{username}.json、摘要 /u/{username}/summary.json、
@@ -457,6 +462,14 @@ export class UserProfileService {
     }
     if (sourceAction.created_at && sourceAction.created_at.length > 0) {
       item.createdAt = sourceAction.created_at;
+    }
+    if (typeof sourceAction.username === 'string' && sourceAction.username.length > 0) {
+      item.author = {
+        id: typeof sourceAction.user_id === 'number' ? sourceAction.user_id : 0,
+        username: sourceAction.username,
+        displayName: sourceAction.name,
+        avatarTemplate: sourceAction.avatar_template
+      };
     }
     return item;
   }
