@@ -29,6 +29,8 @@ export struct SettingsPage {
   onOpenWeb: (url: string, title?: string) => void = () => {};
   // 主动过盾:通知 RootTabPage 打开交互式 Cloudflare 验证页(唯一能真正拿到新 cf_clearance 的路径)。
   onActiveChallenge: () => void = () => {};
+  // 反馈与建议:打开站内反馈帖的原生详情页。本页拿不到 navPathStack,push 由 RootTabPage 注入。
+  onOpenFeedback: () => void = () => {};
   @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
   // RootTabPage 在本页 NavDestination onShown 时自增此 AppStorage 计数(本页此刻已在前台,
   // @StorageProp 变更能可靠触发重渲染)。被 DoH 配置页覆盖后 pop 回来常驻不重建,靠它
@@ -127,7 +129,7 @@ export struct SettingsPage {
 
         Scroll() {
           Column() {
-            // 卡片:外观 / DoH / 刷新通行证 / 关于
+            // 卡片:外观 / DoH / 刷新通行证
             Column() {
               this.AppearanceCell()
               this.HairlineInset()
@@ -137,14 +139,12 @@ export struct SettingsPage {
               this.SettingCell($r('sys.symbol.checkmark_shield'), '刷新 Cloudflare 通行证', '', () => {
                 this.onActiveChallenge();
               })
-              this.HairlineInset()
-              this.SettingCell($r('sys.symbol.info_circle'), '关于 ArkDO', this.getVersionLabel(), () => {
-                this.aboutDialogController.open();
-              })
             }
             .cardStyle()
 
             this.FeedGroup()
+
+            this.AboutGroup()
 
             this.LogGroup()
 
@@ -271,6 +271,24 @@ export struct SettingsPage {
         onCellClick();
       }
     })
+  }
+
+  // 关于组:反馈入口直开站内反馈帖;关于弹框展示版本号与开发者链接。
+  @Builder
+  private AboutGroup() {
+    this.GroupLabel('关于')
+    Column() {
+      this.SettingCell($r('sys.symbol.message'), '反馈与建议', '', () => {
+        this.onOpenFeedback();
+      })
+      this.HairlineInset()
+      this.SettingCell($r('sys.symbol.info_circle'), '关于 ArkDO', this.getVersionLabel(), () => {
+        this.aboutDialogController.open();
+      })
+    }
+    .cardStyle()
+    // GroupLabel 自带 18 上内边距,抹平 cardStyle 的 12 上外边距,免得组标题与卡片间空一截。
+    .margin({ top: 0 })
   }
 
   // 诊断日志工具组:导出(带大小)、详细日志开关、清空。用于用户脱机跑一天后导出日志分析。

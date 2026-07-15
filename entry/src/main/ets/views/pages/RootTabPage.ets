@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { AppConstants } from '../../common/constants/AppConstants';
 import { APP_IS_WIDE_STORAGE_KEY, BreakpointManager } from '../../common/utils/BreakpointManager';
 import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
@@ -400,6 +401,10 @@ export struct RootTabPage {
           onActiveChallenge: () => {
             // 主动过盾:直接打开交互式 CF 验证 sheet(绕过协调器静默阶段),过盾后刷新会话。
             this.openChallengeSheet();
+          },
+          onOpenFeedback: () => {
+            // 标题留空:详情页拉到帖子后自会填真实标题,不必在此硬编码一份易过期的副本。
+            this.openTopicDetailById(AppConstants.FEEDBACK_TOPIC_ID);
           }
         })
       }

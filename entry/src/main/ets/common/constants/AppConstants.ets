@@ -14,6 +14,9 @@ export class AppConstants {
   static readonly LOGIN_URL: string = 'https://linux.do/login';
   static readonly CHALLENGE_PATH: string = '/challenge';
   static readonly CHALLENGE_URL: string = 'https://linux.do/challenge';
+  // 反馈与建议:站内反馈帖 https://linux.do/t/topic/2590051。设置页入口按 id 直开原生详情页,
+  // 用户可就地回帖/点赞(复用登录态与 LoginGate),不走 WebView。
+  static readonly FEEDBACK_TOPIC_ID: number = 2590051;
   static readonly DEFAULT_TIMEOUT_MS: number = 15000;
   // host webview 因 session 变化被 loadUrl 重载时，注入式 fetch 会排队等待其 onPageEnd。
   // 该超时用于兜底：万一 onPageEnd 因异常始终不触发，等待者也不会永久悬住。
