@@ -5,6 +5,9 @@ import { TopicCategory } from '../../models/Topic';
 // 宽或高超过它的独立 <img>(或动图)视为整幅内容图,提升为 IMAGE 块,不再压成 18px 行内图。
 const INLINE_IMAGE_MAX: number = 48;
 
+// 站内 emoji 图片的相对路径前缀,resolveUrl 据此把它们挂 CDN 而非主站。
+const EMOJI_PATH_PREFIX: string = '/images/emoji/';
+
 export enum RichBlockType {
   PARAGRAPH = 'paragraph',
   HEADING = 'heading',
@@ -1761,6 +1764,11 @@ export class CookedHtmlParser {
     }
     if (url.startsWith('//')) {
       return `https:${url}`;
+    }
+    if (url.startsWith(EMOJI_PATH_PREFIX)) {
+      // 正文 cooked 里的 emoji 服务端已改写成 CDN 绝对地址,但 discourse-boosts 的 cooked 不走那套改写,
+      // 吐的是站内相对路径。拼 BASE_URL 会得到必然加载不出的主站直链,故这里挂 CDN(同一份文件)。
+      return `${AppConstants.STATIC_CDN_BASE}${url}`;
     }
     if (url.startsWith('/')) {
       return `${AppConstants.BASE_URL}${url}`;

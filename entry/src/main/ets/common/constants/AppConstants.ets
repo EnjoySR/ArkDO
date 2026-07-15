@@ -1,6 +1,9 @@
 export class AppConstants {
   static readonly APP_NAME: string = 'ArkDO';
   static readonly BASE_URL: string = 'https://linux.do';
+  // 站点静态资源 CDN。主站域名在 TLS 层被按 SNI 阻断,原生 Image 取不到图(头像因此要绕 webview 桥);
+  // 该 CDN 镜像同一份静态资源且不被拦,故站内相对的静态图(emoji 等)一律挂这里而非 BASE_URL。
+  static readonly STATIC_CDN_BASE: string = 'https://cdn.ldstatic.com';
   // host webview 引导页:桥只需一个 linux.do 同源文档(定 origin、带 cookie、供注入 fetch),
   // 无需首页那套重型 SPA。改加载极小的 /session/csrf.json,把冷启动首屏就绪从 ~30s 砍到建连级。
   // 同源、必然存在、顺带预热 CSRF;CF 挡时照样返回挑战 HTML 跑 JS 种 cf_clearance,过盾逻辑不变。

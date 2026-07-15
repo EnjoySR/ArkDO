@@ -1,5 +1,6 @@
 import { buffer } from '@kit.ArkTS';
 import resourceManager from '@ohos.resourceManager';
+import { AppConstants } from '../../common/constants/AppConstants';
 
 // linux.do 的 GET /emojis.json 导出:{ 组名: [{ name, url, ... }] }。
 // 覆盖标准 twemoji + 4 个自定义组(b站/飞书/贴吧/小红书),共 ~2367 条,是 name→url 的权威字典。
@@ -8,7 +9,7 @@ export const LINUXDO_EMOJIS_RAWFILE = 'linuxdo_emojis.json';
 
 // 标准表情的 url 是站内相对路径(/images/emoji/twemoji/xxx.png?v=15),站点实际经 CDN 提供;
 // 走 CDN 既与站点一致、又绕开主站 CF。自定义表情已是协议相对绝对地址,只补协议。
-const EMOJI_CDN_BASE = 'https://cdn.ldstatic.com';
+const EMOJI_CDN_BASE = AppConstants.STATIC_CDN_BASE;
 
 interface RawEmojiEntry {
   name?: string;
