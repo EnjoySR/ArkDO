@@ -13,6 +13,11 @@ const MAX_CHALLENGE_POLL_COUNT: number = 90;
 // 失败即隔 2s 重载挑战页赌下一次能通,最多 3 次,避免用户对着加载页干等。
 const CHALLENGE_RELOAD_DELAY_MS: number = 2000;
 const MAX_CHALLENGE_RELOADS: number = 3;
+// 连续多少次挑战资源加载失败后,提示用户"验证服务连不上"。计数在该域回来任何 HTTP 响应时清零
+// (哪怕是 401——那也证明域可达,只是时通时不通,盾照样能过)。实测三份日志:52s 过掉那次失败 6 次
+// 但拿到过 401,5 分钟过掉那次失败 12 次也拿到过 401,均不该提示;卡死 18 分钟那次失败 53 次且
+// 全程零响应,才是真连不上。阈值 8 能把这两类干净分开。
+const CHALLENGE_RESOURCE_FAIL_HINT_THRESHOLD: number = 8;
 
 @Component
 export struct CfChallengePage {
@@ -29,6 +34,10 @@ export struct CfChallengePage {
   private challengeReloadCount: number = 0;
   // 【测量】是否观察到 CF 人机验证控件资源(challenges.cloudflare.com)被加载——CF 真发起挑战的铁证。
   private sawChallengeWidget: boolean = false;
+  // 挑战资源连不上的累计次数,达阈值即提示用户开代理;该域回来任何 HTTP 响应就清零。
+  private challengeResourceFailCount: number = 0;
+  // 提示条:验证服务连不上。纯提示,不触发任何 refresh,不会清零用户在勾选框上的进度。
+  @State private showConnectivityHint: boolean = false;
 
   aboutToAppear(): void {
     webview.WebviewController.initializeWebEngine();
@@ -37,6 +46,8 @@ export struct CfChallengePage {
     this.challengePollCount = 0;
     this.challengeReloadCount = 0;
     this.sawChallengeWidget = false;
+    this.challengeResourceFailCount = 0;
+    this.showConnectivityHint = false;
     this.initialCfClearance = WebSessionManager.getCfClearanceValue();
     this.logDiagnostic('appear', 'start');
     this.startChallengeCookiePolling();
@@ -79,6 +90,31 @@ export struct CfChallengePage {
         color: $r('app.color.border')
       })
 
+      // 验证服务连不上的提示条:CF 的挑战脚本域被网络阻断时,Turnstile 拿不到自己的脚本,盾永远算不完,
+      // 页面只会无限转圈(实测能干等 18 分钟)。此时除了换网络别无他法,故直接告诉用户,而不是让他干等。
+      if (this.showConnectivityHint) {
+        Column({ space: 4 }) {
+          Text('验证服务连不上')
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.warning'))
+            .width('100%')
+
+          Text('Cloudflare 验证脚本多次无法加载,当前网络下验证可能无法完成。挂上代理后重新打开通常可解决。')
+            .fontSize(13)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+        .backgroundColor($r('app.color.warn_soft_bg'))
+        .border({
+          width: { bottom: 1 },
+          color: $r('app.color.border')
+        })
+      }
+
       Web({ src: AppConstants.CHALLENGE_URL, controller: this.controller })
         .javaScriptAccess(true)
         .domStorageAccess(true)
@@ -119,6 +155,7 @@ export struct CfChallengePage {
           const code: number = this.safeErrorCode(event.error);
           Log.i(`${LOG_TAG} load error url=${this.safeUrlLabel(url)} code=${code} info=${this.safeErrorInfo(event.error)}`);
           this.logDiagnostic('loadError', `url=${this.safeUrlLabel(url)} code=${code}`);
+          this.countChallengeResourceFailure(url);
           this.retryOnChallengeResourceFailure(url);
         })
         .onHttpErrorReceive((event: OnHttpErrorReceiveEvent) => {
@@ -131,6 +168,7 @@ export struct CfChallengePage {
           // 过盾成功后回跳的 404,这里能看到 CF 带回来的完整 url(是否带 __cf_chl_ 查询参数)。
           Log.i(`${LOG_TAG} [MEASURE] status=${statusCode} url="${url}" cf-mitigated="${cfMitigatedHeader}" server="${this.safeResponseHeader(event.response, 'server')}" cf-ray="${this.safeResponseHeader(event.response, 'cf-ray')}"`);
           this.logDiagnostic('httpError', `url=${this.safeUrlLabel(url)} status=${statusCode} mainFrame=${isMainFrame} cfMitigated="${cfMitigatedHeader}"`);
+          this.noteChallengeResourceReachable(url);
           if (this.resolveIfChallengeCompletionResponse(url, statusCode, isMainFrame, cfMitigatedHeader)) {
             return;
           }
@@ -198,6 +236,34 @@ export struct CfChallengePage {
     this.stopChallengeCookiePolling();
     this.onChallengeResolved();
     return true;
+  }
+
+  // 累计挑战资源的连接失败次数,到阈值就把"连不上"提示条放出来。
+  // 只统计 onErrorReceive(传输层失败,压根没拿到响应);HTTP 错误码不算——那证明域是通的。
+  private countChallengeResourceFailure(url: string): void {
+    if (this.hasResolved || this.safeUrlLabel(url) !== 'cloudflare_challenge_resource') {
+      return;
+    }
+    this.challengeResourceFailCount++;
+    if (this.challengeResourceFailCount < CHALLENGE_RESOURCE_FAIL_HINT_THRESHOLD || this.showConnectivityHint) {
+      return;
+    }
+    this.showConnectivityHint = true;
+    Log.i(`${LOG_TAG} challenge resource unreachable — hint shown failCount=${this.challengeResourceFailCount}`);
+    this.logDiagnostic('challengeResourceHint', `failCount=${this.challengeResourceFailCount}`);
+  }
+
+  // 该域回来任何 HTTP 响应(401 也算)即证明它可达,只是时通时不通,盾仍可能过 → 清零并撤掉提示,
+  // 避免把"抖了几下但最终能过"的正常情况误报成"连不上"。
+  private noteChallengeResourceReachable(url: string): void {
+    if (this.safeUrlLabel(url) !== 'cloudflare_challenge_resource') {
+      return;
+    }
+    this.challengeResourceFailCount = 0;
+    if (this.showConnectivityHint) {
+      this.showConnectivityHint = false;
+      this.logDiagnostic('challengeResourceHintCleared', 'reachable');
+    }
   }
 
   // 挑战脚本资源加载失败时隔 2s 重载挑战页(限 3 次),赌该域下一次可达。
