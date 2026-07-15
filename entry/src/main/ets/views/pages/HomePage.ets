@@ -17,6 +17,7 @@ import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
 import { CategoryDrawer } from '../components/CategoryDrawer';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
+import { SEARCH_OVERLAY_VISIBLE_KEY, SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -69,6 +70,8 @@ export struct HomePage {
   onSessionRecheck: () => void = () => {};
   onOpenNotifications: () => void = () => {};
   onOpenSearch: () => void = () => {};
+  // 搜索浮层可见态镜像:一镜到底期间隐藏顶栏源图标,把几何交给浮层里的目标图标(geometryTransition)。
+  @StorageProp(SEARCH_OVERLAY_VISIBLE_KEY) private searchOverlayVisible: boolean = false;
   onTopicClick: (topic: Topic) => void = () => {};
   // 按帖子 ID 直接跳转详情(通用入口,不依赖完整 Topic 对象)。
   onOpenTopicById: (topicId: number) => void = () => {};
@@ -475,11 +478,16 @@ export struct HomePage {
     })
   }
 
-  // 顶栏搜索入口:放大镜图标,点击从当前页融合展开搜索浮层(由 RootTabPage 承载)。
+  // 顶栏搜索入口:放大镜图标,点击一镜到底展开搜索浮层(由 RootTabPage 承载)。
+  // 浮层可见时把源图标 if 掉(几何交给浮层前导图标),二者同 geometryTransition id、由同一 animateTo 驱动插值。
   @Builder
   private SearchButton() {
     Button() {
-      FaIconView({ icon: this.searchIcon(), color: $r('app.color.text_primary'), iconSize: 20 })
+      if (!this.searchOverlayVisible) {
+        FaIconView({ icon: this.searchIcon(), color: $r('app.color.text_primary'), iconSize: 20 })
+          .geometryTransition(SEARCH_ICON_GEOMETRY_ID, { follow: true })
+          .transition(TransitionEffect.OPACITY)
+      }
     }
     .width(42)
     .height(42)

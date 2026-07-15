@@ -25,6 +25,8 @@ const MAX_SEARCH_PAGE: number = 10;
 // 浮层不进 Navigation 栈,系统返回键需由 @Entry 拦截:可见时 bump BACK_TICK,RootTabPage 监听后关闭。
 export const SEARCH_OVERLAY_VISIBLE_KEY: string = 'searchOverlayVisible';
 export const SEARCH_OVERLAY_BACK_TICK_KEY: string = 'searchOverlayBackTick';
+// 一镜到底共享元素 id:顶栏放大镜(源)与浮层前导放大镜(目标)标同一 id,由 openSearch 的 animateTo 插值。
+export const SEARCH_ICON_GEOMETRY_ID: string = 'arkdo-search-icon';
 
 // 帖子搜索浮层:从当前页融合展开(不走 Navigation push)。顶部搜索条 + 下方历史/结果。
 // 键盘避让走系统 RESIZE(输入框在顶、结果区自动收缩),无需像评论浮层那样手动监听 avoidAreaChange。
@@ -49,8 +51,6 @@ export struct SearchOverlay {
   @State private hasSearched: boolean = false;
   @State private errorMessage: string = '';
   @State private requiresChallenge: boolean = false;
-  // 进场轻微下落:配合调用处的整体淡入,读作"从顶栏融合展开"。
-  @State private enterOffsetY: number = 10;
   private currentPage: number = 1;
   private debounceTimer: number = -1;
   // 请求序号:边打字边搜时丢弃过期响应(只认最后一次)。
@@ -103,13 +103,7 @@ export struct SearchOverlay {
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.page_bg'))
-    .translate({ y: this.enterOffsetY })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-    .onAppear(() => {
-      this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
-        this.enterOffsetY = 0;
-      });
-    })
   }
 
   @Builder
@@ -117,7 +111,10 @@ export struct SearchOverlay {
     Row({ space: 8 }) {
       // 输入容器:放大镜 + 输入框 + 清除。
       Row({ space: 8 }) {
+        // 一镜到底目标:与顶栏源图标同 geometryTransition id,浮层出现时由源飞入至此。
         FaIconView({ icon: this.searchIcon(), color: $r('app.color.text_tertiary'), iconSize: 16 })
+          .geometryTransition(SEARCH_ICON_GEOMETRY_ID, { follow: true })
+          .transition(TransitionEffect.OPACITY)
 
         TextInput({ text: $$this.query, placeholder: '搜索帖子…' })
           .id(INPUT_FOCUS_ID)

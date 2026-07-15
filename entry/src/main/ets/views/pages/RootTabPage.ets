@@ -736,15 +736,17 @@ export struct RootTabPage {
   // 搜索浮层开关:animateTo 驱动 .transition 淡入/淡出;同时镜像可见态到 AppStorage,
   // 供 Index @Entry 的 onBackPress 判断是否拦截系统返回键。
   private openSearch(): void {
-    AppStorage.setOrCreate(SEARCH_OVERLAY_VISIBLE_KEY, true);
-    this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+    // 可见态切换放进 animateTo 闭包:顶栏源图标(HomePage @StorageProp 驱动移除)与浮层目标图标
+    // 的出现进同一动画事务,geometryTransition 才能配对并插值(一镜到底)。
+    this.getUIContext().animateTo({ duration: 280, curve: Curve.Friction }, () => {
+      AppStorage.setOrCreate(SEARCH_OVERLAY_VISIBLE_KEY, true);
       this.showSearchOverlay = true;
     });
   }
 
   private closeSearch(): void {
-    AppStorage.setOrCreate(SEARCH_OVERLAY_VISIBLE_KEY, false);
-    this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseIn }, () => {
+    this.getUIContext().animateTo({ duration: 260, curve: Curve.Friction }, () => {
+      AppStorage.setOrCreate(SEARCH_OVERLAY_VISIBLE_KEY, false);
       this.showSearchOverlay = false;
     });
   }
