@@ -267,10 +267,10 @@ export struct ProfilePage {
 
       // 卡片 2:快捷入口
       Row() {
-        this.QuickEntryNative($r('sys.symbol.eye'), '已读', false, () => {
+        this.QuickEntryNative($r('sys.symbol.arrow_counterclockwise_clock'), '浏览历史', false, () => {
           this.onOpenReadTopics();
         })
-        this.QuickEntryNative($r('sys.symbol.bookmark'), '书签', false, () => {
+        this.QuickEntryNative($r('sys.symbol.bookmark'), '我的书签', false, () => {
           if (this.getUsername().length > 0) {
             this.onOpenBookmarks(this.getUsername());
           }
@@ -280,7 +280,7 @@ export struct ProfilePage {
             this.onOpenActivity(this.getUsername(), '1', '我的点赞');
           }
         })
-        this.QuickEntry($r('sys.symbol.square_and_pencil'), '草稿', this.getDraftCount(), false, false,
+        this.QuickEntry($r('sys.symbol.square_and_pencil'), '我的草稿', this.getDraftCount(), false, false,
           `/u/${this.getUsername()}/activity/drafts`)
       }
       .padding({ top: CARD_PADDING, bottom: 14 })
