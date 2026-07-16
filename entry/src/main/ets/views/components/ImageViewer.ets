@@ -10,6 +10,11 @@ export interface ViewerImage {
   fallbackUrl: string;
 }
 
+// 预览可见态镜像 + 系统返回键信号:浮层不进 Navigation 栈,返回键由 Index @Entry 拦截并
+// bump 计数,经 RootTabPage 以 @Param 传入本组件消费(非首图翻回上一张,首图才关闭)。
+export const IMAGE_VIEWER_VISIBLE_KEY: string = 'imageViewerVisible';
+export const IMAGE_VIEWER_BACK_TICK_KEY: string = 'imageViewerBackTick';
+
 const MIN_SCALE: number = 1;
 const MAX_SCALE: number = 4;
 const DOUBLE_TAP_SCALE: number = 2.5;
@@ -31,6 +36,8 @@ export struct ImageViewer {
   @Param images: ViewerImage[] = [];
   @Param startIndex: number = 0;
   @Param onClose: () => void = () => {};
+  // 系统返回键信号计数(Index 拦截后 bump):非首图翻回上一张,首图关闭预览。
+  @Param backTick: number = 0;
 
   @Local currentIndex: number = 0;
   @Local failedIndexes: number[] = [];
@@ -44,6 +51,18 @@ export struct ImageViewer {
   // 未放大(≈1)才放行拖动关闭；放大后禁用，把竖直拖动让给库的图片平移。
   @Local scaleGuess: number = 1;
   private pinchBase: number = 1;
+  // 返回键翻页用控制器:showPrevious 带切换动画并触发 onChange(直接改 .index 无动画)。
+  private swiperController: SwiperController = new SwiperController();
+
+  // 返回键:非首图翻回上一张(动画翻页,onChange 会同步 currentIndex 并重置缩放估计),首图关闭。
+  @Monitor('backTick')
+  onBackTick(): void {
+    if (this.currentIndex > 0) {
+      this.swiperController.showPrevious();
+      return;
+    }
+    this.onClose();
+  }
 
   aboutToAppear(): void {
     this.currentIndex = this.clampIndex(this.startIndex);
@@ -54,7 +73,7 @@ export struct ImageViewer {
 
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
-      Swiper() {
+      Swiper(this.swiperController) {
         Repeat<ViewerImage>(this.images).each((ri: RepeatItem<ViewerImage>) => {
           ImagePreview({
             config: {

@@ -27,7 +27,12 @@ import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { LoginGate } from '../../services/session/LoginGate';
 import { ArkWebHost } from '../components/ArkWebHost';
 import { MathRenderHost } from '../components/MathRenderHost';
-import { ImageViewer, ViewerImage } from '../components/ImageViewer';
+import {
+  IMAGE_VIEWER_BACK_TICK_KEY,
+  IMAGE_VIEWER_VISIBLE_KEY,
+  ImageViewer,
+  ViewerImage
+} from '../components/ImageViewer';
 import { SEARCH_OVERLAY_BACK_TICK_KEY, SEARCH_OVERLAY_VISIBLE_KEY, SearchOverlay } from '../components/SearchOverlay';
 import { ensureFaIconsLoaded } from '../components/FaIcon';
 import { ensureTagIconsLoaded } from '../components/TagIconRegistry';
@@ -73,6 +78,8 @@ export struct RootTabPage {
   @State private showImageViewer: boolean = false;
   @State private viewerImages: ViewerImage[] = [];
   @State private viewerStartIndex: number = 0;
+  // 预览返回键信号:Index @Entry 拦截后 bump,经 @Param 透传给 ImageViewer(翻回上一张/首图关闭)。
+  @StorageProp(IMAGE_VIEWER_BACK_TICK_KEY) private viewerBackTick: number = 0;
   // 主窗口引用:图片预览期间隐藏/恢复状态栏用(打开时获取,关闭后释放)。
   // 窗口常驻全屏布局(ImmersiveWindow):状态栏避让下沉到各页面的顶层内容容器
   // (padding 加在带页面背景色的容器上,背景自然填满状态栏条且颜色逐页正确);
@@ -207,6 +214,7 @@ export struct RootTabPage {
         ImageViewer({
           images: this.viewerImages,
           startIndex: this.viewerStartIndex,
+          backTick: this.viewerBackTick,
           onClose: () => {
             this.closeImageViewer();
           }
@@ -306,6 +314,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
+      // 图片预览打开时优先消费返回键:预览从详情页打开,Navigation 栈非空,系统返回键
+      // 先到达栈顶 NavDestination(轮不到 Index @Entry 的 onBackPress),不拦会直接弹掉详情页。
+      .onBackPressed(() => this.consumeViewerBack())
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
       .backgroundColor($r('app.color.page_bg'))
@@ -843,6 +854,8 @@ export struct RootTabPage {
   private openImageViewer(images: ViewerImage[], startIndex: number): void {
     this.viewerImages = images;
     this.viewerStartIndex = startIndex;
+    // 镜像可见态:预览打开期间系统返回键由 Index @Entry 拦截(翻回上一张/首图关闭)。
+    AppStorage.setOrCreate(IMAGE_VIEWER_VISIBLE_KEY, true);
     // 先暂停插图同步再隐藏,归零事件不落到背景 padding 上。
     ImmersiveWindow.suppressInsetSync(true);
     window.getLastWindow(getContext(this)).then((win: window.Window) => {
@@ -858,7 +871,19 @@ export struct RootTabPage {
     });
   }
 
+  // 图片预览打开时消费返回键:bump 信号计数,交 ImageViewer 决定翻回上一张还是关闭;
+  // 未打开时返回 false 放行默认 pop。挂在详情页 NavDestination 的 onBackPressed 上。
+  private consumeViewerBack(): boolean {
+    if (!this.showImageViewer) {
+      return false;
+    }
+    const prev: number = (AppStorage.get(IMAGE_VIEWER_BACK_TICK_KEY) as number | undefined) ?? 0;
+    AppStorage.setOrCreate(IMAGE_VIEWER_BACK_TICK_KEY, prev + 1);
+    return true;
+  }
+
   private closeImageViewer(): void {
+    AppStorage.setOrCreate(IMAGE_VIEWER_VISIBLE_KEY, false);
     const win: window.Window | undefined = this.viewerWindow;
     if (win !== undefined) {
       // 恢复状态栏显示;图标色统一走 ImmersiveWindow 按当前主题基线恢复。

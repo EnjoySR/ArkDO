@@ -402,7 +402,7 @@ export struct TopicDetailPage {
       .height(52)
       .backgroundColor(REPLY_BLUE)
       .shadow({ radius: 8, color: '#33000000', offsetX: 0, offsetY: 2 })
-      .margin({ right: 16, bottom: 8 })
+      .margin({ right: 16, bottom: 16 })
       // 不对称过渡:出现(关闭浮层后)淡入;消失(打开浮层时)立即移除,被同时淡入的遮罩盖住,毫无痕迹。
       .transition(TransitionEffect.asymmetric(
         TransitionEffect.OPACITY.animation({ duration: 150, curve: Curve.EaseOut }),
