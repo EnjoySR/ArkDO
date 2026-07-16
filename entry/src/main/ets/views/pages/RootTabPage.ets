@@ -1,7 +1,7 @@
 import { Log } from '../../services/logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { APP_IS_WIDE_STORAGE_KEY, BreakpointManager } from '../../common/utils/BreakpointManager';
-import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildTopicDetailRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isTopicDetailRouteParam, isWebRouteParam, LevelProgressRouteParam, TopicDetailRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -41,6 +41,8 @@ import { BookmarksPage } from './BookmarksPage';
 import { ActivityListPage } from './ActivityListPage';
 import { ReadTopicsPage } from './ReadTopicsPage';
 import { BadgesPage } from './BadgesPage';
+import { UserProfilePage } from './UserProfilePage';
+import { SolvedPostsPage } from './SolvedPostsPage';
 import { TopicDetailPage } from './TopicDetailPage';
 import { WebViewPage } from './WebViewPage';
 
@@ -289,6 +291,9 @@ export struct RootTabPage {
           },
           onOpenLink: (url: string) => {
             this.handleOpenLink(url);
+          },
+          onOpenUser: (user: User) => {
+            this.openUserProfileFor(user);
           }
         })
       }
@@ -527,6 +532,62 @@ export struct RootTabPage {
           badgeCount: (param as BadgesRouteParam).badgeCount,
           onBack: () => {
             this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.USER_PROFILE && isUserProfileRouteParam(param)) {
+      NavDestination() {
+        UserProfilePage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as UserProfileRouteParam).username,
+          seedDisplayName: (param as UserProfileRouteParam).displayName ?? '',
+          seedAvatarTemplate: (param as UserProfileRouteParam).avatarTemplate ?? '',
+          seedUserId: (param as UserProfileRouteParam).userId ?? 0,
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
+            this.openTopicDetailById(topicId, undefined, title, postNumber, postNumber !== undefined);
+          },
+          onOpenActivity: (username: string, filter: string, title: string) => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.ACTIVITY, buildActivityRouteParam(username, filter, title)));
+          },
+          onOpenBadges: (username: string, badgeCount: number) => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.BADGES, buildBadgesRouteParam(username, badgeCount)));
+          },
+          onOpenSolved: (username: string, solvedCount: number) => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.SOLVED, buildSolvedRouteParam(username, solvedCount)));
+          },
+          // 互动圈头像可点:递归 push 同一路由,栈自然记住来路。
+          onOpenUser: (username: string, displayName: string, avatarTemplate: string, userId: number) => {
+            this.openUserProfile(username, displayName, avatarTemplate, userId);
+          },
+          onOpenWeb: (url: string, title?: string) => {
+            this.openWebPage(url, title);
+          }
+        })
+      }
+      .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.SOLVED && isSolvedRouteParam(param)) {
+      NavDestination() {
+        SolvedPostsPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as SolvedRouteParam).username,
+          solvedCount: (param as SolvedRouteParam).solvedCount,
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
+            this.openTopicDetailById(topicId, undefined, title, postNumber, postNumber !== undefined);
           }
         })
       }
@@ -864,6 +925,30 @@ export struct RootTabPage {
 
   private openProfilePage(): void {
     this.navPathStack.pushPath(new NavPathInfo(AppRouteName.PROFILE, buildProfileRouteParam('homeAvatar')));
+  }
+
+  // 他人主页:点任意头像(帖子作者、互动圈、通知等)进来。
+  // displayName/avatarTemplate 由调用方顺手透传,资料请求回来前先渲染,避免首屏跳动。
+  // 点自己的头像不进这里——「我的」页有登出/设置/草稿,是另一个页面。
+  private openUserProfile(username: string, displayName: string, avatarTemplate: string, userId: number): void {
+    if (username.length === 0) {
+      return;
+    }
+    if (this.currentUser !== undefined && username === this.currentUser.username) {
+      this.openProfilePage();
+      return;
+    }
+    this.navPathStack.pushPath(new NavPathInfo(AppRouteName.USER_PROFILE,
+      buildUserProfileRouteParam(username, displayName, avatarTemplate, userId)));
+  }
+
+  // 从 User 对象开头像入口:各处调用点手里拿的都是 User,省得每处都拆字段。
+  private openUserProfileFor(user?: User): void {
+    if (!user || user.username.length === 0) {
+      return;
+    }
+    this.openUserProfile(user.username, user.displayName ? user.displayName : '',
+      user.avatarTemplate ? user.avatarTemplate : '', user.id);
   }
 
   private getAnonymousUser(): User {
