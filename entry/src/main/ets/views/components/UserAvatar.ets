@@ -10,40 +10,34 @@ export struct UserAvatar {
   avatarSize: number = 38;
   private readonly avatarImageSize: string = '96';
   private readonly avatarBorderColor: string = '#4D00AEFF';
-  // 经 host webview 取回并解码的静态头像。主站 avatar_template 走系统栈会被 SNI 封锁,只能喂 PixelMap(单帧)。
+  // 当前使用的头像候选下标:动图(0)加载失败 → 静态(1)→ 都失败(>=候选数)回退首字母。
+  @State private avatarSourceIndex: number = 0;
+  // 主站(linux.do)被 SNI 封锁的头像经 host webview 过盾取回并解码的 PixelMap(单帧,静态)。
+  // ldstatic.com CDN 上的头像不封,走原生 Image 直载(且 .png 实为动图内容时会自动播放),不落此字段。
   @State private avatarPixelMap: image.PixelMap | undefined = undefined;
-  // 动图头像(animated_avatar,在未被封的 CDN 上)原生 Image 直载即可自动播 GIF;
-  // 过桥解码成 PixelMap 只会取到首帧变静态,故动图不过桥。原生加载失败才置真回退桥取静态。
-  @State private animatedFailed: boolean = false;
   // 图片型 flair(gif/png,跨源 CDN)同头像走桥取 PixelMap;图标型 flair(FA 名)不用。
   // flair 角标只在稍大的头像上显示,避免 20px 的回复/boost 小头像被角标糊住。
   private readonly flairMinAvatarSize: number = 32;
 
   aboutToAppear(): void {
-    // 有动图头像时走原生 Image(自动播 GIF),不预取;仅无动图时经桥取静态头像。
-    if (!this.shouldUseNativeAnimated()) {
-      this.loadStaticAvatar();
-    }
+    this.prepareCurrentCandidate();
   }
 
   build() {
     // 外层 Stack:头像本体铺满,flair 角标对齐右下角。
     Stack() {
       Stack() {
-        if (this.shouldUseNativeAnimated()) {
-          // 动图头像:跨源 CDN(s3.ldstatic.com,非被封主站),原生 Image 直载且自动播 GIF。
-          // 若该 URL 意外不可直载(如被封/失效),onError 置真回退到桥取的静态头像。
-          Image(this.animatedAvatarUrl())
+        if (this.useNativeImage()) {
+          // CDN(ldstatic.com)头像不被封,原生 Image 直载;若该 URL 实为动图内容(如动图 .png/gif)则自动播放。
+          // 原生加载失败(如 URL 失效)→ onError 退到下一候选。
+          Image(this.currentAvatarUrl())
             .width(this.avatarSize)
             .height(this.avatarSize)
             .borderRadius(this.avatarBorderRadius())
             .objectFit(ImageFit.Cover)
             .backgroundColor($r('app.color.surface_muted'))
             .draggable(false)
-            .onError(() => {
-              this.animatedFailed = true;
-              this.loadStaticAvatar();
-            })
+            .onError(() => this.advanceCandidate())
         } else if (this.avatarPixelMap) {
           Image(this.avatarPixelMap)
             .width(this.avatarSize)
@@ -108,14 +102,26 @@ export struct UserAvatar {
     .offset({ x: this.flairOverhang(), y: this.flairOverhang() })
   }
 
-  // 经 host webview 取静态头像(主站 avatar_template,被 SNI 封需过盾)并解码成 PixelMap。
-  // 命中缓存直接显示;取不到则保持首字母占位。动图头像不走此路(见 build 原生分支)。
-  private async loadStaticAvatar(): Promise<void> {
-    const url: string = this.staticAvatarUrl();
-    if (url.length === 0) {
-      this.avatarPixelMap = undefined;
+  // 按当前候选准备显示:CDN 头像交给原生 Image 自行加载(见 build 原生分支),
+  // 主站被封头像经 host webview 过盾取字节解码成 PixelMap。
+  private prepareCurrentCandidate(): void {
+    const url: string = this.currentAvatarUrl();
+    if (url.length === 0 || this.isNativeHost(url)) {
       return;
     }
+    this.loadViaBridge(url);
+  }
+
+  // 当前候选取不到 → 退到下一候选(动图失败退静态);无更多候选则保持首字母占位。
+  private advanceCandidate(): void {
+    if (this.avatarSourceIndex + 1 < this.avatarCandidates().length) {
+      this.avatarSourceIndex += 1;
+      this.prepareCurrentCandidate();
+    }
+  }
+
+  // 主站被封头像经 host webview 取字节并解码成 PixelMap(单帧)。命中缓存直接显示;取不到退下一候选。
+  private async loadViaBridge(url: string): Promise<void> {
     const cache: AvatarImageCache = AvatarImageCache.getInstance();
     const cached: image.PixelMap | undefined = cache.getCached(url);
     if (cached) {
@@ -125,7 +131,9 @@ export struct UserAvatar {
     const pixelMap: image.PixelMap | undefined = await cache.load(url);
     if (pixelMap) {
       this.avatarPixelMap = pixelMap;
+      return;
     }
+    this.advanceCandidate();
   }
 
   // 是否展示 flair 角标:头像够大 + 有 flairUrl;图片型直接展示(原生 Image 异步加载),图标型需字库里有该图标。
@@ -208,27 +216,38 @@ export struct UserAvatar {
     return this.avatarSize / 2;
   }
 
-  // 是否走原生动图分支:有 animated_avatar 且原生尚未失败。
-  private shouldUseNativeAnimated(): boolean {
-    return !this.animatedFailed && this.animatedAvatarUrl().length > 0;
+  // 当前候选是否走原生 Image:候选 URL 在未被封的 CDN(ldstatic.com)上。
+  private useNativeImage(): boolean {
+    const url: string = this.currentAvatarUrl();
+    return url.length > 0 && this.isNativeHost(url);
   }
 
-  // 动图头像 URL(animated_avatar,通常已是 //cdn 绝对地址,无 {size} 占位)。
-  private animatedAvatarUrl(): string {
+  // ldstatic.com CDN(含 cdn/s3 等子域)不被 SNI 封锁,原生 Image 可直载并自动播放动图内容;
+  // 主站 linux.do 被封,须经 host webview 过桥取 PixelMap。
+  private isNativeHost(url: string): boolean {
+    return url.includes('ldstatic.com');
+  }
+
+  private currentAvatarUrl(): string {
+    const candidates: string[] = this.avatarCandidates();
+    if (this.avatarSourceIndex < candidates.length) {
+      return candidates[this.avatarSourceIndex];
+    }
+    return '';
+  }
+
+  // 优先动图(animated_avatar),失败回退静态(avatar_template)。
+  private avatarCandidates(): string[] {
+    const candidates: string[] = [];
     const animatedAvatar: string | undefined = this.user?.animatedAvatar;
     if (animatedAvatar && animatedAvatar.length > 0) {
-      return this.resolveAvatarUrl(animatedAvatar);
+      candidates.push(this.resolveAvatarUrl(animatedAvatar));
     }
-    return '';
-  }
-
-  // 静态头像 URL(avatar_template,主站被 SNI 封,须过桥)。
-  private staticAvatarUrl(): string {
     const avatarTemplate: string | undefined = this.user?.avatarTemplate;
     if (avatarTemplate && avatarTemplate.length > 0) {
-      return this.resolveAvatarUrl(avatarTemplate);
+      candidates.push(this.resolveAvatarUrl(avatarTemplate));
     }
-    return '';
+    return candidates;
   }
 
   private resolveAvatarUrl(rawAvatar: string): string {
