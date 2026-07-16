@@ -10,23 +10,41 @@ export struct UserAvatar {
   avatarSize: number = 38;
   private readonly avatarImageSize: string = '96';
   private readonly avatarBorderColor: string = '#4D00AEFF';
-  // 当前使用的头像候选下标:动图(0)加载失败 → 静态(1)→ 都失败(>=候选数)回退首字母。
-  @State private avatarSourceIndex: number = 0;
-  // 经 host webview 取回并解码的头像。原生 Image 走系统栈会被 SNI 封锁,只能喂 PixelMap。
+  // 经 host webview 取回并解码的静态头像。主站 avatar_template 走系统栈会被 SNI 封锁,只能喂 PixelMap(单帧)。
   @State private avatarPixelMap: image.PixelMap | undefined = undefined;
+  // 动图头像(animated_avatar,在未被封的 CDN 上)原生 Image 直载即可自动播 GIF;
+  // 过桥解码成 PixelMap 只会取到首帧变静态,故动图不过桥。原生加载失败才置真回退桥取静态。
+  @State private animatedFailed: boolean = false;
   // 图片型 flair(gif/png,跨源 CDN)同头像走桥取 PixelMap;图标型 flair(FA 名)不用。
   // flair 角标只在稍大的头像上显示,避免 20px 的回复/boost 小头像被角标糊住。
   private readonly flairMinAvatarSize: number = 32;
 
   aboutToAppear(): void {
-    this.loadCurrent();
+    // 有动图头像时走原生 Image(自动播 GIF),不预取;仅无动图时经桥取静态头像。
+    if (!this.shouldUseNativeAnimated()) {
+      this.loadStaticAvatar();
+    }
   }
 
   build() {
     // 外层 Stack:头像本体铺满,flair 角标对齐右下角。
     Stack() {
       Stack() {
-        if (this.avatarPixelMap) {
+        if (this.shouldUseNativeAnimated()) {
+          // 动图头像:跨源 CDN(s3.ldstatic.com,非被封主站),原生 Image 直载且自动播 GIF。
+          // 若该 URL 意外不可直载(如被封/失效),onError 置真回退到桥取的静态头像。
+          Image(this.animatedAvatarUrl())
+            .width(this.avatarSize)
+            .height(this.avatarSize)
+            .borderRadius(this.avatarBorderRadius())
+            .objectFit(ImageFit.Cover)
+            .backgroundColor($r('app.color.surface_muted'))
+            .draggable(false)
+            .onError(() => {
+              this.animatedFailed = true;
+              this.loadStaticAvatar();
+            })
+        } else if (this.avatarPixelMap) {
           Image(this.avatarPixelMap)
             .width(this.avatarSize)
             .height(this.avatarSize)
@@ -90,10 +108,10 @@ export struct UserAvatar {
     .offset({ x: this.flairOverhang(), y: this.flairOverhang() })
   }
 
-  // 取当前候选头像:命中缓存直接显示;否则异步经 host webview 取。当前候选失败则退到下一候选,
-  // 全部候选失败则维持首字母占位。
-  private async loadCurrent(): Promise<void> {
-    const url: string = this.currentAvatarUrl();
+  // 经 host webview 取静态头像(主站 avatar_template,被 SNI 封需过盾)并解码成 PixelMap。
+  // 命中缓存直接显示;取不到则保持首字母占位。动图头像不走此路(见 build 原生分支)。
+  private async loadStaticAvatar(): Promise<void> {
+    const url: string = this.staticAvatarUrl();
     if (url.length === 0) {
       this.avatarPixelMap = undefined;
       return;
@@ -107,12 +125,6 @@ export struct UserAvatar {
     const pixelMap: image.PixelMap | undefined = await cache.load(url);
     if (pixelMap) {
       this.avatarPixelMap = pixelMap;
-      return;
-    }
-    // 当前候选取不到 → 尝试下一候选(动图失败退静态);无更多候选则保持首字母。
-    if (this.avatarSourceIndex + 1 < this.avatarCandidates().length) {
-      this.avatarSourceIndex += 1;
-      await this.loadCurrent();
     }
   }
 
@@ -196,26 +208,27 @@ export struct UserAvatar {
     return this.avatarSize / 2;
   }
 
-  private currentAvatarUrl(): string {
-    const candidates: string[] = this.avatarCandidates();
-    if (this.avatarSourceIndex < candidates.length) {
-      return candidates[this.avatarSourceIndex];
+  // 是否走原生动图分支:有 animated_avatar 且原生尚未失败。
+  private shouldUseNativeAnimated(): boolean {
+    return !this.animatedFailed && this.animatedAvatarUrl().length > 0;
+  }
+
+  // 动图头像 URL(animated_avatar,通常已是 //cdn 绝对地址,无 {size} 占位)。
+  private animatedAvatarUrl(): string {
+    const animatedAvatar: string | undefined = this.user?.animatedAvatar;
+    if (animatedAvatar && animatedAvatar.length > 0) {
+      return this.resolveAvatarUrl(animatedAvatar);
     }
     return '';
   }
 
-  // 优先动图(animated_avatar),失败回退静态(avatar_template)。
-  private avatarCandidates(): string[] {
-    const candidates: string[] = [];
-    const animatedAvatar: string | undefined = this.user?.animatedAvatar;
-    if (animatedAvatar && animatedAvatar.length > 0) {
-      candidates.push(this.resolveAvatarUrl(animatedAvatar));
-    }
+  // 静态头像 URL(avatar_template,主站被 SNI 封,须过桥)。
+  private staticAvatarUrl(): string {
     const avatarTemplate: string | undefined = this.user?.avatarTemplate;
     if (avatarTemplate && avatarTemplate.length > 0) {
-      candidates.push(this.resolveAvatarUrl(avatarTemplate));
+      return this.resolveAvatarUrl(avatarTemplate);
     }
-    return candidates;
+    return '';
   }
 
   private resolveAvatarUrl(rawAvatar: string): string {
