@@ -767,7 +767,9 @@ export struct TopicPostItem {
       }
     }
     .width('100%')
-    .margin({ top: 2 })
+    // 楼底是"上次访问"红线时:红线绝对定位骑在楼底分界线上,文字会向上侵入本楼,
+    // boost 行多留 8 下间距避免被红线文字贴住;普通 1px 灰线无需额外留白。
+    .margin({ top: 2, bottom: this.showLastVisitedLine ? 8 : 0 })
   }
 
   // 火箭入口:点击上抛给页面打开 boost 输入浮层。两处复用(操作行内 38/0 / boost 列表末尾 28/6)。
