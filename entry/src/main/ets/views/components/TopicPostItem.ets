@@ -1,6 +1,7 @@
 import { Log } from '../../services/logging/Log';
 import { curves } from '@kit.ArkUI';
 import { AcceptedAnswer, Poll, PollVoteResult, PostBoost, PostReaction, SharedIssueResult, TopicPost } from '../../models/TopicDetail';
+import { User } from '../../models/User';
 import { CookedHtmlParser, RichInlineNode, RichInlineType } from '../../services/content/CookedHtmlParser';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { ReactionMutation } from '../../services/topic/ReactionMutation';
@@ -87,6 +88,9 @@ export struct TopicPostItem {
   onReply: (post: TopicPost) => void = () => {};
   // 点火箭:把整条 post 上抛给页面,由页面打开 boost 输入浮层。
   onAddBoost: (post: TopicPost) => void = () => {};
+  // 点头像/昵称进他人主页。挂在头像与昵称各自身上而非外层 Row——
+  // 本 SDK 无 stopPropagation,外层挂了会与「回复别人」指示器的 onClick 冒泡打架。
+  onOpenUser: (user: User) => void = () => {};
   // 投票/撤销:把整条 post 与目标 poll 上抛给页面做乐观闭环。返回服务端校正结果;null=失败。
   onVote: (post: TopicPost, poll: Poll, optionIds: string[]) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
   onRemoveVote: (post: TopicPost, poll: Poll) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
@@ -230,7 +234,7 @@ export struct TopicPostItem {
       .alignItems(HorizontalAlign.Start)
       // 渐隐终点必须是同色系零透明度(#00+同色):Color.Transparent 是透明黑,
       // RGBA 逐通道插值时中间帧会过路半透明灰(蓝→灰→消失的成因)。
-      // 深色主题用深蓝高亮 #16283C(浅蓝在深底上刺眼),终点同为其零透明度变体。
+      // 深色主题用深蓝高亮 #13202D(浅蓝在深底上刺眼),终点同为其零透明度变体。
       .backgroundColor(this.flashBg())
       .animation({ duration: 600, curve: Curve.EaseOut })
     }
@@ -266,6 +270,9 @@ export struct TopicPostItem {
     Row() {
       UserAvatar({ user: this.post.author, avatarSize: 40 })
         .margin({ right: 12 })
+        .onClick(() => {
+          this.openUser(this.post.author);
+        })
 
       // 昵称(+ 状态表情、徽章)在上,姓名 + 称号一行在下。
       Column() {
@@ -278,6 +285,9 @@ export struct TopicPostItem {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .flexShrink(1)
+            .onClick(() => {
+              this.openUser(this.post.author);
+            })
 
           // 状态表情(user_status.emoji,如棒棒糖)——具名表情图片,经 EmojiUrlRegistry 查 url。
           if (this.statusEmojiUrl().length > 0) {
@@ -471,6 +481,9 @@ export struct TopicPostItem {
               Row() {
                 UserAvatar({ user: reply.author, avatarSize: 40 })
                   .margin({ right: 12 })
+                  .onClick(() => {
+                    this.openUser(reply.author);
+                  })
 
                 Column() {
                   // 昵称 + 用户名一行。
@@ -481,6 +494,9 @@ export struct TopicPostItem {
                       .fontColor($r('app.color.text_primary'))
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .onClick(() => {
+                        this.openUser(reply.author);
+                      })
 
                     if (this.replyUsername(reply).length > 0) {
                       Text(this.replyUsername(reply))
@@ -1114,10 +1130,10 @@ export struct TopicPostItem {
   }
 
   // 落地高亮底色:高亮态用同色系不透明,渐隐终点用同色系零透明度(避免过路灰)。
-  // 深色主题换深蓝 #16283C(浅蓝在深底刺眼),明色沿用 #E8F1FE。
+  // 深色主题换深蓝 #13202D(更贴近页面底色 #17191D,#16283C 在深底上仍偏亮),明色沿用 #E8F1FE。
   private flashBg(): string {
     if (this.appIsDark) {
-      return this.flashActive ? '#16283C' : '#0016283C';
+      return this.flashActive ? '#13202D' : '#0013202D';
     }
     return this.flashActive ? '#E8F1FE' : '#00E8F1FE';
   }
@@ -1180,6 +1196,14 @@ export struct TopicPostItem {
       return false;
     }
     return this.lastReadPostNumber >= 0 && this.post.postNumber <= this.lastReadPostNumber;
+  }
+
+  // 点头像/昵称进他人主页。作者缺失(接口偶发不给)时静默忽略,不弹错。
+  private openUser(user?: User): void {
+    if (!user || user.username.length === 0) {
+      return;
+    }
+    this.onOpenUser(user);
   }
 
   private getAuthorName(): string {
