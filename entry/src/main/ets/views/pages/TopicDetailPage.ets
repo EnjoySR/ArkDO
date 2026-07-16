@@ -2,6 +2,7 @@ import { Log } from '../../services/logging/Log';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
 import { Poll, PollVoteResult, PostBoost, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { TopicCategory, TopicTag } from '../../models/Topic';
+import { User } from '../../models/User';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
@@ -126,6 +127,8 @@ export struct TopicDetailPage {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击上抛给根导航:站内帖子链接跳原生详情,其余打开通用 WebView。
   onOpenLink: (url: string) => void = () => {};
+  // 点楼层作者头像/昵称上抛给根导航,进他人主页。
+  onOpenUser: (user: User) => void = () => {};
   private categoryIndex: CategoryIndex = new CategoryIndex();
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
@@ -240,6 +243,9 @@ export struct TopicDetailPage {
           },
           onAddBoost: (targetPost: TopicPost) => {
             this.openComposerForBoost(targetPost);
+          },
+          onOpenUser: (user: User) => {
+            this.onOpenUser(user);
           },
           onJumpToPost: (postNumber: number): Promise<void> => {
             return this.jumpToPostNumber(postNumber);

@@ -11,6 +11,10 @@ export enum AppRouteName {
   BADGES = 'badges',
   READ_TOPICS = 'readTopics',
   SITES = 'sites',
+  // 他人主页:点任意头像进这里。PROFILE 是「我的」页,与本页无关(那页混着登出/设置/草稿)。
+  USER_PROFILE = 'userProfile',
+  // 他被采纳为解决方案的回复列表,入口是他人主页统计格里的「解决方案」。
+  SOLVED = 'solved',
   // 双栏(平板横屏)下右详情栏的空占位:未选帖子时垫在栈底,让右栏不空白。仅宽屏使用。
   PLACEHOLDER = 'placeholder'
 }
@@ -121,6 +125,56 @@ export function isBadgesRouteParam(param: Object | undefined): boolean {
     return false;
   }
   const candidate: BadgesRouteParam = param as BadgesRouteParam;
+  return typeof candidate.username === 'string' && candidate.username.length > 0;
+}
+
+// 他人主页参数:username 是取数的唯一 key(/u/{username}.json 等全按它取)。
+// displayName/avatarTemplate 由点击来源(帖子作者、互动圈头像等)顺手透传:
+// 资料请求回来前身份区就能先画出名字和头像,避免首屏跳动。缺省则等 detail。
+export interface UserProfileRouteParam {
+  username: string;
+  displayName?: string;
+  avatarTemplate?: string;
+  // 点击来源的用户 id 一并透传:头像形状按 id 决定(id===1 方形圆角,其余圆形),
+  // 种子缺 id 会先以 0 渲染成圆形、detail 回来再变方形,导致 Neo(id=1)头像圆→方闪一下。
+  userId?: number;
+}
+
+export function buildUserProfileRouteParam(username: string, displayName?: string, avatarTemplate?: string, userId?: number): UserProfileRouteParam {
+  return {
+    username: username,
+    displayName: displayName,
+    avatarTemplate: avatarTemplate,
+    userId: userId
+  };
+}
+
+export function isUserProfileRouteParam(param: Object | undefined): boolean {
+  if (!param) {
+    return false;
+  }
+  const candidate: UserProfileRouteParam = param as UserProfileRouteParam;
+  return typeof candidate.username === 'string' && candidate.username.length > 0;
+}
+
+// 解决方案列表参数:目标用户名 + 总数(用于标题「解决方案 · N」,0 表示未知)。
+export interface SolvedRouteParam {
+  username: string;
+  solvedCount: number;
+}
+
+export function buildSolvedRouteParam(username: string, solvedCount: number): SolvedRouteParam {
+  return {
+    username: username,
+    solvedCount: solvedCount
+  };
+}
+
+export function isSolvedRouteParam(param: Object | undefined): boolean {
+  if (!param) {
+    return false;
+  }
+  const candidate: SolvedRouteParam = param as SolvedRouteParam;
   return typeof candidate.username === 'string' && candidate.username.length > 0;
 }
 

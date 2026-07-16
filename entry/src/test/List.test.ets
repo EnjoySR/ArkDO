@@ -14,6 +14,7 @@ import topicBadgesTest from './TopicBadges.test';
 import themeManagerTest from './ThemeManager.test';
 import reactionMutationTest from './ReactionMutation.test';
 import userProfileServiceTest from './UserProfileService.test';
+import userRelationServiceTest from './UserRelationService.test';
 import categoryIndexTest from './CategoryIndex.test';
 import bookmarkServiceTest from './BookmarkService.test';
 
@@ -33,6 +34,7 @@ export default function testsuite() {
   topicBadgesTest();
   themeManagerTest();
   userProfileServiceTest();
+  userRelationServiceTest();
   categoryIndexTest();
   bookmarkServiceTest();
 }
