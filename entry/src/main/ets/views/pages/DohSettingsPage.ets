@@ -286,7 +286,6 @@ export struct DohSettingsPage {
       .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
     }
     .cardStyle()
-    .margin({ top: 0 })
   }
 
   @Builder
