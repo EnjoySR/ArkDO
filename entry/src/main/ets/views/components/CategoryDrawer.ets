@@ -3,6 +3,7 @@ import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
 import { SiteDef } from '../../services/site/SitePrefs';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { getCategoryColor, getCategoryIcon, getCategoryLogo, resolveBadgeAssetUrl } from './TopicBadgeUtils';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const ROW_HEIGHT: number = 48;
 const COLOR_BAR_WIDTH: number = 4;
@@ -23,6 +24,8 @@ interface CategoryRowParams {
  */
 @Component
 export struct CategoryDrawer {
+  // 窗口常驻全屏布局:抽屉高度铺满物理屏,内容自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   // 分类异步加载,@Prop 才能在父组件更新后同步进抽屉(普通成员变量只在创建时赋值一次)。
   @Prop categories: TopicCategory[] = [];
   @Prop isLoggedIn: boolean = false;
@@ -114,6 +117,7 @@ export struct CategoryDrawer {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }

@@ -7,6 +7,7 @@ import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { UserProfileService } from '../../services/user/UserProfileService';
 import { TopicMetadataBadges } from '../components/TopicBadges';
 import { UserAvatar } from '../components/UserAvatar';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][ActivityListPage]';
 const PAGE_PADDING: number = 16;
@@ -17,6 +18,8 @@ const AVATAR_SIZE: number = 40;
 // 数据源统一为 /user_actions.json,按 offset 翻页。
 @Component
 export struct ActivityListPage {
+  // 窗口常驻全屏布局:根列自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: JsonNetworkClient | undefined = undefined;
   isArkWebReady: boolean = false;
   username: string = '';
@@ -75,6 +78,7 @@ export struct ActivityListPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }

@@ -5,6 +5,7 @@ import { JsonNetworkClient, NetworkResult } from '../../services/network/Network
 import { UserProfileService } from '../../services/user/UserProfileService';
 import { BadgeTile, badgeTypeColor } from '../components/BadgeTile';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][BadgesPage]';
 const PAGE_PADDING: number = 16;
@@ -15,6 +16,8 @@ const BADGES_PER_ROW: number = 3;
 // 与摘要接口同源,走同一 bridge 过盾。按金/银/铜分组,点击单枚弹出说明。
 @Component
 export struct BadgesPage {
+  // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: JsonNetworkClient | undefined = undefined;
   isArkWebReady: boolean = false;
   username: string = '';
@@ -76,6 +79,7 @@ export struct BadgesPage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.sysTopInset })
     }
     .width('100%')
     .height('100%')

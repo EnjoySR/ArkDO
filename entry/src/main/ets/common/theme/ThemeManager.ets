@@ -2,6 +2,7 @@ import { Log } from '../../services/logging/Log';
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { mediaquery } from '@kit.ArkUI';
+import { ImmersiveWindow } from '../utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][Theme]';
 const PREF_STORE_NAME: string = 'app_settings';
@@ -132,5 +133,7 @@ export class ThemeManager {
         break;
     }
     AppStorage.setOrCreate(APP_IS_DARK_STORAGE_KEY, dark);
+    // 常驻全屏布局下系统栏图标色不随颜色模式自动翻转,须随主题手动同步(深色浅图标、浅色深图标)。
+    ImmersiveWindow.applyBarContentColor(dark);
   }
 }

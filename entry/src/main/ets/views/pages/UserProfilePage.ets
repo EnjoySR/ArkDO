@@ -29,6 +29,7 @@ import { getEmojiUrl } from '../components/EmojiUrlRegistry';
 import { HolographicText } from '../components/HolographicText';
 import { BadgeTile } from '../components/BadgeTile';
 import { UserAvatar } from '../components/UserAvatar';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][UserProfile]';
 
@@ -62,6 +63,8 @@ const SEGMENT_RECENT: number = 2;
 // 书签(私有 403)、草稿/设置/登出(他人视角无意义)。故不复用「我的」页而单独成页。
 @Component
 export struct UserProfilePage {
+  // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   username: string = '';
@@ -158,6 +161,7 @@ export struct UserProfilePage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.sysTopInset })
     }
     .width('100%')
     .height('100%')

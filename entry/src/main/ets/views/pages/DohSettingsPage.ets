@@ -2,6 +2,7 @@ import { Log } from '../../services/logging/Log';
 import { common } from '@kit.AbilityKit';
 import { DohManager, DohResolveMode, DohServer } from '../../services/network/DohManager';
 import { DohSpeedTester, DohTestResult } from '../../services/network/DohSpeedTester';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][DohPage]';
 
@@ -131,6 +132,8 @@ struct AddDohDialog {
  */
 @Component
 export struct DohSettingsPage {
+  // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   onBack: () => void = () => {};
   // 切换/开关/删除导致生效变更后回调:由上层重载宿主 webview,让新 DNS 立即用于解析。
   onDohApplied: () => void = () => {};
@@ -210,6 +213,7 @@ export struct DohSettingsPage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.sysTopInset })
     }
     .width('100%')
     .height('100%')

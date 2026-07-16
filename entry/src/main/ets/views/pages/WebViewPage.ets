@@ -4,6 +4,7 @@ import { image } from '@kit.ImageKit';
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][WebViewPage]';
 
@@ -11,6 +12,8 @@ const LOG_TAG: string = '[ArkDO][WebViewPage]';
 // 复用 App 全局 CookieManager(与 host webview 同源),站内链接可带登录态。
 @Component
 export struct WebViewPage {
+  // 窗口常驻全屏布局:根列自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   url: string = '';
   pageTitle: string = '';
   onBack: () => void = () => {};
@@ -96,6 +99,7 @@ export struct WebViewPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }

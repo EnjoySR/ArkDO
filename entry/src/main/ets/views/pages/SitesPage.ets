@@ -2,6 +2,7 @@ import { Log } from '../../services/logging/Log';
 import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
 import { SiteIconStore } from '../../services/site/SiteIconStore';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][SitesPage]';
 
@@ -170,6 +171,8 @@ struct SiteEditDialog {
  */
 @Component
 export struct SitesPage {
+  // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   onBack: () => void = () => {};
   // 打开站点:交给 RootTabPage push 通用 WebView 页(与帖子外链同一条链路)。siteId 用于缓存该站 favicon。
   onOpenSite: (url: string, title: string, siteId: string) => void = () => {};
@@ -248,6 +251,7 @@ export struct SitesPage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.sysTopInset })
     }
     .width('100%')
     .height('100%')

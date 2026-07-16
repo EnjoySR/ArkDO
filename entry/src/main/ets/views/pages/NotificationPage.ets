@@ -5,12 +5,15 @@ import { NotificationEventBus } from '../../services/notification/NotificationEv
 import { LoginGate } from '../../services/session/LoginGate';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
 import { NotificationListItem } from '../components/NotificationListItem';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][NotificationPage]';
 const PAGE_SIZE: number = 30;
 
 @Component
 export struct NotificationPage {
+  // 窗口常驻全屏布局:根列自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: JsonNetworkClient | undefined = undefined;
   isArkWebReady: boolean = false;
   onBack: () => void = () => {};
@@ -76,6 +79,7 @@ export struct NotificationPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }

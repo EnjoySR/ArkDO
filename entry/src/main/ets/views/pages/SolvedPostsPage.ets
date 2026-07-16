@@ -6,6 +6,7 @@ import { JsonNetworkClient, NetworkResult } from '../../services/network/Network
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { UserProfileService } from '../../services/user/UserProfileService';
 import { TopicMetadataBadges } from '../components/TopicBadges';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][SolvedPostsPage]';
 const PAGE_PADDING: number = 16;
@@ -18,6 +19,8 @@ const PAGE_PADDING: number = 16;
 // 一模一样的他的头像是纯噪音(官网就是这么做的),去掉后省下宽度给答案正文。
 @Component
 export struct SolvedPostsPage {
+  // 窗口常驻全屏布局:根列自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: JsonNetworkClient | undefined = undefined;
   isArkWebReady: boolean = false;
   username: string = '';
@@ -75,6 +78,7 @@ export struct SolvedPostsPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }

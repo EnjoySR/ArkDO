@@ -3,6 +3,7 @@ import webview from '@ohos.web.webview';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 import { CONNECT_EXTRACT_SCRIPT, ConnectLevelParser } from '../../services/connect/ConnectLevelParser';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import {
   ConnectBarItem,
   ConnectLevelData,
@@ -48,6 +49,8 @@ enum LoadPhase {
  */
 @Component
 export struct LevelProgressPage {
+  // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   @Prop isLoggedIn: boolean = false;
   onBack: () => void = () => {};
   // 兜底:解析失败时可在内置浏览器直接打开 connect.linux.do。
@@ -141,6 +144,7 @@ export struct LevelProgressPage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.sysTopInset })
       .backgroundColor($r('app.color.page_bg_gray'))
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     }

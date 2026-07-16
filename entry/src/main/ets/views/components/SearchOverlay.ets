@@ -10,6 +10,7 @@ import { SearchHistoryStore } from '../../services/search/SearchHistoryStore';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { TopicListItem } from './TopicListItem';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][Search]';
 // 搜索输入框焦点 id:挂载后 requestFocus 弹软键盘。
@@ -32,6 +33,8 @@ export const SEARCH_ICON_GEOMETRY_ID: string = 'arkdo-search-icon';
 // 键盘避让走系统 RESIZE(输入框在顶、结果区自动收缩),无需像评论浮层那样手动监听 avoidAreaChange。
 @Component
 export struct SearchOverlay {
+  // 窗口常驻全屏布局:浮层根列铺满整屏,搜索栏自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   isArkWebReady: boolean = false;
   onClose: () => void = () => {};
@@ -102,6 +105,7 @@ export struct SearchOverlay {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }

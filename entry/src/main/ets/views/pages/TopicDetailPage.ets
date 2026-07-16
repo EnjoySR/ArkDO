@@ -19,9 +19,9 @@ import { TopicSummaryCard } from '../components/TopicSummaryCard';
 import { TopicPostItem } from '../components/TopicPostItem';
 import { ViewerImage } from '../components/ImageViewer';
 import { CommentInputBar, NO_MAX_CHARS, REPLY_BLUE } from '../components/CommentInputBar';
-import { ComposerWindowGuard } from '../components/ComposerWindowGuard';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { TopicScrubber } from '../components/TopicScrubber';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
@@ -33,14 +33,17 @@ const POSTS_CACHED_COUNT: number = 4;
 const EARLIER_PREFETCH_INDEX: number = 10;
 // 顶部"正在加载/定位"悬浮胶囊开关:暂时隐藏(产品观感待定),置 true 即恢复。
 const SHOW_LOADING_CAPSULE: boolean = false;
-// 提交成功的 toast 延后到浮层完全收场(遮罩淡出 220ms、退全屏 240ms、键盘收起约 270ms)之后再弹,
-// 否则 toast 存活期横跨键盘收起与退全屏两次布局变化,会被重新锚定而在屏幕上跳一下。
+// 提交成功的 toast 延后到浮层完全收场(遮罩淡出 220ms、键盘收起约 270ms)之后再弹,
+// 否则 toast 存活期横跨键盘收起的布局变化,会被重新锚定而在屏幕上跳一下。
 const SUCCESS_TOAST_DELAY_MS: number = 350;
 // boost 正文上限:服务端 16 字,超一个字就是不带原因的 422({"failed":"FAILED"}),故在客户端先拦。
 const BOOST_MAX_CHARS: number = 16;
 
 @Component
 export struct TopicDetailPage {
+  // 窗口常驻全屏布局:主内容列自行避让状态栏(padding 在带背景的列上,背景填满状态栏条);
+  // 评论浮层/遮罩留在根 Stack 层不加避让,天然盖满整屏。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   @State @Watch('syncTopicBookmarkFromDetail') private detail: TopicDetail | undefined = undefined;
   // 标题书签图标的独立驱动态:detail 是 interface 的 @State,改字段不触发重渲染,故用基元 @State 镜像。
   // detail 整体加载/替换时经 @Watch 从 detail.bookmarked 同步;楼层 toggle 收藏后由回调直接改写实现即时联动。
@@ -89,22 +92,15 @@ export struct TopicDetailPage {
   // 补上短楼场景下"首楼映射够不到底"的末段行程;末尾项滚出视口即撤销。用 onReachEnd 而非"末楼可见"
   // 作触发——后者末楼冒出 1px 就误判到底,超长末楼会翻车;onReachEnd 是与楼高无关的真·触底信号。
   @State private atListEnd: boolean = false;
-  // 评论输入浮层是否展开(点右下角悬浮回复按钮打开)。展开时由 ComposerWindowGuard 切全屏布局
-  // (让浮层遮罩盖住状态栏、输入条贴键盘上沿),并给主内容补一个状态栏高度的顶部内边距抵消整体上移。
-  @State @Watch('onComposerToggle') private showComposer: boolean = false;
-  // 全屏布局标志:与 showComposer 分开,关闭时守卫延迟到淡出动画结束再落下,避免状态栏先露白。
-  // 主内容的顶部补偿内边距也绑定它,始终与全屏同步,免得关闭途中背景跳动。
-  @State private composerFullScreen: boolean = false;
+  // 评论输入浮层是否展开(点右下角悬浮回复按钮打开)。窗口常驻全屏布局(ImmersiveWindow),
+  // 浮层遮罩经 expandSafeArea 天然盖住状态栏,不再需要临时切窗口模式与背景补偿。
+  @State private showComposer: boolean = false;
   // 定向回复目标楼号:0 = 回复整个话题(顶层);>0 = 回复该楼(带 reply_to_post_number)。
   @State private replyTargetPostNumber: number = 0;
   // 输入框占位文字:回复话题「回复当前话题」/回复某楼「回复<昵称>」/发 boost「发一个 boost…」。
   @State private composerPlaceholder: string = '回复当前话题';
   // boost 输入目标楼 id:0 = 当前浮层是普通回复;>0 = 当前浮层是给该楼发 boost。
   @State private boostTargetPostId: number = 0;
-  // 评论浮层的全屏窗口守卫:全屏开关经回调同步回 @State composerFullScreen。
-  private composerWindowGuard: ComposerWindowGuard = new ComposerWindowGuard((on: boolean) => {
-    this.composerFullScreen = on;
-  });
   // 帖子列表滚动控制器:供「回复别人」指示器 / 被回复列表「跳到帖子」按 postNumber 定位楼层。
   private scroller: Scroller = new Scroller();
   param: TopicDetailRouteParam = {
@@ -162,13 +158,6 @@ export struct TopicDetailPage {
       this.loadSiteMetadataIfNeeded();
       this.loadTopicDetail();
     }
-
-    // 读主窗口与状态栏高度,供评论浮层展开时切全屏 + 补偿背后位移。
-    this.composerWindowGuard.init(getContext(this));
-  }
-
-  private onComposerToggle(): void {
-    this.composerWindowGuard.toggle(this.showComposer);
   }
 
   aboutToDisappear(): void {
@@ -184,9 +173,6 @@ export struct TopicDetailPage {
       this.unsubscribeLoginState();
       this.unsubscribeLoginState = undefined;
     }
-
-    // 清掉待触发的退出全屏计时器;若仍处于全屏(评论浮层未正常关闭),兜底还原布局。
-    this.composerWindowGuard.dispose();
 
     if (this.flashClearTimerId >= 0) {
       clearTimeout(this.flashClearTimerId);
@@ -385,16 +371,14 @@ export struct TopicDetailPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
-    // 全屏时(composerFullScreen)主内容会整体上移一个状态栏高度;补等高顶部内边距抵消,背后视觉不动。
-    // 绑 composerFullScreen 而非 showComposer:关闭时全屏延后落下,补偿也随之延后,避免关闭途中背景跳。
-    .padding({ top: this.composerFullScreen ? this.composerWindowGuard.statusBarHeight : 0 })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
     // 右缘楼层 scrubber:话题够长(最高楼 > 1)且浮层未展开时挂载,拖动直接跳楼。
     // 覆盖层自身透明、只在右缘 Slider 处拦截触摸,不影响正文滚动。
     if (this.detail && this.getHighestPostNumber() > 1 && this.listScrollable
-      && !this.showComposer && !this.composerFullScreen) {
+      && !this.showComposer) {
       TopicScrubber({
         currentPostNumber: this.currentPostNumber,
         highestPostNumber: this.getHighestPostNumber(),
@@ -404,10 +388,9 @@ export struct TopicDetailPage {
       })
     }
 
-    // 右下角悬浮回复按钮:仅在帖子已加载、浮层未展开且全屏布局已还原时显示。
-    // 必须一并绑定 composerFullScreen:关闭浮层时退全屏延迟 240ms,期间根 Stack 底边仍延伸到
-    // 导航条区域,锚在底边的按钮会先出现在偏下位置、退全屏后再跳回(用户反馈的"闪回" BUG)。
-    if (this.detail && !this.showComposer && !this.composerFullScreen) {
+    // 右下角悬浮回复按钮:仅在帖子已加载且浮层未展开时显示。
+    // 窗口常驻全屏布局后不再有临时切换,按钮锚点全程稳定,无需再绑全屏标志防"闪回"。
+    if (this.detail && !this.showComposer) {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         FaIconView({
           icon: this.replyFabIcon(),
@@ -420,9 +403,7 @@ export struct TopicDetailPage {
       .backgroundColor(REPLY_BLUE)
       .shadow({ radius: 8, color: '#33000000', offsetX: 0, offsetY: 2 })
       .margin({ right: 16, bottom: 8 })
-      // 不对称过渡:出现(关闭浮层后)淡入;消失(打开浮层时)立即移除。
-      // 消失不能加动画——退场中的节点不参与布局、也没有全屏补偿,会被同帧的全屏切换
-      // 拖着上移一个状态栏高度再淡掉;瞬间移除则被同时淡入的遮罩盖住,毫无痕迹。
+      // 不对称过渡:出现(关闭浮层后)淡入;消失(打开浮层时)立即移除,被同时淡入的遮罩盖住,毫无痕迹。
       .transition(TransitionEffect.asymmetric(
         TransitionEffect.OPACITY.animation({ duration: 150, curve: Curve.EaseOut }),
         TransitionEffect.IDENTITY
@@ -454,7 +435,7 @@ export struct TopicDetailPage {
     }
 
     // 评论输入浮层:内联挂在根 Stack 顶层(而非 contentCover),这样组件 getLastWindow 拿到主窗口、
-    // 能稳定收到键盘高度事件把输入条顶到键盘上方;组件内部临时切全屏布局让遮罩盖住状态栏。
+    // 能稳定收到键盘高度事件把输入条顶到键盘上方;窗口常驻全屏布局,遮罩经 expandSafeArea 盖住状态栏。
     if (this.showComposer) {
       CommentInputBar({
         placeholder: this.composerPlaceholder,
@@ -743,7 +724,7 @@ export struct TopicDetailPage {
     }
   }
 
-  // 提交成功后浮层随即关闭(键盘收起+退全屏),提示延后到收场结束再弹,避免 toast 被重新锚定而跳动。
+  // 提交成功后浮层随即关闭(键盘收起),提示延后到收场结束再弹,避免 toast 被重新锚定而跳动。
   // 失败提示不延迟:浮层保持展开、键盘不收,不存在布局变化。
   private showToastAfterComposerClose(message: string, duration: number): void {
     setTimeout(() => {

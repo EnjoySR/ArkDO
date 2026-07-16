@@ -1,5 +1,5 @@
 import { ImagePreview, PreviewDirection } from '@rv/image-preview';
-import window from '@ohos.window';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 /**
  * 一张待浏览的图片：url 为首选（原图 href，高清），优化图作为兜底。
@@ -47,20 +47,9 @@ export struct ImageViewer {
 
   aboutToAppear(): void {
     this.currentIndex = this.clampIndex(this.startIndex);
-    this.resolveTopInset();
-  }
-
-  // 查询系统状态栏高度（沉浸式全屏下让关闭按钮不被状态栏遮挡）
-  private resolveTopInset(): void {
-    try {
-      window.getLastWindow(getContext(this)).then((win: window.Window) => {
-        const area: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-        this.topInset = px2vp(area.topRect.height);
-      }).catch(() => {
-      });
-    } catch (err) {
-      this.topInset = 0;
-    }
+    // 状态栏高度读全局插图(ImmersiveWindow 维护):预览打开时状态栏可能已被隐藏,
+    // 此刻查 getWindowAvoidArea 会得 0,关闭按钮就会顶进挖孔/刘海区;AppStorage 里是冻结的真实高度。
+    this.topInset = (AppStorage.get(SYS_TOP_INSET_KEY) as number | undefined) ?? 0;
   }
 
   build() {

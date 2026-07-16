@@ -4,6 +4,7 @@ import { JsonNetworkClient, NetworkResult } from '../../services/network/Network
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { TopicListItem } from '../components/TopicListItem';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][ReadTopicsPage]';
 
@@ -11,6 +12,8 @@ const LOG_TAG: string = '[ArkDO][ReadTopicsPage]';
 // 只回当前登录用户读过的主题、按最近阅读排序。响应是标准 topic_list,整行复用首页 TopicListItem。
 @Component
 export struct ReadTopicsPage {
+  // 窗口常驻全屏布局:根列自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: JsonNetworkClient | undefined = undefined;
   isArkWebReady: boolean = false;
   onBack: () => void = () => {};
@@ -70,6 +73,7 @@ export struct ReadTopicsPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }

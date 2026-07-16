@@ -6,6 +6,7 @@ import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import { DohManager, DohServer } from '../../services/network/DohManager';
 import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
 import { SitePrefs } from '../../services/site/SitePrefs';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
 
@@ -24,6 +25,8 @@ const CARD_GAP: number = 12;
 // 设置与诊断日志:从个人中心页拆出的独立子页,由个人中心右上角齿轮入口 push 进入。
 @Component
 export struct SettingsPage {
+  // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   onBack: () => void = () => {};
   onOpenDoh: () => void = () => {};
   // 打开站内 Web 页:关于弹框里"开发者 @JoeyYin"跳 linux.do 个人资料页复用此链路,由 RootTabPage 注入。
@@ -170,6 +173,7 @@ export struct SettingsPage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.sysTopInset })
     }
     .width('100%')
     .height('100%')

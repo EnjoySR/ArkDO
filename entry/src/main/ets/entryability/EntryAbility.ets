@@ -6,6 +6,7 @@ import { window } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
 import { ThemeManager } from '../common/theme/ThemeManager';
 import { BreakpointManager } from '../common/utils/BreakpointManager';
+import { ImmersiveWindow } from '../common/utils/ImmersiveWindow';
 import { DohManager } from '../services/network/DohManager';
 import { FileLogger } from '../services/logging/FileLogger';
 import { AppStateEventBus } from '../services/session/AppStateEventBus';
@@ -56,6 +57,14 @@ export default class EntryAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
     // Main window is created, set main page for this ability
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
+
+    // 常驻沉浸式:loadContent 前就切全屏布局并同步系统栏插图高度,首帧即按最终布局渲染,
+    // 避免"先非全屏渲染一帧再跳全屏"的冷启动闪动。详见 ImmersiveWindow 注释。
+    try {
+      ImmersiveWindow.init(windowStage.getMainWindowSync());
+    } catch (err) {
+      hilog.error(DOMAIN, 'testTag', 'immersive init failed: %{public}s', JSON.stringify(err));
+    }
 
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {

@@ -6,6 +6,9 @@ import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/L
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
 import { common } from '@kit.AbilityKit';
+import window from '@ohos.window';
+import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
+import { ImmersiveWindow } from '../../common/utils/ImmersiveWindow';
 import { Topic } from '../../models/Topic';
 import { User } from '../../models/User';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
@@ -70,6 +73,11 @@ export struct RootTabPage {
   @State private showImageViewer: boolean = false;
   @State private viewerImages: ViewerImage[] = [];
   @State private viewerStartIndex: number = 0;
+  // 主窗口引用:图片预览期间隐藏/恢复状态栏用(打开时获取,关闭后释放)。
+  // 窗口常驻全屏布局(ImmersiveWindow):状态栏避让下沉到各页面的顶层内容容器
+  // (padding 加在带页面背景色的容器上,背景自然填满状态栏条且颜色逐页正确);
+  // 页面内遮罩/浮层留在未加 padding 的层级,天然盖满物理屏。此处 Navigation 不加任何避让。
+  private viewerWindow?: window.Window = undefined;
   // 帖子搜索浮层:根 Stack 顶层内联渲染(不进 Navigation 栈),由首页搜索图标触发。
   @State private showSearchOverlay: boolean = false;
   // 系统返回键信号:浮层不进导航栈,返回键由 Index @Entry 拦截并 bump 此计数,这里监听后关闭浮层。
@@ -828,15 +836,39 @@ export struct RootTabPage {
   }
 
   // 图片浏览器开关:详情页经 onOpenImages 回调冒泡上来触发。animateTo 驱动 .transition 淡入/淡出。
+  // 窗口常驻全屏布局(ImmersiveWindow),浮层在 Navigation 之外天然铺满物理屏——无须切窗口模式、
+  // 无须背景补偿。这里只做一件窗口级小事:预览期间隐藏状态栏(时间/电量不印在图上),关闭时恢复。
+  // 全屏布局下系统栏显隐不引起任何布局变化,且隐藏触发的插图归零事件被 suppress 丢弃,
+  // 背景 padding 全程一个值,不存在可闪的重排。
   private openImageViewer(images: ViewerImage[], startIndex: number): void {
     this.viewerImages = images;
     this.viewerStartIndex = startIndex;
+    // 先暂停插图同步再隐藏,归零事件不落到背景 padding 上。
+    ImmersiveWindow.suppressInsetSync(true);
+    window.getLastWindow(getContext(this)).then((win: window.Window) => {
+      this.viewerWindow = win;
+      win.setWindowSystemBarEnable(['navigation']).catch(() => {});
+      // 底部手势条图标改白,黑底上可见。
+      win.setWindowSystemBarProperties({
+        navigationBarContentColor: '#FFFFFF'
+      }).catch(() => {});
+    }).catch(() => {});
     this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
       this.showImageViewer = true;
     });
   }
 
   private closeImageViewer(): void {
+    const win: window.Window | undefined = this.viewerWindow;
+    if (win !== undefined) {
+      // 恢复状态栏显示;图标色统一走 ImmersiveWindow 按当前主题基线恢复。
+      win.setWindowSystemBarEnable(['status', 'navigation']).catch(() => {});
+      const dark: boolean = (AppStorage.get(APP_IS_DARK_STORAGE_KEY) as boolean | undefined) ?? false;
+      ImmersiveWindow.applyBarContentColor(dark);
+      this.viewerWindow = undefined;
+    }
+    // 恢复插图同步:状态栏重新出现触发的 avoidAreaChange 会把插图写回(与预览前同值,padding 不动)。
+    ImmersiveWindow.suppressInsetSync(false);
     this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
       this.showImageViewer = false;
     });

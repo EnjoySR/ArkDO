@@ -22,6 +22,7 @@ import { UserProfileService } from '../../services/user/UserProfileService';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { BadgeTile } from '../components/BadgeTile';
 import { UserAvatar } from '../components/UserAvatar';
+import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
 
@@ -41,6 +42,8 @@ const USER_META_HEIGHT: number = 26;
 
 @Component
 export struct ProfilePage {
+  // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
+  @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   // 登录态由 RootTabPage 统一维护(会话事件 + 前台轮询),本页只接收,不再自己查
@@ -160,6 +163,7 @@ export struct ProfilePage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.sysTopInset })
     }
     .width('100%')
     .height('100%')
