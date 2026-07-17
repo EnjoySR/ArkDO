@@ -98,7 +98,7 @@ export struct TopicDetailHeader {
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
-    .height(60)
+    .height(56)
     .padding({ left: 16, right: 16 })
     .backgroundColor($r('app.color.page_bg'))
     .border({
