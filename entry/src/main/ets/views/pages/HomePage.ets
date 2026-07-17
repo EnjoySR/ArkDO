@@ -33,8 +33,8 @@ const DRAWER_WIDTH: number = 288;
 // 别让用户第一时间就把自己拽进全屏验证页。
 const MANUAL_VERIFY_DELAY_MS: number = 6000;
 
-// 版本公告弹窗:开发阶段每次启动都弹方便调试;开发完把它改成 false,同一版本只弹一次。
-const ANNOUNCE_ALWAYS_SHOW: boolean = true;
+// 版本公告弹窗:true=每次启动都弹(调试用);false=同一版本只弹一次(上线值)。
+const ANNOUNCE_ALWAYS_SHOW: boolean = false;
 // 诊断关键字:hilog / DevEco Log 里搜 ANNOUNCE_DIAG 看公告全链路日志。
 const ANNOUNCE_DIAG: string = '[ArkDO][ANNOUNCE_DIAG]';
 // 记「已弹过的 versionCode」的偏好 key(全项目共用 'app_settings' 库)。
