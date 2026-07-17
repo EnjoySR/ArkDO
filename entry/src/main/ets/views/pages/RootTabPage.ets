@@ -760,12 +760,18 @@ export struct RootTabPage {
   }
 
   // 统一的链接点击入口:经 LinkRouter 判断——站内帖子链接提取 topicId 跳原生详情页,
-  // 其余(外站、站内非帖子页)一律打开通用 WebView。
+  // 站内用户主页链接(含正文 @提及)跳原生他人主页,其余(外站、站内其他页)一律打开通用 WebView。
   private handleOpenLink(url: string): void {
     const target: LinkTarget = LinkRouter.resolve(url);
     if (target.kind === LinkTargetKind.TOPIC && target.topicId !== undefined) {
       Log.i(`${LOG_TAG} link -> native topic detail topicId=${target.topicId}`);
       this.openTopicDetailById(target.topicId);
+      return;
+    }
+    if (target.kind === LinkTargetKind.USER && target.username !== undefined) {
+      Log.i(`${LOG_TAG} link -> native user profile username=${target.username}`);
+      // 资料由主页自己按 username 拉,这里没有 displayName/头像可透传。
+      this.openUserProfile(target.username, '', '', 0);
       return;
     }
     if (target.kind === LinkTargetKind.DOWNLOAD) {
