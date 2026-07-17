@@ -14,3 +14,5 @@
 AGENTS.md
 docs/superpowers/
 .superpowers/
+# 设计稿本地化:HTML 原型 / 架构设计文档只在本地,不进版本控制。
+design/
