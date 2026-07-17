@@ -64,6 +64,9 @@ export interface RichInlineNode {
   attachment?: boolean;
   // 行内剧透(<span class="spoiler">):揭示前渲染为涂抹条,点击后显示。
   spoiler?: boolean;
+  // 段落分隔用的换行(仅 LINE_BREAK):由 mergeAdjacentParagraphs 在合并的相邻段落之间插入,
+  // 渲染成双换行空行营造段距。与 <br> 普通换行区分,后者仍是单换行。
+  paragraphBreak?: boolean;
 }
 
 export interface RichListItem {
@@ -252,7 +255,29 @@ export class CookedHtmlParser {
   static parse(html: string): RichBlock[] {
     const source: string = html ? html : '';
     const blocks: RichBlock[] = CookedHtmlParser.parseBlocks(source);
-    return blocks.filter((block: RichBlock) => CookedHtmlParser.hasBlockContent(block));
+    const visible: RichBlock[] = blocks.filter((block: RichBlock) => CookedHtmlParser.hasBlockContent(block));
+    return CookedHtmlParser.mergeAdjacentParagraphs(visible);
+  }
+
+  // 把相邻的纯文本段落(PARAGRAPH)合并进同一段,块之间插入 paragraphBreak 换行。原因:每个 PARAGRAPH
+  // 渲染成一个独立 Text,而 ArkUI 的 Text 选区是组件私有的,跨 Text 无法连续选中/复制。合并后连续
+  // 正文段落进同一个 Text,长按可一路选到底(参考帖 2.x 用 <br> 同段能连选、3.x 另起 <p> 就断)。
+  // 只合并相邻 PARAGRAPH;标题/图片/引用/列表/代码/onebox 等非文本块天然隔断,跨它们仍不可连选。
+  private static mergeAdjacentParagraphs(blocks: RichBlock[]): RichBlock[] {
+    const out: RichBlock[] = [];
+    for (let i: number = 0; i < blocks.length; i++) {
+      const block: RichBlock = blocks[i];
+      const prev: RichBlock | undefined = out.length > 0 ? out[out.length - 1] : undefined;
+      if (block.type === RichBlockType.PARAGRAPH && block.inlines &&
+        prev && prev.type === RichBlockType.PARAGRAPH && prev.inlines) {
+        const separator: RichInlineNode = { type: RichInlineType.LINE_BREAK, text: '\n', paragraphBreak: true };
+        const merged: RichInlineNode[] = prev.inlines.concat([separator], block.inlines);
+        out[out.length - 1] = { type: RichBlockType.PARAGRAPH, inlines: merged };
+      } else {
+        out.push(block);
+      }
+    }
+    return out;
   }
 
   static toPlainText(html: string): string {
@@ -903,6 +928,18 @@ export class CookedHtmlParser {
 
     const appendText = (raw: string): void => {
       let text: string = CookedHtmlParser.decodeHtmlEntities(raw);
+      if (text.length === 0) {
+        return;
+      }
+      // HTML 语义:源码里的换行/缩进/连续空格是不可见排版空白,浏览器折叠成单个空格。此前解析器
+      // 原样保留,导致 <br> 后紧跟的源码换行(<br>\n2.1)多出一个真换行,<br> 行距凭空翻倍。
+      // 折叠这类空白(nbsp   不在其列,予以保留)。
+      text = text.replace(/[ \t\r\n\f]+/g, ' ');
+      // 段首及 <br>/段落换行之后的行首空白不可见,去掉,避免每行多一个前导空格。
+      const prevNode: RichInlineNode | undefined = out.length > 0 ? out[out.length - 1] : undefined;
+      if (!prevNode || prevNode.type === RichInlineType.LINE_BREAK) {
+        text = text.replace(/^ /, '');
+      }
       if (text.length === 0) {
         return;
       }

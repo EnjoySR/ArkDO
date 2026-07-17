@@ -386,7 +386,12 @@ export struct PostRichContent {
           this.openLink(token.href ? token.href : token.src as string);
         })
     } else if (token.type === RichInlineType.LINE_BREAK) {
-      Span('\n')
+      // 段落分隔:双换行造一个实打实的空行拉开段距(lineHeight 撑换行符不生效)。段内 <br> 折行仍单换行 22。
+      if (token.paragraphBreak) {
+        Span('\n\n')
+      } else {
+        Span('\n')
+      }
     } else if (token.type === RichInlineType.LINK && token.href && token.href.length > 0) {
       if (token.attachment) {
         // 附件下载链接:前置下载图标(与官方一致),图标与文字同为一个可点区域。
@@ -972,6 +977,8 @@ export struct PostRichContent {
         Row() {
           Text(block.ordered ? `${index + 1}.` : '•')
             .fontSize(15)
+            // 行高对齐正文的 22:否则圆点 Text 默认行高偏矮,Row 顶对齐下圆点被顶到第一行文字上方。
+            .lineHeight(22)
             .fontColor($r('app.color.text_secondary'))
             .width(24)
 
