@@ -258,8 +258,9 @@ export struct RootTabPage {
           },
           onOpenTopic: (topic: Topic) => {
             // 先关浮层再进详情:详情页正常 push 滑入,返回即回到首页(浮层已关)。
+            // 浮层只从左栏入口打开,选中结果等同于「换一帖」而非「深入一层」,故与左栏同路。
             this.closeSearch();
-            this.openTopicDetail(topic);
+            this.selectTopicFromMaster(topic.id, topic.slug, topic.title);
           }
         })
           .transition(
@@ -843,13 +844,13 @@ export struct RootTabPage {
         this.openSearch();
       },
       onTopicClick: (topic: Topic) => {
-        this.openTopicDetail(topic);
+        this.selectTopicFromMaster(topic.id, topic.slug, topic.title);
       },
       onOpenTopicById: (topicId: number) => {
-        this.openTopicDetailById(topicId);
+        this.selectTopicFromMaster(topicId);
       },
       onOpenTopicAtPost: (topic: Topic, postNumber: number) => {
-        this.openTopicDetailById(topic.id, topic.slug, topic.title, postNumber);
+        this.selectTopicFromMaster(topic.id, topic.slug, topic.title, postNumber);
       },
       onOpenSites: () => {
         this.navPathStack.pushPath(new NavPathInfo(AppRouteName.SITES, buildSitesRouteParam('drawer')));
@@ -900,6 +901,56 @@ export struct RootTabPage {
       AppRouteName.TOPIC_DETAIL,
       buildTopicDetailRouteParam(topicId, slug, title ? title : '', targetPostNumber, highlightTarget)
     ));
+  }
+
+  // 左栏(navBar)发起的选帖。宽屏 Split 下左栏与右栏并排常驻、列表一直可点,若沿用 push
+  // 就是每点一次往右栏摞一层([占位,详情,详情,…]),返回键要按十几次才退得出,且旧详情页
+  // 连同各自的 Web / 公式引擎全悬着不释放。故宽屏改走「清回占位基座 + 压入新详情」:
+  // 栈深恒为 2,点一百次也是 2,返回一次即回占位空态。
+  // 窄屏(手机 / 平板竖屏)是 Stack 单栏,详情盖满屏、左栏根本点不到,原样 push,与改前完全一致。
+  private selectTopicFromMaster(topicId: number, slug?: string, title?: string, targetPostNumber?: number, highlightTarget?: boolean): void {
+    if (!this.appIsWide) {
+      this.openTopicDetailById(topicId, slug, title, targetPostNumber, highlightTarget);
+      return;
+    }
+    // 点的就是右栏正显示的那一帖 → 短路。否则白白重建详情页:Web 重载、滚动位置归零。
+    if (this.isTopicOnTop(topicId, targetPostNumber)) {
+      return;
+    }
+    Log.i(`${LOG_TAG} master select topicId=${topicId} target=${targetPostNumber ?? 0} depth=${this.navPathStack.size()}`);
+    this.resetWideContentToPlaceholder();
+    // 两次栈操作同帧合并,占位页拿不到渲染机会,不会闪;分栏换选中项本也不该有推入动效。
+    this.navPathStack.pushPath(new NavPathInfo(
+      AppRouteName.TOPIC_DETAIL,
+      buildTopicDetailRouteParam(topicId, slug, title ? title : '', targetPostNumber, highlightTarget)
+    ), false);
+  }
+
+  // 把右栏清成只剩占位基座。占位不在栈里(竖屏期间被 removeByName 清掉、转回横屏时 size()≠0
+  // 未补垫的遗留栈)则就地重建——反正本就要整个换掉右栏内容,顺手自愈这条路径。
+  private resetWideContentToPlaceholder(): void {
+    const baseIndex: number = this.navPathStack.getAllPathName().indexOf(AppRouteName.PLACEHOLDER);
+    if (baseIndex >= 0) {
+      this.navPathStack.popToIndex(baseIndex, false);
+    } else {
+      this.navPathStack.clear(false);
+      this.navPathStack.pushPathByName(AppRouteName.PLACEHOLDER, undefined, false);
+    }
+  }
+
+  // 右栏栈顶是否已是目标帖。定位楼号也要一致——点未读徽标是要跳到另一楼,不算同一目标。
+  private isTopicOnTop(topicId: number, targetPostNumber?: number): boolean {
+    const names: string[] = this.navPathStack.getAllPathName();
+    const topIndex: number = names.length - 1;
+    if (topIndex < 0 || names[topIndex] !== AppRouteName.TOPIC_DETAIL) {
+      return false;
+    }
+    const param: Object | undefined = this.navPathStack.getParamByIndex(topIndex) as Object | undefined;
+    if (!isTopicDetailRouteParam(param)) {
+      return false;
+    }
+    const top: TopicDetailRouteParam = param as TopicDetailRouteParam;
+    return top.topicId === topicId && top.targetPostNumber === targetPostNumber;
   }
 
   // 统一的链接点击入口:经 LinkRouter 判断——站内帖子链接提取 topicId 跳原生详情页,
