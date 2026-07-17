@@ -20,6 +20,10 @@ import { CategoryDrawer } from '../components/CategoryDrawer';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SEARCH_OVERLAY_VISIBLE_KEY, SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { PostRichContent } from '../components/PostRichContent';
+import { VersionAnnouncement, VersionAnnouncementService } from '../../services/announce/VersionAnnouncement';
+import { bundleManager } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -28,6 +32,14 @@ const DRAWER_WIDTH: number = 288;
 // 静默过验中"手动验证"按钮的延迟出现时间:保护快乐路径(通常几秒就静默过了),
 // 别让用户第一时间就把自己拽进全屏验证页。
 const MANUAL_VERIFY_DELAY_MS: number = 6000;
+
+// 版本公告弹窗:开发阶段每次启动都弹方便调试;开发完把它改成 false,同一版本只弹一次。
+const ANNOUNCE_ALWAYS_SHOW: boolean = true;
+// 诊断关键字:hilog / DevEco Log 里搜 ANNOUNCE_DIAG 看公告全链路日志。
+const ANNOUNCE_DIAG: string = '[ArkDO][ANNOUNCE_DIAG]';
+// 记「已弹过的 versionCode」的偏好 key(全项目共用 'app_settings' 库)。
+const ANNOUNCE_PREFS_NAME: string = 'app_settings';
+const ANNOUNCE_SHOWN_CODE_KEY: string = 'announce_shown_version_code';
 
 @Component
 export struct HomePage {
@@ -103,6 +115,11 @@ export struct HomePage {
     alignment: DialogAlignment.Center,
     customStyle: true
   });
+  // 版本公告弹层:命中当前 versionCode 的回复后展示其正文。
+  @State private announceVisible: boolean = false;
+  @State private announceCooked: string = '';
+  // 本次页面挂载是否已发起过公告检查(每次冷启动只查一次,不随下拉刷新/切源重复)。
+  private announceChecked: boolean = false;
 
   aboutToAppear(): void {
     if (!this.unsubscribeSessionChanged) {
@@ -134,6 +151,7 @@ export struct HomePage {
       this.loadSiteMetadataIfNeeded();
       this.refreshLatestTopics();
     }
+    this.checkVersionAnnouncement();
   }
 
   aboutToDisappear(): void {
@@ -447,6 +465,49 @@ export struct HomePage {
     .width('100%')
     .height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .bindSheet(this.announceVisible, this.AnnouncementSheet(), {
+      height: SheetSize.FIT_CONTENT,
+      // 顶部拖拽条:下滑即可关闭弹层(内容可滚动时也不冲突,拖拽条是独立手柄)。
+      dragBar: true,
+      showClose: true,
+      onDisappear: () => {
+        this.announceVisible = false;
+      }
+    })
+  }
+
+  // 版本公告弹层:标题 + 命中回复的完整富文本正文(含 [vXXXX] 版本号,超长可滚动)。
+  @Builder
+  private AnnouncementSheet() {
+    Column() {
+      Text('本次更新')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .margin({ top: 24, bottom: 16 })
+
+      Scroll() {
+        Column() {
+          PostRichContent({
+            cookedHtml: this.announceCooked,
+            fallbackText: '',
+            polls: []
+          })
+            .width('100%')
+        }
+        .width('100%')
+      }
+      .layoutWeight(1)
+      .align(Alignment.Top)
+      .scrollBar(BarState.Off)
+      // 内容滚到顶再下拉时把手势交还弹层,让「按住内容区域下滑」也能关闭(否则 Scroll 独吞垂直手势)。
+      .nestedScroll({
+        scrollForward: NestedScrollMode.SELF_FIRST,
+        scrollBackward: NestedScrollMode.SELF_FIRST
+      })
+    }
+    .width('100%')
+    .padding({ left: 20, right: 20, bottom: 24 })
   }
 
   // 顶栏标题:默认「最新」显示应用名时,把「ArkDO」末尾的 O 换成 linux.do 三色圆 logo(内联 ImageSpan
@@ -829,6 +890,73 @@ export struct HomePage {
     if (this.isArkWebReady && this.topics.length === 0) {
       this.loadSiteMetadataIfNeeded();
       this.refreshLatestTopics();
+    }
+    this.checkVersionAnnouncement();
+  }
+
+  // 首页就绪后拉版本公告:用当前 versionCode 从公告帖末尾往前匹配 [v<code>] 那条回复弹出。
+  // 冷启动只查一次;桥是父组件注入的 @Prop,服务必须在此惰性创建(字段初始化器会捕获空壳默认 bridge)。
+  private async checkVersionAnnouncement(): Promise<void> {
+    Log.i(`${ANNOUNCE_DIAG} 触发检查 isArkWebReady=${this.isArkWebReady} 本次挂载已查过=${this.announceChecked}`);
+    if (this.announceChecked || !this.isArkWebReady) {
+      return;
+    }
+    this.announceChecked = true;
+
+    const versionCode: number = this.readVersionCode();
+    Log.i(`${ANNOUNCE_DIAG} 当前 versionCode=${versionCode} ALWAYS_SHOW=${ANNOUNCE_ALWAYS_SHOW}`);
+    if (versionCode <= 0) {
+      Log.w(`${ANNOUNCE_DIAG} versionCode 读取失败,跳过`);
+      return;
+    }
+    if (!ANNOUNCE_ALWAYS_SHOW && this.announceAlreadyShown(versionCode)) {
+      Log.i(`${ANNOUNCE_DIAG} 该版本已弹过,跳过(改 ALWAYS_SHOW=true 可强制弹)`);
+      return;
+    }
+
+    const service: VersionAnnouncementService = new VersionAnnouncementService(this.bridge);
+    const announcement: VersionAnnouncement | null = await service.fetchForVersion(versionCode);
+    if (!announcement) {
+      Log.i(`${ANNOUNCE_DIAG} 无匹配公告,不弹窗`);
+      return;
+    }
+    Log.i(`${ANNOUNCE_DIAG} 弹出公告 楼号=${announcement.postNumber}`);
+    this.announceCooked = announcement.cookedHtml;
+    this.announceVisible = true;
+    if (!ANNOUNCE_ALWAYS_SHOW) {
+      this.markAnnounceShown(versionCode);
+    }
+  }
+
+  private readVersionCode(): number {
+    try {
+      const info: bundleManager.BundleInfo =
+        bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      return info.versionCode;
+    } catch (error) {
+      Log.w(`${LOG_TAG} 读取 versionCode 失败: ${JSON.stringify(error)}`);
+      return 0;
+    }
+  }
+
+  private announceAlreadyShown(versionCode: number): boolean {
+    try {
+      const store: preferences.Preferences =
+        preferences.getPreferencesSync(getContext(this), { name: ANNOUNCE_PREFS_NAME });
+      return (store.getSync(ANNOUNCE_SHOWN_CODE_KEY, 0) as number) === versionCode;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private markAnnounceShown(versionCode: number): void {
+    try {
+      const store: preferences.Preferences =
+        preferences.getPreferencesSync(getContext(this), { name: ANNOUNCE_PREFS_NAME });
+      store.putSync(ANNOUNCE_SHOWN_CODE_KEY, versionCode);
+      store.flush();
+    } catch (error) {
+      Log.w(`${LOG_TAG} 记录已弹版本失败: ${JSON.stringify(error)}`);
     }
   }
 
