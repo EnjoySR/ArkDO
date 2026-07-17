@@ -323,7 +323,7 @@ export struct PostRichContent {
   private InlineTextBlock(inlines: RichInlineNode[], marginTop: number, path: string) {
     Text() {
       ForEach(inlines, (token: RichInlineNode, index: number) => {
-        this.InlineToken(token, path)
+        this.InlineToken(token, path, 15, false)
       }, (token: RichInlineNode, index: number) => this.inlineKey(token, index))
     }
     .fontSize(15)
@@ -335,8 +335,10 @@ export struct PostRichContent {
     .margin({ top: marginTop })
   }
 
+  // baseSize/baseBold:普通文本 Span 的基准字号与加粗。Span 自身属性会覆盖外层 Text,故标题这类
+  // 需放大/加粗的容器必须把字号粗细传进来,否则被 Span 写死的 15/Normal 盖掉(标题不生效的根因)。
   @Builder
-  private InlineToken(token: RichInlineNode, path: string) {
+  private InlineToken(token: RichInlineNode, path: string, baseSize: number, baseBold: boolean) {
     if (token.spoiler && !this.isSpoilerRevealed(path)) {
       // 行内剧透未揭示:逐字符替换成 ░ 打码,点击揭示同段全部剧透。
       // 复制到的也只是 ░,不会漏真实文字。
@@ -436,9 +438,9 @@ export struct PostRichContent {
         })
     } else {
       Span(token.text)
-        .fontSize(15)
+        .fontSize(baseSize)
         .fontColor($r('app.color.text_body'))
-        .fontWeight(token.bold ? FontWeight.Bold : FontWeight.Normal)
+        .fontWeight((baseBold || token.bold) ? FontWeight.Bold : FontWeight.Normal)
         .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
     }
   }
@@ -447,7 +449,7 @@ export struct PostRichContent {
   private HeadingBlock(block: RichBlock, marginTop: number, path: string) {
     Text() {
       ForEach(this.safeInlines(block), (token: RichInlineNode, index: number) => {
-        this.InlineToken(token, path)
+        this.InlineToken(token, path, this.getHeadingFontSize(block.level ? block.level : 2), true)
       }, (token: RichInlineNode, index: number) => this.inlineKey(token, index))
     }
     .fontSize(this.getHeadingFontSize(block.level ? block.level : 2))
@@ -1148,7 +1150,7 @@ export struct PostRichContent {
                 } else {
                   Text() {
                     ForEach(cell.inlines, (token: RichInlineNode, t: number) => {
-                      this.InlineToken(token, `${path}-r${r}c${c}`)
+                      this.InlineToken(token, `${path}-r${r}c${c}`, 15, false)
                     }, (token: RichInlineNode, t: number) => this.inlineKey(token, t))
                   }
                   .fontSize(14)
