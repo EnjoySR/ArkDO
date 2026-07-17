@@ -54,6 +54,8 @@ export struct HomePage {
   @State private showSideBar: boolean = false;
   // 抽屉横向拖拽偏移(向左拖为负,跟手);松手过阈值关闭、否则弹回 0。
   @State private drawerDragX: number = 0;
+  // 本轮左滑是否已被接管:onActionStart 里判定一次,后续 update/end 据此放行。
+  private swipeTracking: boolean = false;
   // 当前内容源:selectedCategory 有值=看某版块;否则看内置入口 selectedFeedKey。
   @State private selectedCategory?: TopicCategory = undefined;
   @State private selectedFeedKey: string = FeedKey.LATEST;
@@ -73,6 +75,12 @@ export struct HomePage {
   @Prop isCheckingSession: boolean = false;
   @Prop hasCheckedSession: boolean = false;
   onAccountClick: () => void = () => {};
+  // 左滑拉出个人中心:手势在本页,导航栈在宿主(RootTabPage)手里,故三个阶段全部上抛。
+  onProfileSwipeStart: () => void = () => {};
+  onProfileSwipeUpdate: (progress: number) => void = () => {};
+  onProfileSwipeEnd: (progress: number, velocity: number) => void = () => {};
+  // 主体实测宽度(vp):把手指位移换算成 0~1 进度的分母。
+  @State private swipeAreaWidth: number = 0;
   // 下拉刷新时通知宿主补查会话:上次会话检查被 CF 拦截时,右上角状态可能不真实。
   onSessionRecheck: () => void = () => {};
   onOpenNotifications: () => void = () => {};
@@ -152,6 +160,14 @@ export struct HomePage {
       this.unsubscribeNotifications();
       this.unsubscribeNotifications = undefined;
     }
+  }
+
+  // 手指位移(向左为负)换算成 0~1 进度,夹在区间内。
+  private swipeProgressOf(offsetX: number): number {
+    if (this.swipeAreaWidth <= 0) {
+      return 0;
+    }
+    return Math.min(1, Math.max(0, -offsetX / this.swipeAreaWidth));
   }
 
   build() {
@@ -295,6 +311,45 @@ export struct HomePage {
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .alignItems(HorizontalAlign.Start)
+    // 左滑跟手拉出个人中心:位移换算成 0~1 进度上抛,由宿主驱动 Navigation 的交互式转场。
+    .onAreaChange((_oldArea: Area, newArea: Area) => {
+      this.swipeAreaWidth = newArea.width as number;
+    })
+    .gesture(
+      // 仅向左、起手 10vp 才认:与 List 的竖向滚动靠方向隔离,与抽屉靠 showSideBar 闸隔离。
+      PanGesture({ direction: PanDirection.Left, distance: 10 })
+        .onActionStart(() => {
+          // 抽屉开着时左滑归抽屉(那是关抽屉手势),不抢。
+          if (this.showSideBar || this.swipeAreaWidth <= 0) {
+            this.swipeTracking = false;
+            return;
+          }
+          this.swipeTracking = true;
+          this.onProfileSwipeStart();
+        })
+        .onActionUpdate((event: GestureEvent) => {
+          if (!this.swipeTracking) {
+            return;
+          }
+          this.onProfileSwipeUpdate(this.swipeProgressOf(event.offsetX));
+        })
+        .onActionEnd((event: GestureEvent) => {
+          if (!this.swipeTracking) {
+            return;
+          }
+          this.swipeTracking = false;
+          // velocityX 向左为负,取反换成「向左甩得多快」。
+          this.onProfileSwipeEnd(this.swipeProgressOf(event.offsetX), -event.velocityX);
+        })
+        .onActionCancel(() => {
+          if (!this.swipeTracking) {
+            return;
+          }
+          this.swipeTracking = false;
+          // 手势被系统打断:当回弹处理,别把转场悬着。
+          this.onProfileSwipeEnd(0, 0);
+        })
+    )
 
       // 遮罩:抽屉打开时铺满,拦截并点击关闭,防止点穿到帖子列表。
       if (this.showSideBar) {

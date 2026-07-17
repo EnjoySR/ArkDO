@@ -57,6 +57,19 @@ import { WebViewPage } from './WebViewPage';
 
 const LOG_TAG: string = '[ArkDO][Root]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
+// ===== 首页左滑跟手拉出个人中心 =====
+// 松手判定阈值:滑过屏宽这个比例即补完,否则回弹。
+const SWIPE_COMMIT_RATIO: number = 0.4;
+// 松手判定阈值:横向甩速(vp/s)超过即直接补完,不看距离。
+const SWIPE_COMMIT_VELOCITY: number = 800;
+// ↓↓↓ 手感就调这三个:补完时长、回弹时长、收尾曲线。 ↓↓↓
+const SWIPE_COMMIT_MS: number = 280;
+const SWIPE_REBOUND_MS: number = 220;
+const SWIPE_SETTLE_CURVE: Curve = Curve.Friction;
+// 首页视差(对齐系统默认转场的观感):个人中心滑到底时,首页左移自身宽度的这个比例、并压暗这个幅度。
+// 与个人中心的位移共用同一个 progress,天然同步。0 即关掉视差。
+const SWIPE_PARALLAX_RATIO: number = 0.25;
+const SWIPE_PARALLAX_DIM: number = 0.08;
 
 enum RootSheet {
   NONE = 0,
@@ -97,6 +110,15 @@ export struct RootTabPage {
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   private notificationService: NotificationService = new NotificationService(this.bridge);
   private navPathStack: NavPathStack = new NavPathStack();
+  // 手势激活闸:仅此为 true 时 customNavContentTransition 才接管 PROFILE 的 push;
+  // 点头像那条路照走系统默认转场,互不干扰。
+  @State private profileSwipeActive: boolean = false;
+  // 跟手进度 0~1:同时驱动 ProfilePage 的 translate、首页视差、proxy.updateTransition,三者共用一个源。
+  @State private profileSwipeProgress: number = 0;
+  private profileSwipeProxy?: NavigationTransitionProxy = undefined;
+  // 收尾动画进行中:此间不许 onTransitionEnd 重置 active,否则位移表达式短路成 0、页面瞬移归位,
+  // 收尾动画等于白播(表现为"一松手就唰一下到位")。
+  private profileSwipeSettling: boolean = false;
   private sessionCheckSequence: number = 0;
   // 上次会话检查是否失败(CF 盾/网络原因,状态可能不真实),下拉刷新时据此补查。
   private lastSessionCheckFailed: boolean = false;
@@ -289,6 +311,109 @@ export struct RootTabPage {
     //  想微调列表宽度只改这一个数即可。
     .navBarWidth(420)
     .navDestination(this.NavDestinationBuilder)
+    // 只接管「手势闸打开 + PUSH + 目标是 PROFILE」这一种;其余一律返回 undefined 走系统默认,
+    // 不影响其他页面的转场。
+    .customNavContentTransition((from: NavContentInfo, to: NavContentInfo, operation: NavigationOperation) => {
+      return this.buildProfileSwipeTransition(to, operation);
+    })
+  }
+
+  private buildProfileSwipeTransition(to: NavContentInfo, operation: NavigationOperation): NavigationAnimatedTransition | undefined {
+    if (!this.profileSwipeActive || operation !== NavigationOperation.PUSH || to.name !== AppRouteName.PROFILE) {
+      return undefined;
+    }
+    return {
+      // 不开这个,updateTransition / cancelTransition 全是空操作(API 12 起)。
+      isInteractive: true,
+      // 兜底:手势异常中断没人收尾时超时自动结束,避免转场悬着——挂起期间 Navigation 吞掉所有输入。
+      timeout: 3000,
+      transition: (proxy: NavigationTransitionProxy) => {
+        this.profileSwipeProxy = proxy;
+        proxy.updateTransition?.(0);
+      },
+      // 注:实测每次转场此回调会触发两遍(系统行为),故这里必须保持幂等,别塞非幂等副作用。
+      onTransitionEnd: (success: boolean) => {
+        this.profileSwipeProxy = undefined;
+        // 收尾动画还在播时不要重置——留给动画的 onFinish 收,否则页面当场瞬移。
+        if (!this.profileSwipeSettling) {
+          this.profileSwipeActive = false;
+          this.profileSwipeProgress = 0;
+        }
+      }
+    };
+  }
+
+  // 手指按下即 push:跟手要求目标页当场在场,晚了就跟不上手指(实测 push 到转场就绪 ≈15~20ms,一帧内)。
+  private handleProfileSwipeStart(): void {
+    // 宽屏(平板横屏)是 Split 双栏:首页常驻左栏、个人中心出现在右栏,
+    // "把页面从右边拖进来"这个隐喻不成立,视差还会把左栏整个推走。宽屏只留点头像入口。
+    if (this.appIsWide || this.profileSwipeActive || this.profileSwipeSettling) {
+      return;
+    }
+    this.profileSwipeActive = true;
+    this.profileSwipeProgress = 0;
+    this.navPathStack.pushPath(new NavPathInfo(AppRouteName.PROFILE, buildProfileRouteParam('homeSwipe')));
+  }
+
+  private handleProfileSwipeUpdate(progress: number): void {
+    if (!this.profileSwipeActive) {
+      return;
+    }
+    this.profileSwipeProgress = progress;
+    this.profileSwipeProxy?.updateTransition?.(progress);
+  }
+
+  // 松手:过阈值或甩速够快就补完,否则回弹。两条路的收尾动画都由自绘 translate 播,
+  // 时长/曲线见顶部三个常量。
+  private handleProfileSwipeEnd(progress: number, velocity: number): void {
+    if (!this.profileSwipeActive || this.profileSwipeSettling) {
+      return;
+    }
+    const commit: boolean = progress >= SWIPE_COMMIT_RATIO || velocity >= SWIPE_COMMIT_VELOCITY;
+    this.profileSwipeSettling = true;
+    if (commit) {
+      // 先自绘把页面推到满屏,推到位了再 finish。
+      // 不能一松手就 finish——系统当场判定转场结束并撤掉 NavBar,而自绘动画还要再播 SWIPE_COMMIT_MS,
+      // 这期间页面尚未盖满,露出的那条缝背后首页已经没了(表现为"背后首页突然消失")。
+      this.settleProfileSwipe(1, SWIPE_COMMIT_MS, () => {
+        this.profileSwipeProxy?.finishTransition();
+      });
+    } else {
+      // 回弹走 finish+pop,不走 cancelTransition:
+      //   cancelTransition 虽然能把栈回滚干净(栈深归 0),但会把 NavBar 的 eventHub 永久留在禁用态
+      //   ——此后首页命中测试恒为空,上下滑/左滑/点击全死,只有渲染还在动(GIF 照转),极难察觉。
+      //   系统日志实锤:"NavBar/12 eventHub not enabled" + "Touch test result is empty."
+      //   而正常 POP 流程会把 eventHub 收拾干净,故绕道:让 push 落地再补一次 pop。
+      // 顺序上先自绘把页面滑回屏外,滑到看不见了再 finish+pop——
+      // finish 那一下页面会瞬间归位,把它藏在屏幕外,眼睛看到的全程才是平滑的。
+      this.settleProfileSwipe(0, SWIPE_REBOUND_MS, () => {
+        this.profileSwipeProxy?.finishTransition();
+        this.navPathStack.pop(false);
+      });
+    }
+  }
+
+  // 把进度动画到 target,播完执行 after 并复位。
+  // 注意:target 与当前进度相等时 animateTo 无状态变化,onFinish 不会触发——
+  // 必须走同步分支,否则 active 永久卡 true、转场悬着不落地(下一次左滑直接失灵)。
+  private settleProfileSwipe(target: number, duration: number, after: () => void): void {
+    const finishUp: () => void = () => {
+      after();
+      this.profileSwipeSettling = false;
+      this.profileSwipeActive = false;
+      this.profileSwipeProgress = 0;
+    };
+    if (Math.abs(this.profileSwipeProgress - target) < 0.001) {
+      finishUp();
+      return;
+    }
+    this.getUIContext().animateTo({
+      duration: duration,
+      curve: SWIPE_SETTLE_CURVE,
+      onFinish: finishUp
+    }, () => {
+      this.profileSwipeProgress = target;
+    });
   }
 
   @Builder
@@ -402,6 +527,9 @@ export struct RootTabPage {
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
       .backgroundColor($r('app.color.page_bg'))
+      // 左滑跟手时本页的位移。百分比相对自身宽度,不必测屏宽:progress=0 整页停在右侧屏外,=1 归位。
+      // 手势闸关闭时恒 0,点头像那条路(系统默认转场)不受影响。
+      .translate({ x: this.profileSwipeActive ? `${(1 - this.profileSwipeProgress) * 100}%` : 0 })
     } else if (name === AppRouteName.LEVEL_PROGRESS) {
       NavDestination() {
         LevelProgressPage({
@@ -695,6 +823,16 @@ export struct RootTabPage {
       onAccountClick: () => {
         this.handleAccountClick();
       },
+      // 左滑跟手拉出个人中心:手势在 HomePage,导航栈在这里,故三个阶段由它上抛给宿主驱动。
+      onProfileSwipeStart: () => {
+        this.handleProfileSwipeStart();
+      },
+      onProfileSwipeUpdate: (progress: number) => {
+        this.handleProfileSwipeUpdate(progress);
+      },
+      onProfileSwipeEnd: (progress: number, velocity: number) => {
+        this.handleProfileSwipeEnd(progress, velocity);
+      },
       onSessionRecheck: () => {
         this.recheckSessionIfNeeded();
       },
@@ -723,6 +861,11 @@ export struct RootTabPage {
     .width('100%')
     .height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    // 视差:跟手期间首页左移+压暗,补上自绘转场缺失的层次感
+    // (系统默认转场自带这层,一旦用 customNavContentTransition 接管就得自己画,否则首页完全静止)。
+    // 百分比相对自身宽度,不必测屏宽。手势闸关闭时恒复位,点头像那条路不受影响。
+    .translate({ x: this.profileSwipeActive ? `${-SWIPE_PARALLAX_RATIO * 100 * this.profileSwipeProgress}%` : 0 })
+    .brightness(this.profileSwipeActive ? 1 - SWIPE_PARALLAX_DIM * this.profileSwipeProgress : 1)
   }
 
   private openLoginPage(): void {
