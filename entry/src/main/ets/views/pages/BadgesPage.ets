@@ -4,6 +4,7 @@ import { RelativeTime } from '../../common/utils/RelativeTime';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
 import { UserProfileService } from '../../services/user/UserProfileService';
 import { BadgeTile, badgeTypeColor } from '../components/BadgeTile';
+import { LoadStateView } from '../components/LoadStateView';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
@@ -97,39 +98,16 @@ export struct BadgesPage {
   @Builder
   private Content() {
     if (this.groups.length === 0) {
-      Column() {
-        if (this.isLoading) {
-          LoadingProgress()
-            .width(28)
-            .height(28)
-            .color($r('app.color.ld_accent'))
-            .margin({ bottom: 12 })
-          Text('加载中...')
-            .fontSize(15)
-            .fontColor($r('app.color.text_secondary'))
-        } else if (this.loadFailed) {
-          Text(this.message.length > 0 ? this.message : '加载失败')
-            .fontSize(15)
-            .fontColor($r('app.color.text_secondary'))
-          Button('重试')
-            .fontSize(15)
-            .fontColor($r('app.color.ld_accent'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(20)
-            .padding({ left: 28, right: 28, top: 8, bottom: 8 })
-            .margin({ top: 16 })
-            .onClick(() => {
-              this.loadBadges();
-            })
-        } else {
-          Text('暂无徽章')
-            .fontSize(15)
-            .fontColor($r('app.color.text_faint'))
+      LoadStateView({
+        isLoading: this.isLoading,
+        loadingText: '加载中…',
+        message: this.message.length > 0 ? this.message : '加载失败',
+        showRetry: this.loadFailed,
+        emptyTitle: '暂无徽章',
+        onRetry: () => {
+          this.loadBadges();
         }
-      }
-      .width('100%')
-      .layoutWeight(1)
-      .justifyContent(FlexAlign.Center)
+      })
     } else {
       Scroll() {
         Column() {

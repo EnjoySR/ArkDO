@@ -5,6 +5,7 @@ import { NotificationEventBus } from '../../services/notification/NotificationEv
 import { LoginGate } from '../../services/session/LoginGate';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
 import { NotificationListItem } from '../components/NotificationListItem';
+import { LoadStateView } from '../components/LoadStateView';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const LOG_TAG: string = '[ArkDO][NotificationPage]';
@@ -87,38 +88,16 @@ export struct NotificationPage {
   @Builder
   private Content() {
     if (this.items.length === 0) {
-      // 空 / 加载 / 失败态
-      Column() {
-        if (this.isInitialLoading) {
-          LoadingProgress()
-            .width(28)
-            .height(28)
-            .color($r('app.color.brand'))
-            .margin({ bottom: 12 })
-          Text('加载中...')
-            .fontSize(15)
-            .fontColor($r('app.color.text_secondary'))
-        } else {
-          Text(this.message.length > 0 ? this.message : '暂无通知')
-            .fontSize(15)
-            .fontColor($r('app.color.text_secondary'))
-          if (this.loadFailed) {
-            Button('重试')
-              .fontSize(15)
-              .fontColor($r('app.color.brand'))
-              .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius(20)
-              .padding({ left: 28, right: 28, top: 8, bottom: 8 })
-              .margin({ top: 16 })
-              .onClick(() => {
-                this.loadInitial();
-              })
-          }
+      LoadStateView({
+        isLoading: this.isInitialLoading,
+        loadingText: '加载中…',
+        message: this.message.length > 0 ? this.message : '通知加载失败,请重试',
+        showRetry: this.loadFailed,
+        emptyTitle: '暂无通知',
+        onRetry: () => {
+          this.loadInitial();
         }
-      }
-      .width('100%')
-      .layoutWeight(1)
-      .justifyContent(FlexAlign.Center)
+      })
     } else {
       Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
         List() {

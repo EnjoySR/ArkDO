@@ -7,6 +7,7 @@ import { BookmarkService } from '../../services/bookmark/BookmarkService';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { UserAvatar } from '../components/UserAvatar';
+import { LoadStateView } from '../components/LoadStateView';
 import { TopicMetadataBadges } from '../components/TopicBadges';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
@@ -93,37 +94,18 @@ export struct BookmarksPage {
   @Builder
   private Content() {
     if (this.bookmarks.length === 0) {
-      Column() {
-        if (this.isInitialLoading) {
-          LoadingProgress()
-            .width(28)
-            .height(28)
-            .color($r('app.color.ld_accent'))
-            .margin({ bottom: 12 })
-          Text('加载中...')
-            .fontSize(15)
-            .fontColor($r('app.color.text_secondary'))
-        } else if (this.loadFailed) {
-          Text(this.message.length > 0 ? this.message : '书签加载失败')
-            .fontSize(15)
-            .fontColor($r('app.color.text_secondary'))
-          Button('重试')
-            .fontSize(15)
-            .fontColor($r('app.color.ld_accent'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(20)
-            .padding({ left: 28, right: 28, top: 8, bottom: 8 })
-            .margin({ top: 16 })
-            .onClick(() => {
-              this.loadInitial();
-            })
-        } else {
-          this.EmptyState()
+      LoadStateView({
+        isLoading: this.isInitialLoading,
+        loadingText: '加载中…',
+        message: this.message.length > 0 ? this.message : '书签加载失败',
+        showRetry: this.loadFailed,
+        emptyIcon: $r('sys.symbol.bookmark'),
+        emptyTitle: '还没有书签',
+        emptySubtitle: '在帖子里点书签图标，就能把它存到这里随时回看',
+        onRetry: () => {
+          this.loadInitial();
         }
-      }
-      .width('100%')
-      .layoutWeight(1)
-      .justifyContent(FlexAlign.Center)
+      })
     } else {
       Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
         List() {
@@ -169,32 +151,6 @@ export struct BookmarksPage {
         this.loadInitial();
       })
     }
-  }
-
-  @Builder
-  private EmptyState() {
-    Column() {
-      SymbolGlyph($r('sys.symbol.bookmark'))
-        .fontSize(30)
-        .fontColor([$r('app.color.text_faint')])
-    }
-    .width(66)
-    .height(66)
-    .borderRadius(33)
-    .border({ width: 1, color: $r('app.color.border') })
-    .justifyContent(FlexAlign.Center)
-    .margin({ bottom: 16 })
-
-    Text('还没有书签')
-      .fontSize(16)
-      .fontWeight(FontWeight.Medium)
-      .fontColor($r('app.color.text_primary'))
-    Text('在帖子里点书签图标，就能把它存到这里随时回看')
-      .fontSize(13)
-      .fontColor($r('app.color.text_faint'))
-      .textAlign(TextAlign.Center)
-      .margin({ top: 6 })
-      .padding({ left: 40, right: 40 })
   }
 
   // 单条书签:上半部分对齐首页帖子行(头像 + 标题 + 分类/标签徽标),
