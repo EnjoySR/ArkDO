@@ -29,9 +29,9 @@ const POSTS_PAGE_SIZE: number = 20;
 // 楼层预创建数(视口外上下各 N 条)。注意:maintainVisibleContentPosition 只补偿"布局范围外"的
 // 头插,插入点落进预创建范围内则不补偿——向上预取阈值必须显著大于本值。
 const POSTS_CACHED_COUNT: number = 4;
-// 向上预取阈值(posts 下标):离已加载区间顶部还剩这么多楼就开始补。取远大于 cachedCount 的值,
-// 让网络响应回来时插入点仍在布局范围外,走框架补偿(零跳动);太小会复现"视口瞬移"BUG。
-const EARLIER_PREFETCH_INDEX: number = 10;
+// 向上预取阈值(posts 下标):离已加载区间顶部还剩这么多楼就开始"拉数据"——只入 pendingEarlier 缓存,
+// 不碰数据源。拉取纯后台、不动画面,故提前量给足,让数据在视口进入插入安全窗之前就备好。
+const EARLIER_PREFETCH_INDEX: number = 25;
 // 顶部"正在加载/定位"悬浮胶囊开关:暂时隐藏(产品观感待定),置 true 即恢复。
 const SHOW_LOADING_CAPSULE: boolean = false;
 // 提交成功的 toast 延后到浮层完全收场(遮罩淡出 220ms、键盘收起约 270ms)之后再弹,
@@ -63,6 +63,12 @@ export struct TopicDetailPage {
   // 窗口式加载(从任意楼号进入)的向上分页:已加载区间之前是否还有更早楼层/是否正在补。
   @State private hasEarlier: boolean = false;
   @State private isLoadingEarlier: boolean = false;
+  // 已拉到手但尚未插入的更早楼层。插入时机与网络返回时刻解耦:响应期间用户仍在上滑,若拿到就插,
+  // 插入点常已漂进 List 布局范围,只能靠手动重锚救场——而重锚是无动画瞬跳,会掐断惯性滑动。
+  // 改由 tryFlushEarlierPosts 在滚动回调里择机同步插入(见其注释)。
+  private pendingEarlier: TopicPost[] = [];
+  // 窗口纪元:换窗/重载须作废在途预取与缓存——旧窗口的楼层插进新窗口是楼号错乱。
+  private earlierEpoch: number = 0;
   // 首帧定位的 List 下标(目标楼 + summary 占位偏移)。List 创建时读取一次,无需 @State。
   private initialListIndex: number = 0;
   // "上次访问"红线:进入时快照的已读水位(只取一次,页内重开窗口/本次阅读推高水位都不重取,
@@ -324,15 +330,17 @@ export struct TopicDetailPage {
       this.summaryVisible = start === 0;
       // 右缘 scrubber:维护可滚动性、钉底闩、当前楼号(见 updateScrubberFromScroll)。
       this.updateScrubberFromScroll(start, end);
-      // 快到已加载区间顶部时预取更早楼层:响应回来时插入点须仍在布局范围外才有框架补偿,
-      // 阈值要给"网络期间用户继续上滑"留够余量(实测 3 太小,必现视口瞬移)。
+      // 先试插已备好的更早楼层:这里是同步的,start 即真值,插入点必在布局范围外 → 框架静默补偿,
+      // 滑动不断帧。再按阈值预取下一页(纯拉数据,不动画面)。顺序不能反,否则 pending 未清会挡住预取。
+      this.tryFlushEarlierPosts(start);
       if (this.hasEarlier && start - 1 <= EARLIER_PREFETCH_INDEX) {
-        this.loadEarlierPosts();
+        this.prefetchEarlierPosts();
       }
     })
     .onReachStart(() => {
-      // 兜底:飞速甩到顶、预取没来得及触发时。
-      this.loadEarlierPosts();
+      // 兜底:飞速甩到顶、安全窗没命中时。此处 start 为 0,tryFlush 会走手动重锚分支。
+      this.tryFlushEarlierPosts(this.currentStartListIndex);
+      this.prefetchEarlierPosts();
     })
     .onReachEnd(() => {
       this.loadMorePosts();
@@ -737,6 +745,7 @@ export struct TopicDetailPage {
     const stream: number[] = result.data.stream ?? [];
     const nextSource: PostDataSource = new PostDataSource();
     nextSource.reset(result.data.posts);
+    this.invalidateEarlierPrefetch();
     this.dataSource = nextSource;
     this.postCount = nextSource.totalCount();
     this.hasEarlier = PostStreamPager.countEarlier(stream, nextSource.getAll()) > 0;
@@ -880,6 +889,7 @@ export struct TopicDetailPage {
     if (result.success && result.data) {
       const stream: number[] = result.data.stream ?? [];
       this.detail = result.data;
+      this.invalidateEarlierPrefetch();
       this.dataSource.reset(result.data.posts);
       this.postCount = this.dataSource.totalCount();
       this.message = this.postCount > 0 ? '' : '暂无帖子内容';
@@ -977,16 +987,23 @@ export struct TopicDetailPage {
     }
   }
 
-  // 向上补更早楼层(窗口式进入后往回看):取已加载区间之前的一页 id,头插进数据源。
-  // 插入若发生在视口上方,由 maintainVisibleContentPosition 保持可视内容不动。
-  private async loadEarlierPosts(): Promise<void> {
-    if (!this.detail || this.isLoadingEarlier || !this.hasEarlier) {
+  // 换窗/重载时调用:纪元 +1 让在途预取的响应自行丢弃,并清掉已缓存的旧窗口楼层。
+  private invalidateEarlierPrefetch(): void {
+    this.earlierEpoch += 1;
+    this.pendingEarlier = [];
+  }
+
+  // 向上补更早楼层(窗口式进入后往回看)的第一步:取已加载区间之前的一页 id 拉回来存进 pendingEarlier,
+  // 不碰数据源、不动画面。何时真正插入由 tryFlushEarlierPosts 决定。
+  // pending 未清空时不再重复拉:prevIds 按 dataSource 已加载区间算,pending 尚未并入,再拉就是同一批。
+  private async prefetchEarlierPosts(): Promise<void> {
+    if (!this.detail || this.isLoadingEarlier || !this.hasEarlier || this.pendingEarlier.length > 0) {
       return;
     }
     const stream: number[] = this.detail.stream ? this.detail.stream : [];
     const loaded: TopicPost[] = this.dataSource.getAll();
     const prevIds: number[] = PostStreamPager.collectPrevIds(stream, loaded, POSTS_PAGE_SIZE);
-    Log.i(`${LOG_TAG} loadEarlier begin stream=${stream.length} loaded=${loaded.length} window=[${loaded[0]?.postNumber}..${loaded[loaded.length - 1]?.postNumber}] prevIds=${prevIds.length}`);
+    Log.i(`${LOG_TAG} prefetchEarlier begin stream=${stream.length} loaded=${loaded.length} window=[${loaded[0]?.postNumber}..${loaded[loaded.length - 1]?.postNumber}] prevIds=${prevIds.length}`);
     if (prevIds.length === 0) {
       this.hasEarlier = false;
       return;
@@ -994,27 +1011,49 @@ export struct TopicDetailPage {
 
     this.isLoadingEarlier = true;
     const topicId: number = this.detail.id;
+    const epoch: number = this.earlierEpoch;
     const result: NetworkResult<TopicPost[]> = await new TopicService(this.bridge).loadMorePosts(topicId, prevIds);
     this.isLoadingEarlier = false;
-
-    if (result.success && result.data) {
-      const startBefore: number = this.currentStartListIndex;
-      const added: number = this.dataSource.prependPosts(result.data);
-      this.postCount = this.dataSource.totalCount();
-      this.hasEarlier = PostStreamPager.countEarlier(stream, this.dataSource.getAll()) > 0;
-      this.updateLastVisitedAnchor();
-      // 兜底重锚:插入点落在 List 已布局范围内(视口上方剩余楼层 ≤ cachedCount)时框架不补偿,
-      // 视口内容会瞬移到新插入的楼——手动按"原下标 + 插入数"无动画锚回。范围外则框架已补偿,勿重复。
-      if (added > 0 && startBefore - 1 <= POSTS_CACHED_COUNT) {
-        this.scroller.scrollToIndex(startBefore + added, false);
-        Log.i(`${LOG_TAG} manual re-anchor startBefore=${startBefore} added=${added} -> ${startBefore + added}`);
-      }
-      Log.i(`${LOG_TAG} loadEarlier ok added=${added} total=${this.postCount} hasEarlier=${this.hasEarlier} startBefore=${startBefore}`);
+    // 等待期间换过窗:这批楼层属于旧窗口,插进去就是楼号错乱,直接丢弃。
+    if (epoch !== this.earlierEpoch) {
+      Log.i(`${LOG_TAG} prefetchEarlier stale drop epoch=${epoch} now=${this.earlierEpoch}`);
       return;
     }
 
-    Log.i(`${LOG_TAG} loadEarlier failed topicId=${topicId} status=${result.statusCode} err=${result.error?.message ?? ''}`);
+    if (result.success && result.data) {
+      this.pendingEarlier = result.data;
+      Log.i(`${LOG_TAG} prefetchEarlier ok cached=${this.pendingEarlier.length}`);
+      // 响应回来时滑动可能已停,onScrollIndex 不再回调 → 主动试插一次,否则数据一直躺在缓存里。
+      this.tryFlushEarlierPosts(this.currentStartListIndex);
+      return;
+    }
+
+    Log.i(`${LOG_TAG} prefetchEarlier failed topicId=${topicId} status=${result.statusCode} err=${result.error?.message ?? ''}`);
     this.showComposerToast(result.error?.message ? result.error.message : '加载更早楼层失败', 1500);
+  }
+
+  // 第二步:把预取好的更早楼层头插进数据源。插入点在 List 已布局范围外(视口上方剩余楼层 > cachedCount)
+  // 时 maintainVisibleContentPosition 静默补偿,惯性滑动不受影响——这是常规路径,靠 onScrollIndex
+  // 每帧调用来抓住这个安全窗。落进范围内则框架不补偿,视口会瞬移到新插入的楼,只能手动无动画重锚,
+  // 代价是掐断滑动,故仅在暴力甩到顶等错过安全窗的情况下兜底。
+  private tryFlushEarlierPosts(start: number): void {
+    if (this.pendingEarlier.length === 0) {
+      return;
+    }
+    const needReAnchor: boolean = start - 1 <= POSTS_CACHED_COUNT;
+    const batch: TopicPost[] = this.pendingEarlier;
+    this.pendingEarlier = [];
+    const added: number = this.dataSource.prependPosts(batch);
+    this.postCount = this.dataSource.totalCount();
+    const stream: number[] = this.detail && this.detail.stream ? this.detail.stream : [];
+    this.hasEarlier = PostStreamPager.countEarlier(stream, this.dataSource.getAll()) > 0;
+    this.updateLastVisitedAnchor();
+    if (added > 0 && needReAnchor) {
+      this.scroller.scrollToIndex(start + added, false);
+      Log.i(`${LOG_TAG} flushEarlier re-anchor start=${start} added=${added} -> ${start + added} total=${this.postCount} hasEarlier=${this.hasEarlier}`);
+      return;
+    }
+    Log.i(`${LOG_TAG} flushEarlier silent start=${start} added=${added} total=${this.postCount} hasEarlier=${this.hasEarlier}`);
   }
 
   private startReadingTrackerIfNeeded(): void {
