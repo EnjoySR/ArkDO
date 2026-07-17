@@ -25,12 +25,25 @@ interface UploadResponse {
   height?: number;
 }
 
-// 压缩上限:最长边超过则等比缩到该值(论坛配图足够,且把注入脚本的 base64 体积压到 host 可承受)。
-const MAX_EDGE: number = 1920;
-// JPEG 压缩质量(0-100)。70 在清晰度与体积间平衡。
-const JPEG_QUALITY: number = 70;
+// ── 图片优化参数:对齐 Discourse 官方 composer,免得原生端比网页端更狠地劣化画质。
+// 依据 discourse main 分支 frontend/discourse/app/services/media-optimization-worker.js
+// 与 frontend/discourse/app/workers/media-optimization/codecs.js。
 
-// 图片上传服务:选图 → 压缩(gif 除外) → base64 → 经 host webview multipart 传 /uploads.json。
+// 小于此体积的图不重编码,原样上传(官方 composer_media_optimization_image_bytes_optimization_threshold)。
+// 小图重编码是画质净赔:省不下几个字节,却白吃一遍有损压缩。
+const BYTES_OPTIMIZATION_THRESHOLD: number = 524288;
+// 宽度超过此值才缩放。官方只看宽度、不看最长边,故长截图这类竖图能保住原分辨率。
+const RESIZE_THRESHOLD: number = 1920;
+// 缩放目标宽度,高度按原比例。
+const RESIZE_TARGET: number = 1920;
+// 编码质量。90 对应官方 image_quality 默认档 high(其 medium 档才是 70)。
+const ENCODE_QUALITY: number = 90;
+// 嗅探文件头魔数所需字节数(HEIC 的 ftyp box 位置最靠后,12 字节够用)。
+const SNIFF_BYTES: number = 16;
+// 扫 PNG 块找 acTL 的窗口。acTL 必须出现在首个 IDAT 之前,不会藏在很后面。
+const PNG_CHUNK_SCAN_BYTES: number = 4096;
+
+// 图片上传服务:选图 → 按需优化(见 encodeForUpload) → base64 → 经 host webview multipart 传 /uploads.json。
 // 维护 short_url → 真实 url 映射,供编辑器预览把 raw 里的 upload:// 短码换成可加载直链
 // (CookedHtmlParser 对 upload:// 原样返回、无法加载,故预览必须替换)。
 export class UploadService {
@@ -59,7 +72,7 @@ export class UploadService {
     }
   }
 
-  // 上传单张图片。读文件 → (gif 原样 / 其余解码压缩为 jpeg) → base64 → 经 bridge 传 /uploads.json。
+  // 上传单张图片。读文件 → 按需优化(见 encodeForUpload) → base64 → 经 bridge 传 /uploads.json。
   // 成功返回 UploadedImage 并登记短码映射;失败返回 undefined。
   async uploadUri(uri: string): Promise<UploadedImage | undefined> {
     let encoded: EncodedImage | undefined;
@@ -130,32 +143,78 @@ export class UploadService {
     return `![${name}](${img.shortUrl})`;
   }
 
-  // 把 uri 编码成可上传的字节:gif 保留原文件(压缩会丢动画),其余解码后等比缩放并压成 jpeg。
+  // 把 uri 编码成可上传的字节。策略对齐 Discourse 官方 composer:只有 jpeg/png 且体积过门槛才重编码,
+  // 带透明通道编 WebP(不支持则 PNG)以保住 alpha,其余格式(gif/webp/bmp/…)一律原样传。
+  // 重编码失败、或结果反而更大,都退回原图字节——原图永远是安全兜底。
   private async encodeForUpload(uri: string): Promise<EncodedImage | undefined> {
-    const lower: string = uri.toLowerCase();
-    if (lower.endsWith('.gif')) {
-      return this.encodeRaw(uri, 'image.gif', 'image/gif');
-    }
-
     const file: fs.File = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+    try {
+      const originalSize: number = fs.statSync(file.fd).size;
+      const format: string = this.sniffFormat(file);
+      const raw: RawDescriptor = UploadService.rawDescriptor(format);
+
+      // gif/webp/bmp 等不重编码:gif 会丢动画,其余官方端同样不碰。
+      if (!raw.optimizable) {
+        return this.readRaw(file, originalSize, raw);
+      }
+      // HEIC 论坛多半不在 authorized_extensions 里,原样传会被拒,故无视体积门槛一律转码。
+      const mustConvert: boolean = format === 'heic';
+      if (!mustConvert && originalSize < BYTES_OPTIMIZATION_THRESHOLD) {
+        return this.readRaw(file, originalSize, raw);
+      }
+      // APNG 的动画帧会被解码器丢掉只剩首帧,故原样传。
+      if (format === 'png' && this.isAnimatedPng(file)) {
+        return this.readRaw(file, originalSize, raw);
+      }
+
+      let optimized: EncodedImage | undefined;
+      try {
+        optimized = await this.optimize(file, originalSize);
+      } catch (error) {
+        const err: BusinessError = error as BusinessError;
+        Log.i(`[ArkDO][Upload] optimize failed code=${err.code} msg=${err.message}, keeping original`);
+      }
+      return optimized ? optimized : this.readRaw(file, originalSize, raw);
+    } finally {
+      fs.closeSync(file);
+    }
+  }
+
+  // 解码 → 按需缩放 → 编码。返回 undefined 表示调用方应退回原图(结果没比原图小)。
+  private async optimize(file: fs.File, originalSize: number): Promise<EncodedImage | undefined> {
     let imageSource: image.ImageSource | undefined;
     let pixelMap: image.PixelMap | undefined;
     let packer: image.ImagePacker | undefined;
     try {
       imageSource = image.createImageSource(file.fd);
       const info: image.ImageInfo = await imageSource.getImageInfo();
-      const srcW: number = info.size.width;
-      const srcH: number = info.size.height;
-      const target: TargetSize = UploadService.fitWithin(srcW, srcH, MAX_EDGE);
+      const target: TargetSize = UploadService.fitWidth(info.size.width, info.size.height);
       const decodeOptions: image.DecodingOptions = {
         desiredSize: { width: target.width, height: target.height }
       };
       pixelMap = await imageSource.createPixelMap(decodeOptions);
+
+      // 有透明像素就不能编 JPEG(透明区会被拍平成黑底)。官方编 WebP;鸿蒙 packer 不支持 WebP 时退 PNG。
+      const transparent: boolean = await UploadService.hasTransparency(pixelMap);
       packer = image.createImagePacker();
-      const packOptions: image.PackingOption = { format: 'image/jpeg', quality: JPEG_QUALITY };
-      const arrayBuffer: ArrayBuffer = await packer.packing(pixelMap, packOptions);
+      const outputFormat: string = transparent ? UploadService.pickAlphaFormat(packer) : 'image/jpeg';
+      const packOptions: image.PackingOption = { format: outputFormat, quality: ENCODE_QUALITY };
+      const arrayBuffer: ArrayBuffer = await packer.packToData(pixelMap, packOptions);
+
+      // 编完不比原图小就没必要换:退回原图既省体积又零损失(PNG 无损重编码常撞上这条)。
+      if (arrayBuffer.byteLength >= originalSize) {
+        Log.i(`[ArkDO][Upload] encoded ${arrayBuffer.byteLength}B >= original ${originalSize}B, keeping original`);
+        return undefined;
+      }
+
       const base64: string = this.base64Helper.encodeToStringSync(new Uint8Array(arrayBuffer));
-      return { base64: base64, fileName: 'image.jpg', mimeType: 'image/jpeg', width: target.width, height: target.height };
+      return {
+        base64: base64,
+        fileName: UploadService.fileNameFor(outputFormat),
+        mimeType: outputFormat,
+        width: target.width,
+        height: target.height
+      };
     } finally {
       if (pixelMap) {
         pixelMap.release();
@@ -166,36 +225,151 @@ export class UploadService {
       if (imageSource) {
         imageSource.release();
       }
-      fs.closeSync(file);
     }
   }
 
-  // 原样读取文件字节并 base64(gif 等不宜重编码的格式)。宽高交给服务端(返 0 时省略尺寸段)。
-  private encodeRaw(uri: string, fileName: string, mimeType: string): EncodedImage {
-    const file: fs.File = fs.openSync(uri, fs.OpenMode.READ_ONLY);
-    try {
-      const stat: fs.Stat = fs.statSync(file.fd);
-      const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
-      fs.readSync(file.fd, buffer);
-      const base64: string = this.base64Helper.encodeToStringSync(new Uint8Array(buffer));
-      return { base64: base64, fileName: fileName, mimeType: mimeType, width: 0, height: 0 };
-    } finally {
-      fs.closeSync(file);
+  // 是否含透明像素。先用 alphaType 快速排除(照片/相机图都是 OPAQUE),只有可能带 alpha 时才真扫像素:
+  // 「有 alpha 通道」不等于「用到了透明」,截图 PNG 常常整幅不透明,扫完才敢放心编 JPEG。
+  private static async hasTransparency(pixelMap: image.PixelMap): Promise<boolean> {
+    const info: image.ImageInfo = await pixelMap.getImageInfo();
+    if (info.alphaType === image.AlphaType.OPAQUE) {
+      return false;
+    }
+    // 仅这两种排布的 alpha 落在每像素第 4 字节;其余格式(RGB_565/RGB_888…)本就无 alpha。
+    if (info.pixelFormat !== image.PixelMapFormat.RGBA_8888 &&
+      info.pixelFormat !== image.PixelMapFormat.BGRA_8888) {
+      return false;
+    }
+
+    const buffer: ArrayBuffer = new ArrayBuffer(pixelMap.getPixelBytesNumber());
+    await pixelMap.readPixelsToBuffer(buffer);
+    const bytes: Uint8Array = new Uint8Array(buffer);
+    // 逐行按 stride 走:行尾可能有对齐填充,填充字节是 0,顺序扫会把它误判成透明像素。
+    const width: number = info.size.width;
+    const height: number = info.size.height;
+    const stride: number = info.stride > 0 ? info.stride : width * 4;
+    for (let y: number = 0; y < height; y++) {
+      const rowStart: number = y * stride;
+      for (let x: number = 3; x < width * 4; x += 4) {
+        if (bytes[rowStart + x] < 255) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // 选一个能保住 alpha 的输出格式。官方用 WebP;鸿蒙 packer 是否支持 WebP 编码只能运行时问
+  // supportedFormats,不支持就退 PNG(无损、体积大些,总好过把透明拍平)。
+  private static pickAlphaFormat(packer: image.ImagePacker): string {
+    const supported: string[] = packer.supportedFormats;
+    return supported && supported.includes('image/webp') ? 'image/webp' : 'image/png';
+  }
+
+  private static fileNameFor(mimeType: string): string {
+    if (mimeType === 'image/webp') {
+      return 'image.webp';
+    }
+    if (mimeType === 'image/png') {
+      return 'image.png';
+    }
+    return 'image.jpg';
+  }
+
+  // 按文件头魔数判断真实格式。不能靠扩展名:相册返回的 uri 未必带真实后缀,
+  // 之前 gif 就是靠 .gif 后缀识别的,一旦 uri 不带后缀就会被压成静帧。
+  private sniffFormat(file: fs.File): string {
+    const header: ArrayBuffer = new ArrayBuffer(SNIFF_BYTES);
+    const read: number = fs.readSync(file.fd, header, { offset: 0 });
+    const b: Uint8Array = new Uint8Array(header);
+    if (read >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
+      return 'jpeg';
+    }
+    if (read >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
+      return 'png';
+    }
+    if (read >= 6 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) {
+      return 'gif';
+    }
+    if (read >= 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+      b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) {
+      return 'webp';
+    }
+    if (read >= 2 && b[0] === 0x42 && b[1] === 0x4d) {
+      return 'bmp';
+    }
+    // ISO-BMFF ftyp box:HEIC/HEIF 共用,品牌位不再细分(都走转码)。
+    if (read >= 12 && b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+      return 'heic';
+    }
+    return 'unknown';
+  }
+
+  // APNG 在首个 IDAT 前带 acTL 块;解码器只会给首帧,压了就丢动画,故需提前识别并原样传。
+  private isAnimatedPng(file: fs.File): boolean {
+    const buffer: ArrayBuffer = new ArrayBuffer(PNG_CHUNK_SCAN_BYTES);
+    const read: number = fs.readSync(file.fd, buffer, { offset: 0 });
+    const view: DataView = new DataView(buffer);
+    let offset: number = 8; // 跳过 PNG 签名
+    while (offset + 8 <= read) {
+      const length: number = view.getUint32(offset);
+      const type: string = String.fromCharCode(
+        view.getUint8(offset + 4), view.getUint8(offset + 5),
+        view.getUint8(offset + 6), view.getUint8(offset + 7));
+      if (type === 'acTL') {
+        return true;
+      }
+      if (type === 'IDAT' || type === 'IEND') {
+        return false;
+      }
+      offset += 12 + length; // length(4) + type(4) + data + crc(4)
+    }
+    return false;
+  }
+
+  // 原样读取文件字节并 base64。宽高交给服务端(/uploads.json 响应里带,故这里给 0 即可)。
+  private readRaw(file: fs.File, size: number, raw: RawDescriptor): EncodedImage {
+    const buffer: ArrayBuffer = new ArrayBuffer(size);
+    fs.readSync(file.fd, buffer, { offset: 0 });
+    const base64: string = this.base64Helper.encodeToStringSync(new Uint8Array(buffer));
+    return { base64: base64, fileName: raw.fileName, mimeType: raw.mimeType, width: 0, height: 0 };
+  }
+
+  // 各格式原样上传时的文件名/类型,以及是否该走重编码。
+  private static rawDescriptor(format: string): RawDescriptor {
+    switch (format) {
+      case 'png':
+        return { fileName: 'image.png', mimeType: 'image/png', optimizable: true };
+      case 'heic':
+        return { fileName: 'image.heic', mimeType: 'image/heic', optimizable: true };
+      case 'gif':
+        return { fileName: 'image.gif', mimeType: 'image/gif', optimizable: false };
+      case 'webp':
+        return { fileName: 'image.webp', mimeType: 'image/webp', optimizable: false };
+      case 'bmp':
+        return { fileName: 'image.bmp', mimeType: 'image/bmp', optimizable: false };
+      default: // jpeg 及嗅探不出的,按 jpeg 处理(与改造前的行为一致)
+        return { fileName: 'image.jpg', mimeType: 'image/jpeg', optimizable: true };
     }
   }
 
-  // 把 (w,h) 等比缩放到最长边不超过 maxEdge;本就不超则原样返回。
-  private static fitWithin(width: number, height: number, maxEdge: number): TargetSize {
-    const longest: number = Math.max(width, height);
-    if (longest <= maxEdge || longest === 0) {
+  // 宽度超过阈值则等比缩到目标宽度,否则原样返回。只看宽度是照抄官方:竖向长图因此保住原分辨率。
+  private static fitWidth(width: number, height: number): TargetSize {
+    if (width <= RESIZE_THRESHOLD || width === 0) {
       return { width: width, height: height };
     }
-    const ratio: number = maxEdge / longest;
     return {
-      width: Math.max(1, Math.round(width * ratio)),
-      height: Math.max(1, Math.round(height * ratio))
+      width: RESIZE_TARGET,
+      height: Math.max(1, Math.round((height / width) * RESIZE_TARGET))
     };
   }
+}
+
+// 某格式原样上传时的描述,以及它是否适合重编码。
+interface RawDescriptor {
+  fileName: string;
+  mimeType: string;
+  optimizable: boolean;
 }
 
 // 编码后待上传的图片字节。
