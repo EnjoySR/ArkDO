@@ -167,6 +167,30 @@
     {
       "name": "boost_bubble_bg",
       "value": "#26292E"
+    },
+    {
+      "name": "fab_compose_bg",
+      "value": "#3AA3DC"
+    },
+    {
+      "name": "fab_compose_fg",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "fab_top_bg",
+      "value": "#2A2E33"
+    },
+    {
+      "name": "fab_top_fg",
+      "value": "#C5CAD1"
+    },
+    {
+      "name": "fab_top_border",
+      "value": "#33FFFFFF"
+    },
+    {
+      "name": "fab_shadow",
+      "value": "#66000000"
     }
   ]
 }

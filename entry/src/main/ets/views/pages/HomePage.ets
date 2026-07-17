@@ -17,13 +17,15 @@ import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
 import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
 import { CategoryDrawer } from '../components/CategoryDrawer';
+import { HomeFab } from '../components/HomeFab';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SEARCH_OVERLAY_VISIBLE_KEY, SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
-import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { PostRichContent } from '../components/PostRichContent';
 import { VersionAnnouncement, VersionAnnouncementService } from '../../services/announce/VersionAnnouncement';
 import { bundleManager } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
+import { FrameCallback } from '@kit.ArkUI';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -36,6 +38,31 @@ const ANNOUNCE_DIAG: string = '[ArkDO][ANNOUNCE_DIAG]';
 // 记「已弹过的 versionCode」的偏好 key(全项目共用 'app_settings' 库)。
 const ANNOUNCE_PREFS_NAME: string = 'app_settings';
 const ANNOUNCE_SHOWN_CODE_KEY: string = 'announce_shown_version_code';
+// 右下角悬浮按钮换成「回到顶部」的滚动阈值,单位=视口高的倍数。
+// 浮现/收起取不同值形成滞回区:轻微滑动不该把发帖入口换掉(1.5 屏才浮现),
+// 也不能让用户停在临界点时图标反复 morph(退回 1.2 屏才变回发帖)。
+const FAB_TOP_SHOW_RATIO: number = 1.5;
+const FAB_TOP_HIDE_RATIO: number = 1.2;
+// 回顶动画:只有最后一屏走动画,这是那一屏的时长。
+const SCROLL_TOP_MS: number = 380;
+// 瞬移落地的重试上限:惯性未停时 scrollTo 可能被"顶回去",逐帧再钉;超过则放弃动画直接到顶,
+// 宁可生硬也不能卡在半路。
+const SCROLL_TOP_MAX_RETRY: number = 3;
+
+// 下一帧回调。setTimeout(0) 只是"下一个宏任务",跟"上一帧已渲染"没有任何保证关系,
+// 用它串瞬移→动画会时灵时不灵;postFrameCallback 才是真正的帧边界。
+class NextFrameTask extends FrameCallback {
+  private readonly run: () => void;
+
+  constructor(run: () => void) {
+    super();
+    this.run = run;
+  }
+
+  onFrame(_frameTimeInNano: number): void {
+    this.run();
+  }
+}
 
 @Component
 export struct HomePage {
@@ -68,6 +95,12 @@ export struct HomePage {
   @State private unreadNotifications: number = 0;
   private unsubscribeNotifications?: () => void = undefined;
   private categoryIndex: CategoryIndex = new CategoryIndex();
+  // 帖子列表的 Scroller:回顶按钮要用它跳回顶部,滚动阈值判定也靠它读当前偏移。
+  private listScroller: Scroller = new Scroller();
+  // 右下角悬浮按钮当前身份:false=发帖,true=回到顶部。由滚动位置驱动。
+  @State private showBackToTopFab: boolean = false;
+  // 列表视口实测高度(vp):把滚动偏移换算成"滑过几屏"的分母,onAreaChange 量得。
+  @State private listViewportH: number = 0;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   @Prop accountUser: User = { id: 0, username: '' };
@@ -90,6 +123,9 @@ export struct HomePage {
   // 窗口常驻全屏布局:主体内容自行避让状态栏(padding 加在带背景的主体列,背景填满状态栏条);
   // 遮罩与抽屉不加,天然盖满整屏。
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
+  // 列表区 Stack 铺进了底部安全区(expandSafeArea BOTTOM),悬浮按钮得自己躲开手势条,
+  // 否则 16vp 的底边距会把它压在导航指示条上。
+  @StorageProp(SYS_BOTTOM_INSET_KEY) private sysBottomInset: number = 0;
   onTopicClick: (topic: Topic) => void = () => {};
   // 按帖子 ID 直接跳转详情(通用入口,不依赖完整 Topic 对象)。
   onOpenTopicById: (topicId: number) => void = () => {};
@@ -162,6 +198,68 @@ export struct HomePage {
     }
   }
 
+  // 按当前滚动偏移决定右下角按钮的身份。滞回:滑过 1.5 屏才换成回顶,退回 1.2 屏内才变回发帖。
+  private updateFabMode(): void {
+    if (this.listViewportH <= 0) {
+      return;
+    }
+    const y: number = this.listScroller.currentOffset().yOffset;
+    if (!this.showBackToTopFab && y > this.listViewportH * FAB_TOP_SHOW_RATIO) {
+      this.showBackToTopFab = true;
+    } else if (this.showBackToTopFab && y < this.listViewportH * FAB_TOP_HIDE_RATIO) {
+      this.showBackToTopFab = false;
+    }
+  }
+
+  // 回到顶部。两难:列表可能已翻几十页,真把几万 vp 滚完既慢又晕;直接跳又太生硬——
+  // 人眼没有位移可跟,只看到画面瞬变。故两段式:先无动画瞬移到离顶一屏的"起跑线"
+  // (这段本来滚起来也只是一片糊,看不清等于没损失),再把最后一屏用动画滑完,
+  // 给出一个跟得住的"到站"过程。观感上花的是一屏的钱,买的是全程动画的感觉。
+  private scrollToTop(): void {
+    // 立刻换回发帖态:morph 与这段滚动同时进行,按钮和列表一起"到站"。
+    this.showBackToTopFab = false;
+    const runway: number = this.listViewportH;
+    if (runway <= 0) {
+      // 视口没量到就别耍花活,老老实实到顶。
+      this.listScroller.scrollEdge(Edge.Top);
+      return;
+    }
+    if (this.listScroller.currentOffset().yOffset <= runway) {
+      // 本来就在一屏内,直接动画滑完。
+      this.animateScrollToTop();
+      return;
+    }
+    this.teleportThenAnimate(runway, 0);
+  }
+
+  // 瞬移到起跑线,并在下一帧确认它真的落地了再起动画。
+  // 之所以要"确认":点击时列表可能还在惯性滑行,惯性会把瞬移顶回去,
+  // 动画段于是又从几万 vp 外起跑——这正是回顶时灵时不灵的来源。
+  private teleportThenAnimate(runway: number, attempt: number): void {
+    this.listScroller.scrollTo({ xOffset: 0, yOffset: runway });
+    this.getUIContext().postFrameCallback(new NextFrameTask(() => {
+      // 1vp 容差:像素取整/浮点误差,不必较真。
+      if (this.listScroller.currentOffset().yOffset <= runway + 1) {
+        this.animateScrollToTop();
+        return;
+      }
+      if (attempt + 1 < SCROLL_TOP_MAX_RETRY) {
+        this.teleportThenAnimate(runway, attempt + 1);
+      } else {
+        // 惯性太顽固,放弃动画:生硬到顶也好过卡在半路。
+        this.listScroller.scrollEdge(Edge.Top);
+      }
+    }));
+  }
+
+  private animateScrollToTop(): void {
+    this.listScroller.scrollTo({
+      xOffset: 0,
+      yOffset: 0,
+      animation: { duration: SCROLL_TOP_MS, curve: Curve.EaseOut }
+    });
+  }
+
   // 手指位移(向左为负)换算成 0~1 进度,夹在区间内。
   private swipeProgressOf(offsetX: number): number {
     if (this.swipeAreaWidth <= 0) {
@@ -207,9 +305,10 @@ export struct HomePage {
       .height(56)
       .padding({ left: 12, right: 12, top: 16, bottom: 14 })
 
-      Stack() {
+      // BottomEnd 供右下角悬浮按钮定位;Refresh 与空态列都是 100%×100%,不受对齐方式影响。
+      Stack({ alignContent: Alignment.BottomEnd }) {
         Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
-          List() {
+          List({ scroller: this.listScroller }) {
             ForEach(this.topics, (topic: Topic) => {
               TopicListItem({
                 topic: topic,
@@ -257,6 +356,9 @@ export struct HomePage {
           .onReachEnd(() => {
             this.loadMoreTopics();
           })
+          .onDidScroll(() => {
+            this.updateFabMode();
+          })
         }
         .width('100%')
         .height('100%')
@@ -300,10 +402,30 @@ export struct HomePage {
           .justifyContent(FlexAlign.Center)
           .hitTestBehavior(HitTestMode.Transparent)
         }
+
+        // 悬浮按钮:发帖 / 回到顶部同占一个坑位,按滚动位置换身份(详见 HomeFab)。
+        // 列表为空时(加载中/失败/CF 挑战)不出现——既无从回顶,空态下也不该冒出主动作。
+        if (this.topics.length > 0) {
+          HomeFab({
+            showBackToTop: this.showBackToTopFab,
+            onCompose: () => {
+              // TODO(阶段二):接发帖链路(TopicService.createTopic + ComposerPage 加标题/分类)。
+              this.getUIContext().getPromptAction().showToast({ message: '发帖功能开发中', duration: 1500 });
+            },
+            onBackToTop: () => {
+              this.scrollToTop();
+            }
+          })
+            .margin({ right: 16, bottom: 16 + this.sysBottomInset })
+        }
       }
       .width('100%')
       .layoutWeight(1)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      // 视口实测高度:换算"滑过几屏"的分母。窗口尺寸/分栏变化时会重新量。
+      .onAreaChange((_oldArea: Area, newArea: Area) => {
+        this.listViewportH = Number(newArea.height);
+      })
     }
     .width('100%')
     .height('100%')
@@ -663,6 +785,8 @@ export struct HomePage {
     this.currentPage = 0;
     this.hasMore = true;
     this.loadFailed = false;
+    // 换内容源后列表从头开始,按钮身份跟着复位——否则会卡在回顶态(新列表已在顶部,却显示回顶)。
+    this.showBackToTopFab = false;
     this.refreshLatestTopics();
   }
 
