@@ -75,6 +75,10 @@ export struct NotificationPage {
       .width('100%')
       .height(56)
       .padding({ left: 12, right: 8 })
+      .border({
+        width: { bottom: 1 },
+        color: $r('app.color.border')
+      })
 
       this.Content()
     }
