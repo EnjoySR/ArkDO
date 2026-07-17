@@ -8,15 +8,25 @@ import { JsonNetworkClient } from '../../services/network/NetworkTypes';
 import { UploadService, UploadedImage } from '../../services/upload/UploadService';
 import { MarkdownRenderService } from '../../services/content/MarkdownRenderService';
 import { MarkdownToolbar } from '../components/MarkdownToolbar';
+import { TopicCategory } from '../../models/Topic';
+import { CategoryIndex } from '../../services/site/CategoryIndex';
+import { getCategoryColor, getCategoryIcon, getCategoryLogo, getTagColor, getTagIcon, resolveBadgeAssetUrl } from '../components/TopicBadgeUtils';
+import { FaIconDefinition, FaIconView } from '../components/FaIcon';
+import { TagSuggestion, TopicService } from '../../services/topic/TopicService';
+import { NetworkResult } from '../../services/network/NetworkTypes';
 import { PostRichContent } from '../components/PostRichContent';
 import { applyAction, EditState, MdAction } from '../../utils/markdownInsert';
 
 const LOG_TAG: string = '[ArkDO][Composer]';
 // 一次最多选图张数(对齐 Discourse composer 手感)。
 const MAX_PICK: number = 9;
+// 发帖最多可选标签数(对齐站点 max_tags_per_topic)。
+const MAX_TAGS: number = 8;
 // 编辑区焦点 id:内联挂载时 defaultFocus 不可靠(展开前内联输入条卸载会收键盘),挂载后
 // 主动 requestFocus 把键盘弹回来,焦点无缝落到全屏编辑区。
 const EDIT_FOCUS_ID: string = 'arkdoComposerInput';
+// 标题输入焦点 id(仅发帖模式):发帖从标题写起,键盘首帧就弹给它。
+const TITLE_FOCUS_ID: string = 'arkdoComposerTitle';
 // 一镜到底共享元素 id:详情页底部输入条(源)与本页主面板(目标)标同一 id,展开时由同一
 // animateTo 插值——输入条几何生长铺满全屏(对齐首页搜索的 geometryTransition 手法)。
 export const COMPOSER_GEOMETRY_ID: string = 'arkdo-composer-surface';
@@ -27,6 +37,13 @@ export const COMPOSER_ANIM_MS: number = 280;
 // 返回键须由详情页所在 NavDestination.onBackPressed 拦截——可见时 bump BACK_TICK,详情页监听后关闭。
 export const COMPOSER_OVERLAY_VISIBLE_KEY: string = 'composerOverlayVisible';
 export const COMPOSER_OVERLAY_BACK_TICK_KEY: string = 'composerOverlayBackTick';
+
+// 分类选择器一行的入参(@Builder 单对象约束)。
+interface PickerRowParams {
+  category: TopicCategory;
+  parent: TopicCategory;
+  isChild: boolean;
+}
 
 // 编辑器两种模式:源码编辑 / 只读预览。切换走同页 animateTo 交叉过渡(不跳路由)。
 enum ComposerMode {
@@ -59,6 +76,47 @@ export struct ComposerPage {
   // 返回 true 表示提交成功(随即返回);false 保留内容供重试。typing/composer 时长对齐官方遥测。
   onSubmit: (raw: string, typingMs: number, composerMs: number) => Promise<boolean> =
     (raw: string, typingMs: number, composerMs: number) => Promise.resolve(false);
+
+  // ===== 发新主题模式 =====
+  // true=发新帖(多出标题输入 + 分类选择,走 onSubmitTopic);false=回帖(原样走 onSubmit)。
+  // 用开关而非改 onSubmit 签名:回帖没有标题/分类,硬塞进同一个回调会让详情页那条链路凭空
+  // 多两个恒为空的参数。
+  composeTopic: boolean = false;
+  // 全量分类(未筛)。选择器内部走 CategoryIndex 与侧边栏共用筛选/树,不在外部预筛。
+  categories: TopicCategory[] = [];
+  onSubmitTopic: (title: string, categoryId: number, raw: string, tags: string[], typingMs: number, composerMs: number) => Promise<boolean> =
+    (title: string, categoryId: number, raw: string, tags: string[], typingMs: number, composerMs: number) => Promise.resolve(false);
+
+  @State private title: string = '';
+  // 已选分类 id;-1=未选(发送置灰)。
+  @State private categoryId: number = -1;
+  // 分类选择器(底部弹窗)开关。
+  @State private categoryPickerVisible: boolean = false;
+  // 树形选择器里当前展开的父版块 id;-1=全收起。单展开,与侧边栏手感一致。
+  @State private expandedParentId: number = -1;
+  // 底部浮层向下拖拽位移(vp);自绘浮层没有 bindSheet 的下拉关闭,靠这个跟手 + 松手判阈值。
+  // 同时只开一个浮层,故两个面板共用此值。
+  @State private sheetDragY: number = 0;
+
+  // 选中分类的前导图标三件套,存 @State 直接驱动 chip 渲染。
+  // 图标不用 FaIconView 而是内联 Image:FaIconView 是自定义组件、icon 是普通属性,chip 里复用同一
+  // 实例时普通属性不随父级更新(只有 @Prop/@Link 才同步),换分类图标刷不上屏。内置 Image 直接读
+  // @State 字符串则可靠重绘。selCatIconPath 空=无图标,退到 logo→兜底色点。
+  @State private selCatIconPath: string = '';
+  @State private selCatLogo: string = '';
+  @State private selCatColor: string = '#999999';
+
+  // 已选标签(发帖必选≥1)。标签隶属分类:换分类后清空重选。
+  @State private selectedTags: TagSuggestion[] = [];
+  // 标签选择器(底部弹窗)开关 + 搜索词 + 联想结果 + 加载态。
+  @State private tagPickerVisible: boolean = false;
+  @State private tagQuery: string = '';
+  @State private tagResults: TagSuggestion[] = [];
+  @State private tagLoading: boolean = false;
+  // 联想请求防抖计时器句柄;输入停顿后才发一次,避免逐字打字狂发请求。
+  private tagDebounceTimer: number = -1;
+  // 本轮联想请求的序号:异步返回乱序时只认最后一发,防旧结果盖新结果。
+  private tagQuerySeq: number = 0;
 
   @State private text: string = '';
   @State private mode: ComposerMode = ComposerMode.Edit;
@@ -122,6 +180,11 @@ export struct ComposerPage {
 
   aboutToDisappear(): void {
     this.mdService.detach();
+    // 卸载时清掉未触发的防抖计时器,免得回调在页面已销毁后触碰 @State。
+    if (this.tagDebounceTimer !== -1) {
+      clearTimeout(this.tagDebounceTimer);
+      this.tagDebounceTimer = -1;
+    }
     // 关闭前主动收键盘:否则键盘残留 + 还原 OFFSET 会把背后详情页整页顶起(实测"整个页面往上跑")。
     try {
       inputMethod.getController().stopInputSession();
@@ -140,7 +203,114 @@ export struct ComposerPage {
   }
 
   private canSubmit(): boolean {
-    return !this.isSubmitting && this.trimmedLength() >= this.minChars;
+    if (this.isSubmitting || this.trimmedLength() < this.minChars) {
+      return false;
+    }
+    // 发帖还得有标题、选了分类、至少一个标签。标题的长度下限不在本地猜(站点 min_topic_title_length
+    // 未知,猜严了会误伤合法标题),只拦空;真不够长由服务端报错原文告知。
+    if (this.composeTopic) {
+      return this.title.trim().length > 0 && this.categoryId >= 0 && this.selectedTags.length > 0;
+    }
+    return true;
+  }
+
+  // 发送按钮置灰时点它:说清楚缺什么,而不是毫无反应。
+  private explainBlockedSubmit(): void {
+    if (this.composeTopic && this.title.trim().length === 0) {
+      this.showToast('还没写标题');
+      return;
+    }
+    if (this.composeTopic && this.categoryId < 0) {
+      this.showToast('还没选分类');
+      return;
+    }
+    if (this.composeTopic && this.selectedTags.length === 0) {
+      this.showToast('至少选一个标签');
+      return;
+    }
+    if (this.trimmedLength() < this.minChars) {
+      this.showToast(`至少还需 ${this.minChars - this.trimmedLength()} 个字`);
+    }
+  }
+
+  private selectedCategoryName(): string {
+    const hit: TopicCategory | undefined = this.categories.find((c: TopicCategory) => c.id === this.categoryId);
+    return hit ? hit.name : '选择分类';
+  }
+
+  // 选中分类变化后,把前导图标三件套算好写进 @State(与选择器/侧边栏同一套 TopicBadgeUtils)。
+  // 走 @State 而非 chip 里方法调用:见 selCatIcon 字段处注释(方法调用藏依赖,图标不更新)。
+  private refreshSelectedCategoryVisual(): void {
+    const cat: TopicCategory | undefined = this.categories.find((c: TopicCategory) => c.id === this.categoryId);
+    if (!cat) {
+      this.selCatIconPath = '';
+      this.selCatLogo = '';
+      this.selCatColor = '#999999';
+      return;
+    }
+    const parent: TopicCategory | undefined = cat.parentCategoryId !== undefined
+      ? this.categories.find((c: TopicCategory) => c.id === cat.parentCategoryId)
+      : undefined;
+    const icon: FaIconDefinition | undefined = getCategoryIcon(cat, parent);
+    this.selCatIconPath = icon ? icon.rawfilePath : '';
+    this.selCatLogo = getCategoryLogo(cat, parent);
+    this.selCatColor = getCategoryColor(cat);
+  }
+
+  private isTagSelected(id: number): boolean {
+    return this.selectedTags.some((t: TagSuggestion) => t.id === id);
+  }
+
+  // 打开标签选择器:清空搜索词,立刻拉一遍热门标签(q 为空)。
+  private openTagPicker(): void {
+    this.tagQuery = '';
+    this.tagResults = [];
+    this.sheetDragY = 0;
+    this.tagPickerVisible = true;
+    this.fetchTags('');
+  }
+
+  // 搜索词变化:防抖 250ms 再查(输入停顿才发一次,避免逐字狂发)。
+  private onTagQueryChanged(value: string): void {
+    if (this.tagDebounceTimer !== -1) {
+      clearTimeout(this.tagDebounceTimer);
+    }
+    this.tagDebounceTimer = setTimeout(() => {
+      this.tagDebounceTimer = -1;
+      this.fetchTags(value.trim());
+    }, 250);
+  }
+
+  private async fetchTags(query: string): Promise<void> {
+    if (!this.bridge || this.categoryId < 0) {
+      return;
+    }
+    const seq: number = ++this.tagQuerySeq;
+    this.tagLoading = true;
+    const selectedIds: number[] = this.selectedTags.map((t: TagSuggestion) => t.id);
+    const result: NetworkResult<TagSuggestion[]> = await new TopicService(this.bridge)
+      .searchTags(this.categoryId, query, selectedIds);
+    // 只认最后一发:防慢请求的旧结果盖掉新结果。
+    if (seq !== this.tagQuerySeq) {
+      return;
+    }
+    this.tagLoading = false;
+    this.tagResults = result.success && result.data ? result.data : [];
+  }
+
+  // 选/取消一个标签。选中后重查(带上新 selected_tag_ids,把已选项从联想里排除并 refine)。
+  private toggleTag(tag: TagSuggestion): void {
+    if (this.isTagSelected(tag.id)) {
+      this.selectedTags = this.selectedTags.filter((t: TagSuggestion) => t.id !== tag.id);
+    } else {
+      // 已达上限:不再加,提示。取消已选不受限,故只在新增分支拦。
+      if (this.selectedTags.length >= MAX_TAGS) {
+        this.showToast(`最多选 ${MAX_TAGS} 个标签`);
+        return;
+      }
+      this.selectedTags = this.selectedTags.concat(tag);
+    }
+    this.fetchTags(this.tagQuery.trim());
   }
 
   private showToast(message: string): void {
@@ -238,9 +408,7 @@ export struct ComposerPage {
 
   private async submit(): Promise<void> {
     if (!this.canSubmit()) {
-      if (this.trimmedLength() < this.minChars) {
-        this.showToast(`至少还需 ${this.minChars - this.trimmedLength()} 个字`);
-      }
+      this.explainBlockedSubmit();
       return;
     }
     this.isSubmitting = true;
@@ -248,7 +416,9 @@ export struct ComposerPage {
     const composerMs: number = this.appearTimeMs > 0 ? Date.now() - this.appearTimeMs : 0;
     let ok: boolean = false;
     try {
-      ok = await this.onSubmit(this.text.trim(), typingMs, composerMs);
+      ok = this.composeTopic
+        ? await this.onSubmitTopic(this.title.trim(), this.categoryId, this.text.trim(), this.selectedTags.map((t: TagSuggestion) => t.name), typingMs, composerMs)
+        : await this.onSubmit(this.text.trim(), typingMs, composerMs);
     } catch (error) {
       ok = false;
     }
@@ -262,6 +432,10 @@ export struct ComposerPage {
     Stack({ alignContent: Alignment.TopStart }) {
       Column() {
         this.Header()
+        // 发帖模式:标题 + 分类。预览态藏起来——预览是看正文成品的,标题栏杵在那儿只是干扰。
+        if (this.composeTopic && this.mode === ComposerMode.Edit) {
+          this.TopicMetaBar()
+        }
         this.ContentArea()
         if (this.mode === ComposerMode.Edit) {
           MarkdownToolbar({
@@ -323,10 +497,147 @@ export struct ComposerPage {
         .backgroundColor('#33000000')
         .hitTestBehavior(HitTestMode.Block)
       }
+
+      // 分类 / 标签选择器:自绘底部浮层,不用 bindSheet。
+      // 原因:bindSheet 的入场动画会被本页手动键盘避让触发的全局 animateTo 打断(收键盘那一下),
+      // 表现为「弹窗一闪就没、键盘收了又弹」。自绘浮层由 if + transition 驱动,不吃这套竞态。
+      // 内容必须直接调用无参 @Builder(读 this.xxx)——@Builder 按值参数传 content 不随 @State 重绘,
+      // 标签联想结果会刷不上屏,故两个浮层各自展开写,不抽 content 参数。
+      if (this.categoryPickerVisible) {
+        Stack({ alignContent: Alignment.Bottom }) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor('#66000000')
+            .onClick(() => { this.closeSheet(1); })
+
+          Column() {
+            this.SheetHeader('选择分类', 1)
+            Column() {
+              this.CategoryPickerSheet()
+            }
+            .layoutWeight(1)
+            .width('100%')
+          }
+          .width('100%')
+          .height('66%')
+          .backgroundColor($r('app.color.page_bg'))
+          .borderRadius({ topLeft: 20, topRight: 20 })
+          .padding({ bottom: this.sysBottomInset })
+          .clip(true)
+          .translate({ y: this.sheetDragY })
+          .transition(TransitionEffect.move(TransitionEdge.BOTTOM).combine(TransitionEffect.OPACITY)
+            .animation({ duration: 240, curve: Curve.EaseOut }))
+        }
+        .width('100%')
+        .height('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.EaseOut }))
+      }
+
+      if (this.tagPickerVisible) {
+        Stack({ alignContent: Alignment.Bottom }) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor('#66000000')
+            .onClick(() => { this.closeSheet(2); })
+
+          Column() {
+            this.SheetHeader('选择标签', 2)
+            Column() {
+              this.TagPickerSheet()
+            }
+            .layoutWeight(1)
+            .width('100%')
+          }
+          .width('100%')
+          .height('80%')
+          .backgroundColor($r('app.color.page_bg'))
+          .borderRadius({ topLeft: 20, topRight: 20 })
+          .padding({ bottom: this.sysBottomInset })
+          .clip(true)
+          .translate({ y: this.sheetDragY })
+          .transition(TransitionEffect.move(TransitionEdge.BOTTOM).combine(TransitionEffect.OPACITY)
+            .animation({ duration: 240, curve: Curve.EaseOut }))
+        }
+        .width('100%')
+        .height('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.EaseOut }))
+      }
     }
     .width('100%')
     .height('100%')
     // 根 Stack 透明:一镜到底期间生长面板之外露出背后详情页(面板全开时自身 page_bg 盖满)。
+  }
+
+  // 关闭指定浮层并复位拖拽位移。which:1=分类 2=标签。
+  private closeSheet(which: number): void {
+    if (which === 1) {
+      this.categoryPickerVisible = false;
+    } else {
+      this.tagPickerVisible = false;
+    }
+    this.sheetDragY = 0;
+  }
+
+  // 浮层顶部:抓手条 + 标题 + 关闭按钮。which:1=分类 2=标签(值参数静态,不涉重绘)。
+  // 整个头部区域可竖向拖拽关闭(bindSheet 自带的下拉关闭在自绘浮层里没有,手动补):
+  // 手势只挂头部、不挂内容,避免跟内部列表滚动抢竖向手势。
+  @Builder
+  private SheetHeader(title: string, which: number) {
+    Column() {
+      Row()
+        .width(36)
+        .height(4)
+        .borderRadius(2)
+        .backgroundColor($r('app.color.border'))
+        .margin({ top: 8, bottom: 4 })
+
+      Row() {
+        Text(title)
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+          .layoutWeight(1)
+        Button({ type: ButtonType.Circle, stateEffect: true }) {
+          SymbolGlyph($r('sys.symbol.xmark'))
+            .fontSize(16)
+            .fontColor([$r('app.color.text_secondary')])
+            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+        }
+        .width(32)
+        .height(32)
+        .backgroundColor($r('app.color.surface_muted'))
+        .onClick(() => {
+          this.closeSheet(which);
+        })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 12, top: 4, bottom: 8 })
+    }
+    .width('100%')
+    .gesture(
+      PanGesture({ direction: PanDirection.Vertical, distance: 5 })
+        .onActionUpdate((event: GestureEvent) => {
+          // 只跟向下拖(≥0),向上不拉伸。
+          this.sheetDragY = Math.max(0, event.offsetY);
+        })
+        .onActionEnd((event: GestureEvent) => {
+          // 拖过 90vp 或向下甩得够快就关,否则弹回原位。
+          if (this.sheetDragY > 90 || event.velocityY > 800) {
+            this.closeSheet(which);
+          } else {
+            this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+              this.sheetDragY = 0;
+            });
+          }
+        })
+        .onActionCancel(() => {
+          this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+            this.sheetDragY = 0;
+          });
+        })
+    )
   }
 
   @Builder
@@ -380,6 +691,398 @@ export struct ComposerPage {
     .alignItems(VerticalAlign.Center)
   }
 
+  // 发帖专属:标题输入 + 分类选择,通栏发丝线与正文分组(对齐项目的鸿蒙清爽风,不套卡片)。
+  @Builder
+  private TopicMetaBar() {
+    Column() {
+      // 不硬设 height:TextInput 自身 padding 被外层固定高压死会把光标上下切掉(项目既有坑),
+      // 故只给上下 padding 撑开。
+      TextInput({ text: $$this.title, placeholder: '标题' })
+        .id(TITLE_FOCUS_ID)
+        .width('100%')
+        .backgroundColor(Color.Transparent)
+        .borderRadius(0)
+        .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+        .fontSize(18)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .placeholderColor($r('app.color.text_tertiary'))
+        .enterKeyType(EnterKeyType.Next)
+        .onChange((value: string) => {
+          // 标题也算"开始写了":遥测的 typing 起点不该只认正文。
+          if (this.firstTypeTimeMs === 0 && value.length > 0) {
+            this.firstTypeTimeMs = Date.now();
+          }
+        })
+        // 挂载即抢焦点:发帖从标题写起,键盘直接弹给标题。
+        .onAppear(() => {
+          this.getUIContext().getFocusController().requestFocus(TITLE_FOCUS_ID);
+        })
+
+      // 分类 chip + 已选标签 chips + 「加标签」按钮,一行放不下自动换行。
+      // 间距一律用右边距+下边距(不用左边距):首列无前导边距→换行后各行左对齐;下边距→撑出行间距。
+      Flex({ wrap: FlexWrap.Wrap, alignItems: ItemAlign.Center }) {
+        this.CategoryChip()
+
+        ForEach(this.selectedTags, (tag: TagSuggestion) => {
+          this.SelectedTagChip(tag)
+        }, (tag: TagSuggestion) => `t${tag.id}`)
+
+        this.AddTagChip()
+      }
+      .width('100%')
+      // 底 padding 调小:每个 chip 自带 bottom:8,末行已有下缝,这里只补一点点。
+      .padding({ left: 16, right: 16, bottom: 2 })
+
+      Divider()
+        .strokeWidth(0.5)
+        .color($r('app.color.border'))
+    }
+    .width('100%')
+  }
+
+  // 已选标签 chip:点 × 移除。
+  @Builder
+  private SelectedTagChip(tag: TagSuggestion) {
+    Row() {
+      // 有映射图标的标签带上图标(与首页/联想列表一致)。
+      if (getTagIcon(tag.name)) {
+        FaIconView({ icon: getTagIcon(tag.name) as FaIconDefinition, color: getTagColor(tag.name), iconSize: 12 })
+          .margin({ right: 5 })
+      }
+      Text(tag.name)
+        .fontSize(13)
+        .fontColor($r('app.color.brand'))
+
+      SymbolGlyph($r('sys.symbol.xmark'))
+        .fontSize(11)
+        .fontColor([$r('app.color.brand')])
+        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+        .margin({ left: 5 })
+    }
+    .padding({ left: 10, right: 9, top: 6, bottom: 6 })
+    .backgroundColor($r('app.color.info_soft_bg'))
+    .borderRadius(14)
+    .margin({ right: 8, bottom: 8 })
+    .onClick(() => {
+      this.selectedTags = this.selectedTags.filter((t: TagSuggestion) => t.id !== tag.id);
+    })
+  }
+
+  // 「加标签」按钮:未选分类时禁用(标签隶属分类,没分类无从查起)。
+  @Builder
+  private AddTagChip() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.plus'))
+        .fontSize(12)
+        .fontColor([this.categoryId >= 0 ? $r('app.color.text_body') : $r('app.color.text_tertiary')])
+        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+      Text(this.selectedTags.length > 0 ? '标签' : '添加标签')
+        .fontSize(13)
+        .fontColor(this.categoryId >= 0 ? $r('app.color.text_body') : $r('app.color.text_tertiary'))
+        .margin({ left: 4 })
+    }
+    .padding({ left: 10, right: 12, top: 6, bottom: 6 })
+    .backgroundColor($r('app.color.surface_muted'))
+    .borderRadius(14)
+    .margin({ right: 8, bottom: 8 })
+    .onClick(() => {
+      if (this.categoryId < 0) {
+        this.showToast('请先选择分类');
+        return;
+      }
+      if (this.selectedTags.length >= MAX_TAGS) {
+        this.showToast(`最多选 ${MAX_TAGS} 个标签`);
+        return;
+      }
+      try {
+        inputMethod.getController().stopInputSession();
+      } catch (err) {
+      }
+      this.openTagPicker();
+    })
+  }
+
+  @Builder
+  private CategoryChip() {
+    Row() {
+      // 选中后带上该分类图标(图标→上传 logo→兜底色点),与选择器/侧边栏一致。
+      // 图标内联 Image(而非 FaIconView),内置组件直接读 @State 才会随换分类重绘,见字段处注释。
+      if (this.categoryId >= 0) {
+        if (this.selCatIconPath.length > 0) {
+          Image($rawfile(this.selCatIconPath))
+            .objectFit(ImageFit.Contain)
+            .renderMode(ImageRenderMode.Template)
+            .fillColor(this.selCatColor)
+            .draggable(false)
+            .width(13)
+            .height(13)
+            .margin({ right: 6 })
+        } else if (this.selCatLogo.length > 0) {
+          Image(resolveBadgeAssetUrl(this.selCatLogo))
+            .width(13)
+            .height(13)
+            .objectFit(ImageFit.Contain)
+            .margin({ right: 6 })
+        } else {
+          Circle()
+            .width(9)
+            .height(9)
+            .fill(this.selCatColor)
+            .margin({ right: 6 })
+        }
+      }
+
+      Text(this.selectedCategoryName())
+        .fontSize(13)
+        .fontColor(this.categoryId >= 0 ? $r('app.color.text_body') : $r('app.color.text_tertiary'))
+
+      SymbolGlyph($r('sys.symbol.chevron_down'))
+        .fontSize(11)
+        .fontColor([$r('app.color.icon_secondary')])
+        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+        .margin({ left: 5 })
+    }
+    .padding({ left: 12, right: 10, top: 6, bottom: 6 })
+    .backgroundColor($r('app.color.surface_muted'))
+    .borderRadius(14)
+    .margin({ right: 8, bottom: 8 })
+    .onClick(() => {
+      // 开选择器前先收键盘:底部弹窗与键盘抢占底部空间,不收会打架。
+      try {
+        inputMethod.getController().stopInputSession();
+      } catch (err) {
+      }
+      // 弹窗一开就展开相关父级:选中的是子版块→展开其父;选中的是有子版块的父→展开它自身
+      // (方便直接改选到它的子版块);否则收起。
+      const selected: TopicCategory | undefined = this.categories.find((c: TopicCategory) => c.id === this.categoryId);
+      if (selected && selected.parentCategoryId !== undefined) {
+        this.expandedParentId = selected.parentCategoryId;
+      } else if (selected && CategoryIndex.hasChildren(this.categories, selected.id)) {
+        this.expandedParentId = selected.id;
+      } else {
+        this.expandedParentId = -1;
+      }
+      this.sheetDragY = 0;
+      this.categoryPickerVisible = true;
+    })
+  }
+
+  // 分类选择器:与侧边栏共用 CategoryIndex 的筛选与父子树,看到的版块集合、层级、图标全一致。
+  // 用底部弹窗承载(发帖是全屏浮层,再嵌树用 bindSheet 最稳);选中即关。
+  // 标题/关闭由外层 SheetHeader 承担,这里只出内容。
+  @Builder
+  private CategoryPickerSheet() {
+    Column() {
+      Scroll() {
+        Column() {
+          ForEach(CategoryIndex.topLevelCategories(this.categories), (top: TopicCategory) => {
+            this.PickerRow({ category: top, parent: top, isChild: false })
+            if (this.expandedParentId === top.id) {
+              ForEach(CategoryIndex.childrenOf(this.categories, top.id), (child: TopicCategory) => {
+                this.PickerRow({ category: child, parent: top, isChild: true })
+              }, (child: TopicCategory) => `c${child.id}`)
+            }
+          }, (top: TopicCategory) => `p${top.id}`)
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.Spring)
+      // Scroll 内容不足一屏时默认竖直居中——版块少时会飘到中间,强制顶对齐。
+      .align(Alignment.Top)
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ left: 4, right: 4 })
+  }
+
+  // 标签选择器:搜索框 + 联想列表(多选,点行加/减)。标签隶属分类,查询必带 categoryId。
+  // 逐次选择都重查(带 selected_tag_ids refine),对齐官方 composer。
+  // 标题/关闭由外层 SheetHeader 承担,这里只出内容。
+  @Builder
+  private TagPickerSheet() {
+    Column() {
+      // 搜索框:输入即防抖联想。
+      Row() {
+        SymbolGlyph($r('sys.symbol.magnifyingglass'))
+          .fontSize(15)
+          .fontColor([$r('app.color.text_tertiary')])
+          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+          .margin({ right: 8 })
+        TextInput({ text: $$this.tagQuery, placeholder: '搜索标签' })
+          .layoutWeight(1)
+          .backgroundColor(Color.Transparent)
+          .borderRadius(0)
+          // TextInput 默认自带较大左内边距,会把文字推离放大镜;显式清零让文字紧贴图标。
+          .padding({ left: 0, right: 0, top: 8, bottom: 8 })
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .placeholderColor($r('app.color.text_tertiary'))
+          .onChange((value: string) => {
+            this.onTagQueryChanged(value);
+          })
+      }
+      .width('100%')
+      .padding({ left: 12, right: 14 })
+      .backgroundColor($r('app.color.surface_muted'))
+      .borderRadius(10)
+      .margin({ bottom: 8 })
+
+      Scroll() {
+        Column() {
+          if (this.tagLoading && this.tagResults.length === 0) {
+            Row() {
+              LoadingProgress().width(20).height(20).color($r('app.color.brand'))
+            }
+            .width('100%')
+            .height(80)
+            .justifyContent(FlexAlign.Center)
+          } else if (this.tagResults.length === 0) {
+            Text(this.tagQuery.length > 0 ? '没有匹配的标签' : '该分类下暂无可选标签')
+              .fontSize(14)
+              .fontColor($r('app.color.text_tertiary'))
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .padding({ top: 28, bottom: 28 })
+          } else {
+            ForEach(this.tagResults, (tag: TagSuggestion) => {
+              this.TagResultRow(tag)
+            }, (tag: TagSuggestion) => `r${tag.id}`)
+          }
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.Spring)
+      .align(Alignment.Top)
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ left: 12, right: 12 })
+  }
+
+  @Builder
+  private TagResultRow(tag: TagSuggestion) {
+    Row() {
+      // 标签图标:按标签名映射(getTagIcon,与首页帖子列表标签同一套);无映射的标签不出图标。
+      if (getTagIcon(tag.name)) {
+        FaIconView({ icon: getTagIcon(tag.name) as FaIconDefinition, color: getTagColor(tag.name), iconSize: 14 })
+          .margin({ right: 8 })
+      }
+      Column() {
+        Row() {
+          Text(tag.name)
+            .fontSize(15)
+            .fontColor(this.isTagSelected(tag.id) ? $r('app.color.brand') : $r('app.color.text_primary'))
+            .fontWeight(this.isTagSelected(tag.id) ? FontWeight.Medium : FontWeight.Regular)
+          Text(`×${tag.count}`)
+            .fontSize(12)
+            .fontColor($r('app.color.text_tertiary'))
+            .margin({ left: 8 })
+        }
+        if (tag.description !== undefined && tag.description.length > 0) {
+          Text(tag.description)
+            .fontSize(12)
+            .fontColor($r('app.color.text_tertiary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 2 })
+        }
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      if (this.isTagSelected(tag.id)) {
+        SymbolGlyph($r('sys.symbol.checkmark'))
+          .fontSize(16)
+          .fontColor([$r('app.color.brand')])
+          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+      }
+    }
+    .width('100%')
+    .padding({ left: 4, right: 4, top: 11, bottom: 11 })
+    .onClick(() => {
+      this.toggleTag(tag);
+    })
+  }
+
+  // 选择器里的一行版块。有子版块的父行:点箭头只展开/收起,点名字才选中该父版块
+  // (对齐侧边栏——父版块本身也可发帖,箭头是独立热区)。
+  // @Builder 只接单个对象参数(多位置参数会报 Argument name clash),故走 PickerRowParams。
+  @Builder
+  private PickerRow(p: PickerRowParams) {
+    Row() {
+      Row() {
+        if (getCategoryIcon(p.category, p.parent)) {
+          FaIconView({ icon: getCategoryIcon(p.category, p.parent) as FaIconDefinition, color: getCategoryColor(p.category), iconSize: 15 })
+        } else if (getCategoryLogo(p.category, p.parent).length > 0) {
+          Image(resolveBadgeAssetUrl(getCategoryLogo(p.category, p.parent)))
+            .width(15)
+            .height(15)
+            .objectFit(ImageFit.Contain)
+        } else {
+          Circle().width(11).height(11).fill(getCategoryColor(p.category))
+        }
+      }
+      .width(18)
+      .justifyContent(FlexAlign.Center)
+      .margin({ right: 10 })
+
+      Text(p.category.name)
+        .fontSize(p.isChild ? 14 : 15)
+        .fontWeight(this.categoryId === p.category.id ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor(this.categoryId === p.category.id ? $r('app.color.brand') : $r('app.color.text_primary'))
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+      // 选中打勾;箭头独立于选中态——父版块被选中后仍能展开去改选它的子版块(勾与箭头可并存)。
+      if (this.categoryId === p.category.id) {
+        SymbolGlyph($r('sys.symbol.checkmark'))
+          .fontSize(16)
+          .fontColor([$r('app.color.brand')])
+          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+          .margin({ left: 6, right: p.isChild || !CategoryIndex.hasChildren(this.categories, p.category.id) ? 4 : 0 })
+      }
+      if (!p.isChild && CategoryIndex.hasChildren(this.categories, p.category.id)) {
+        Row() {
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+            .fontSize(16)
+            .fontColor([$r('app.color.text_faint')])
+            .rotate({ angle: this.expandedParentId === p.category.id ? 90 : 0 })
+        }
+        .height('100%')
+        .width(52)
+        .margin({ right: -12 })
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          // 单展开:点已展开的父收起,否则切到它。
+          this.expandedParentId = this.expandedParentId === p.category.id ? -1 : p.category.id;
+        })
+      }
+    }
+    .width('100%')
+    .height(48)
+    .padding({ left: p.isChild ? 30 : 14, right: 14 })
+    .backgroundColor(this.categoryId === p.category.id ? $r('app.color.surface_muted') : Color.Transparent)
+    .onClick(() => {
+      // 换了分类:已选标签隶属旧分类,清空重选(标签集随分类变)。
+      if (this.categoryId !== p.category.id) {
+        this.selectedTags = [];
+      }
+      this.categoryId = p.category.id;
+      this.refreshSelectedCategoryVisual();
+      this.categoryPickerVisible = false;
+    })
+  }
+
   @Builder
   private SegmentTab(label: string, target: ComposerMode) {
     Text(label)
@@ -426,6 +1129,10 @@ export struct ComposerPage {
             // 再拨回 NONE:内联输入条 aboutToDisappear 可能刚把避让模式还原成 OFFSET,交接错位会让
             // 系统整页避让把全屏内容顶一下(观感"回缩一点再弹回")。这里盖掉它,统一走手动 margin 避让。
             this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+            // 发帖模式焦点归标题(先写标题才顺),这里让开——否则正文会把标题刚抢到的焦点夺走。
+            if (this.composeTopic) {
+              return;
+            }
             this.getUIContext().getFocusController().requestFocus(EDIT_FOCUS_ID);
             // 抢焦点后立即请求显示软键盘保活:尽量抵消内联输入框失焦触发的收起动画,压平"收一点再弹"。
             // 失败无害(requestFocus 本身也会弹键盘)。

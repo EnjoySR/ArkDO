@@ -74,4 +74,52 @@ export class CategoryIndex {
     }
     return CategoryIndex.find(categories, category.parentCategoryId);
   }
+
+  // ========== 版块可见性与树 ==========
+  // 侧边栏(CategoryDrawer)与发帖分类选择器共用这套,保证两处看到的版块集合与父子层级完全一致。
+  // 曾经各写一套(选择器自定义 readRestricted 粗筛 + 扁平列表),导致「未分类」及本是子版块的
+  // 公告/悬赏/活动等在选择器里平铺冒出、跟侧边栏对不上——统一收口到这里根治。
+
+  // Discourse 默认的「未分类」版块:不进任何版块列表。slug 与 name 任一命中即算
+  // (linux.do 名为「未分类」,slug 可能为空或非标准)。
+  static isUncategorized(category: TopicCategory): boolean {
+    const slug: string = (category.slug ?? '').trim().toLowerCase();
+    if (slug === 'uncategorized') {
+      return true;
+    }
+    const name: string = category.name.trim();
+    return name === '未分类' || name.toLowerCase() === 'uncategorized';
+  }
+
+  // 顶级版块:无父、且非「未分类」。受限版块不在此过滤(它只影响显示——加锁/半透),由调用方决定。
+  static topLevelCategories(categories: TopicCategory[]): TopicCategory[] {
+    const result: TopicCategory[] = [];
+    for (let index: number = 0; index < categories.length; index++) {
+      const category: TopicCategory = categories[index];
+      if (category.parentCategoryId === undefined && !CategoryIndex.isUncategorized(category)) {
+        result.push(category);
+      }
+    }
+    return result;
+  }
+
+  // 某父版块下的全部子版块(子版块不再判「未分类」,与侧边栏 childrenOf 行为一致)。
+  static childrenOf(categories: TopicCategory[], parentId: number): TopicCategory[] {
+    const result: TopicCategory[] = [];
+    for (let index: number = 0; index < categories.length; index++) {
+      if (categories[index].parentCategoryId === parentId) {
+        result.push(categories[index]);
+      }
+    }
+    return result;
+  }
+
+  static hasChildren(categories: TopicCategory[], parentId: number): boolean {
+    for (let index: number = 0; index < categories.length; index++) {
+      if (categories[index].parentCategoryId === parentId) {
+        return true;
+      }
+    }
+    return false;
+  }
 }

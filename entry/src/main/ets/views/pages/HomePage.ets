@@ -18,6 +18,9 @@ import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
 import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
 import { CategoryDrawer } from '../components/CategoryDrawer';
 import { HomeFab } from '../components/HomeFab';
+import { ComposerPage } from './ComposerPage';
+import { LoginGate } from '../../services/session/LoginGate';
+import { CreateTopicOutcome } from '../../services/topic/TopicService';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SEARCH_OVERLAY_VISIBLE_KEY, SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
@@ -43,6 +46,11 @@ const ANNOUNCE_SHOWN_CODE_KEY: string = 'announce_shown_version_code';
 // 也不能让用户停在临界点时图标反复 morph(退回 1.2 屏才变回发帖)。
 const FAB_TOP_SHOW_RATIO: number = 1.5;
 const FAB_TOP_HIDE_RATIO: number = 1.2;
+// 首页发帖浮层可见态镜像 + 返回键信号:浮层内联挂在首页根 Stack,不进 Navigation 栈。
+// 首页坐在 navBar(非 NavDestination),系统返回键须由 @Entry(Index)的 onBackPress 拦截——
+// 可见时 bump BACK_TICK,首页监听后关闭。与详情页回帖浮层各用一套 key,互不干扰。
+export const HOME_COMPOSER_VISIBLE_KEY: string = 'homeComposerVisible';
+export const HOME_COMPOSER_BACK_TICK_KEY: string = 'homeComposerBackTick';
 // 回顶动画:只有最后一屏走动画,这是那一屏的时长。
 const SCROLL_TOP_MS: number = 380;
 // 瞬移落地的重试上限:惯性未停时 scrollTo 可能被"顶回去",逐帧再钉;超过则放弃动画直接到顶,
@@ -101,6 +109,10 @@ export struct HomePage {
   @State private showBackToTopFab: boolean = false;
   // 列表视口实测高度(vp):把滚动偏移换算成"滑过几屏"的分母,onAreaChange 量得。
   @State private listViewportH: number = 0;
+  // 发帖浮层开关。
+  @State private showComposer: boolean = false;
+  // 返回键信号镜像:Index.onBackPress 在浮层可见时 bump,本页 @Watch 接住关闭。
+  @StorageProp(HOME_COMPOSER_BACK_TICK_KEY) @Watch('onComposerBackTick') private composerBackTick: number = 0;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   // 宿主真就绪信号:宿主每次真正就绪(onPageEnd,executor 已挂)时宿主自增此计数。
@@ -264,6 +276,54 @@ export struct HomePage {
     });
   }
 
+  private openComposer(): void {
+    // 未登录先拦:LoginGate 弹登录页,登录后用户再自行点发帖(不自动续开,避免登录流程里突兀弹编辑器)。
+    if (!LoginGate.ensureLoggedIn()) {
+      return;
+    }
+    AppStorage.setOrCreate(HOME_COMPOSER_VISIBLE_KEY, true);
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+      this.showComposer = true;
+    });
+  }
+
+  private closeComposer(): void {
+    AppStorage.setOrCreate(HOME_COMPOSER_VISIBLE_KEY, false);
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+      this.showComposer = false;
+    });
+  }
+
+  // 系统返回键(Index.onBackPress 在浮层可见时 bump tick):浮层开着就关。
+  private onComposerBackTick(): void {
+    if (this.showComposer) {
+      this.closeComposer();
+    }
+  }
+
+  // 发新主题:POST /posts。成功后跳进新帖详情;进审核队列则只提示。返回 true 令浮层关闭。
+  private async submitNewTopic(title: string, categoryId: number, raw: string, tags: string[], typingMs: number, composerMs: number): Promise<boolean> {
+    const result: NetworkResult<CreateTopicOutcome> = await new TopicService(this.bridge)
+      .createTopic(title, categoryId, raw, tags, typingMs, composerMs);
+
+    if (result.success && result.data) {
+      const outcome: CreateTopicOutcome = result.data;
+      if (outcome.pending) {
+        this.getUIContext().getPromptAction().showToast({ message: '帖子已提交，等待审核', duration: 2000 });
+      } else if (typeof outcome.topicId === 'number') {
+        // 直接发布:跳进新帖。浮层由 onSubmit 返回 true 后自行关闭,跳转排在其后。
+        const newTopicId: number = outcome.topicId;
+        this.getUIContext().getPromptAction().showToast({ message: '帖子已发布', duration: 1500 });
+        this.onOpenTopicById(newTopicId);
+      }
+      return true;
+    }
+
+    const reason: string = result.error ? result.error.message : '发布失败，请稍后重试。';
+    this.getUIContext().getPromptAction().showToast({ message: reason, duration: 2500 });
+    return false;
+  }
+
   // 手指位移(向左为负)换算成 0~1 进度,夹在区间内。
   private swipeProgressOf(offsetX: number): number {
     if (this.swipeAreaWidth <= 0) {
@@ -417,8 +477,7 @@ export struct HomePage {
           HomeFab({
             showBackToTop: this.showBackToTopFab,
             onCompose: () => {
-              // TODO(阶段二):接发帖链路(TopicService.createTopic + ComposerPage 加标题/分类)。
-              this.getUIContext().getPromptAction().showToast({ message: '发帖功能开发中', duration: 1500 });
+              this.openComposer();
             },
             onBackToTop: () => {
               this.scrollToTop();
@@ -536,6 +595,27 @@ export struct HomePage {
               this.handleDrawerPanEnd();
             })
         )
+
+      // 发帖浮层:挂在根 Stack 最顶层,盖住顶栏/列表/抽屉。不进 Navigation 栈,返回键由 Index 拦截。
+      // 淡入淡出(无一镜到底源可配对——首页没有内联输入条,不像详情页从回复条生长)。
+      if (this.showComposer) {
+        ComposerPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          headerTitle: '发帖',
+          placeholder: '正文（支持 Markdown）',
+          minChars: 1,
+          composeTopic: true,
+          categories: this.categories,
+          onBack: () => {
+            this.closeComposer();
+          },
+          onSubmitTopic: (title: string, categoryId: number, raw: string, tags: string[], typingMs: number, composerMs: number): Promise<boolean> => {
+            return this.submitNewTopic(title, categoryId, raw, tags, typingMs, composerMs);
+          }
+        })
+          .transition(TransitionEffect.OPACITY.animation({ duration: 220, curve: Curve.EaseOut }))
+      }
     }
     .width('100%')
     .height('100%')

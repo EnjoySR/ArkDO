@@ -277,6 +277,58 @@ interface CreateReplyPayload {
   nested_post: boolean;
 }
 
+// 发新主题 POST /posts 的请求体。与 CreateReplyPayload 同走 /posts,差别在于:
+// 不带 topic_id/reply_to_post_number(没有可回的帖),改带 title + category;
+// draft_key 是官方 composer 对新主题的固定值 'new_topic'。
+interface CreateTopicPayload {
+  raw: string;
+  title: string;
+  category: number;
+  unlist_topic: boolean;
+  is_warning: boolean;
+  archetype: string;
+  typing_duration_msecs: number;
+  composer_open_duration_msecs: number;
+  composer_version: number;
+  tags: string[];
+  featured_link: string | null;
+  shared_draft: boolean;
+  draft_key: string;
+  locale: string;
+  image_sizes: Record<string, number>;
+  nested_post: boolean;
+}
+
+// 发新主题的结果:直接发布则带新主题 id(可跳转);进审核队列则只有 pending。
+export interface CreateTopicOutcome {
+  topicId?: number;
+  pending: boolean;
+}
+
+// 标签联想项。发帖 payload 里 tags[] 用的是 name(不是 slug),搜索 refine 用的是 id。
+// count/description 供选择器展示(热度 + 版块说明),pmOnly 的标签不在公开发帖里出现。
+export interface TagSuggestion {
+  id: number;
+  name: string;
+  text: string;
+  count: number;
+  description?: string;
+}
+
+// /tags/filter/search 的响应外壳。
+interface DiscourseTagFilterResponse {
+  results?: DiscourseTagResult[];
+}
+
+interface DiscourseTagResult {
+  id?: number;
+  name?: string;
+  text?: string;
+  count?: number;
+  description?: string;
+  pm_only?: boolean;
+}
+
 export interface TopicPage {
   topics: Topic[];
   page: number;
@@ -719,6 +771,121 @@ export class TopicService {
       return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, 'Linux.do 发表评论响应缺少楼层数据。');
     } catch (error) {
       return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, 'Linux.do 发表评论响应不是有效 JSON。');
+    }
+  }
+
+  // 发新主题:POST /posts,与回帖同端点,靠 title + category、且不带 topic_id 来区分。
+  // 成功响应同样是 { action:'create_post', post:{…} },post.topic_id 即新主题 id;
+  // 进审核队列时为 { action:'enqueued', pending_post:{…} },此时没有可跳转的主题。
+  // 标题长度/分类权限等规则不在本地猜,交服务端裁决,错误原文经 forwardFailure 上抛。
+  async createTopic(
+    title: string,
+    categoryId: number,
+    raw: string,
+    tags: string[] = [],
+    typingDurationMs: number = 0,
+    composerOpenDurationMs: number = 0
+  ): Promise<NetworkResult<CreateTopicOutcome>> {
+    const payload: CreateTopicPayload = {
+      raw: raw,
+      title: title,
+      category: categoryId,
+      unlist_topic: false,
+      is_warning: false,
+      archetype: 'regular',
+      typing_duration_msecs: Math.max(0, Math.round(typingDurationMs)),
+      composer_open_duration_msecs: Math.max(0, Math.round(composerOpenDurationMs)),
+      composer_version: 1,
+      tags: tags,
+      featured_link: null,
+      shared_draft: false,
+      draft_key: 'new_topic',
+      locale: '',
+      image_sizes: {},
+      nested_post: true
+    };
+    const body: string = JSON.stringify(payload);
+    // 官方 composer 发新帖时停在列表页,Referer 给站点根即可(带上以过 CSRF/来源校验)。
+    const referrer: string = `${AppConstants.BASE_URL}/`;
+
+    const response: NetworkResult<string> = await this.bridge.postJson('/posts', body, {
+      notifyChallenge: true,
+      referrer: referrer
+    });
+    if (!response.success) {
+      return this.forwardFailure<CreateTopicOutcome>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, 'Linux.do 发帖响应为空。');
+    }
+
+    try {
+      const wrapper: CreatePostResponse = JSON.parse(response.data) as CreatePostResponse;
+      const created: DiscoursePost | undefined = wrapper.post;
+      if (created !== undefined && typeof created.topic_id === 'number') {
+        return {
+          success: true,
+          statusCode: response.statusCode,
+          challengeState: response.challengeState,
+          data: { topicId: created.topic_id, pending: false }
+        };
+      }
+      if (wrapper.action === 'enqueued' || wrapper.pending_post !== undefined) {
+        return {
+          success: true,
+          statusCode: response.statusCode,
+          challengeState: response.challengeState,
+          data: { pending: true }
+        };
+      }
+      return this.unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, 'Linux.do 发帖响应缺少主题数据。');
+    } catch (error) {
+      return this.unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, 'Linux.do 发帖响应不是有效 JSON。');
+    }
+  }
+
+  // 标签联想:GET /tags/filter/search。标签隶属分类,故必带 categoryId;q 为搜索词(空=取热门前 limit 个);
+  // selectedTagIds 是已选标签 id,让服务端把已选项排除并按剩余上下文再排(对齐官方 composer 的逐次 refine)。
+  // 返回的 name 用于提交(tags[]),id 用于下一次 refine。pm_only 标签滤掉(不用于公开发帖)。
+  async searchTags(categoryId: number, query: string, selectedTagIds: number[]): Promise<NetworkResult<TagSuggestion[]>> {
+    let path: string = `/tags/filter/search?q=${encodeURIComponent(query)}&limit=8&categoryId=${categoryId}`;
+    for (let index: number = 0; index < selectedTagIds.length; index++) {
+      path += `&selected_tag_ids%5B%5D=${selectedTagIds[index]}`;
+    }
+    path += '&filterForInput=true';
+
+    const response: NetworkResult<string> = await this.bridge.getJson(path);
+    if (!response.success) {
+      return this.forwardFailure<TagSuggestion[]>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<TagSuggestion[]>(response.statusCode, response.challengeState, 'Linux.do 标签联想响应为空。');
+    }
+    try {
+      const payload: DiscourseTagFilterResponse = JSON.parse(response.data) as DiscourseTagFilterResponse;
+      const raw: DiscourseTagResult[] = payload.results ?? [];
+      const tags: TagSuggestion[] = [];
+      for (let index: number = 0; index < raw.length; index++) {
+        const item: DiscourseTagResult = raw[index];
+        if (item.pm_only === true || typeof item.id !== 'number' || typeof item.name !== 'string') {
+          continue;
+        }
+        tags.push({
+          id: item.id,
+          name: item.name,
+          text: item.text ?? item.name,
+          count: item.count ?? 0,
+          description: item.description ?? undefined
+        });
+      }
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: tags
+      };
+    } catch (error) {
+      return this.unexpectedResponse<TagSuggestion[]>(response.statusCode, response.challengeState, 'Linux.do 标签联想响应不是有效 JSON。');
     }
   }
 

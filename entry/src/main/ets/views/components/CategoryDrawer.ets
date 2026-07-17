@@ -3,6 +3,7 @@ import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
 import { SiteDef } from '../../services/site/SitePrefs';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { getCategoryColor, getCategoryIcon, getCategoryLogo, resolveBadgeAssetUrl } from './TopicBadgeUtils';
+import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
 const ROW_HEIGHT: number = 48;
@@ -337,44 +338,17 @@ export struct CategoryDrawer {
     return feeds;
   }
 
+  // 版块树的筛选统一走 CategoryIndex,与发帖分类选择器共用同一套(避免两处规则漂移)。
   private topLevelCategories(): TopicCategory[] {
-    const result: TopicCategory[] = [];
-    for (let index: number = 0; index < this.categories.length; index++) {
-      if (this.categories[index].parentCategoryId === undefined && !this.isHiddenCategory(this.categories[index])) {
-        result.push(this.categories[index]);
-      }
-    }
-    return result;
-  }
-
-  // 过滤 Discourse 默认的「未分类」版块,不在版块列表里展示。
-  // slug 可能为空或非标准,故 slug 与 name 任一命中即隐藏(linux.do 名为「未分类」)。
-  private isHiddenCategory(category: TopicCategory): boolean {
-    const slug: string = (category.slug ?? '').trim().toLowerCase();
-    if (slug === 'uncategorized') {
-      return true;
-    }
-    const name: string = category.name.trim();
-    return name === '未分类' || name.toLowerCase() === 'uncategorized';
+    return CategoryIndex.topLevelCategories(this.categories);
   }
 
   private childrenOf(parentId: number): TopicCategory[] {
-    const result: TopicCategory[] = [];
-    for (let index: number = 0; index < this.categories.length; index++) {
-      if (this.categories[index].parentCategoryId === parentId) {
-        result.push(this.categories[index]);
-      }
-    }
-    return result;
+    return CategoryIndex.childrenOf(this.categories, parentId);
   }
 
   private hasChildren(parentId: number): boolean {
-    for (let index: number = 0; index < this.categories.length; index++) {
-      if (this.categories[index].parentCategoryId === parentId) {
-        return true;
-      }
-    }
-    return false;
+    return CategoryIndex.hasChildren(this.categories, parentId);
   }
 
   private findCategory(id: number): TopicCategory | undefined {
