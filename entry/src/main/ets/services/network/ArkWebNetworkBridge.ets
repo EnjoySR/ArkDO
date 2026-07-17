@@ -372,6 +372,15 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
+  // host webview 首屏是否已真正就绪到可发请求（executor 已在 onPageEnd → attachController 里挂上）。
+  // 与 RootTabPage 的 isArkWebReady（UI 解锁标志）不同：看门狗/失败路径会把 isArkWebReady 置真以解锁
+  // 导航，但那一刻 executor 仍为空，任何 fetch 都会被 getJson 等直接跳过（skipped: not ready）。
+  // 首页用它区分「桥能真发请求」与「UI 已解锁」，避免在冷启动空窗里硬闪「加载失败」。
+  // 重载中（reloading=true）executor 仍在，请求会经 whenHostReady 排队，故此处不看 reloading。
+  canFetch(): boolean {
+    return this.executor !== undefined;
+  }
+
   // host webview 重载完成（onPageEnd）：放行所有排队的 fetch，令其注入到刷新后的文档。
   markHostReady(): void {
     this.reloading = false;

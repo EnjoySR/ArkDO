@@ -104,6 +104,10 @@ export struct RootTabPage {
   // 系统返回键信号:浮层不进导航栈,返回键由 Index @Entry 拦截并 bump 此计数,这里监听后关闭浮层。
   @StorageProp(SEARCH_OVERLAY_BACK_TICK_KEY) @Watch('onSearchBackTick') private searchBackTick: number = 0;
   @State private isArkWebReady: boolean = false;
+  // 宿主真就绪信号:仅在 onReady(onPageEnd,executor 已挂)时自增。isArkWebReady 会被看门狗/失败路径
+  // 提前置真且烧掉 false→true 跳变,导致真就绪时首页的 @Watch(isArkWebReady) 不再触发、列表卡在失败态;
+  // 用这个独立单调计数专门驱动「真就绪后重拉列表」,与 UI 解锁标志解耦。
+  @State private hostReadyEpoch: number = 0;
   @State private currentUser?: User = undefined;
   @State private isCheckingSession: boolean = false;
   @State private hasCheckedSession: boolean = false;
@@ -817,6 +821,7 @@ export struct RootTabPage {
     HomePage({
       bridge: this.bridge,
       isArkWebReady: this.isArkWebReady,
+      hostReadyEpoch: this.hostReadyEpoch,
       accountUser: this.currentUser ?? this.getAnonymousUser(),
       isLoggedIn: this.currentUser !== undefined,
       isCheckingSession: this.isCheckingSession,
@@ -1139,6 +1144,10 @@ export struct RootTabPage {
 
   private handleArkWebReady(): void {
     this.isArkWebReady = true;
+    // 宿主真就绪:自增信号驱动首页重拉列表。看门狗/失败路径已提前把 isArkWebReady 置真、烧掉了
+    // false→true 跳变,单靠 @Watch(isArkWebReady) 无法在真就绪时唤醒列表(会卡在失败态直到手点重试);
+    // 这个独立计数专门补上「真就绪 → 自愈列表」这条路径。
+    this.hostReadyEpoch++;
     // 注入沙箱上下文,让 host webview 的下载委托知道文件保存目录(filesDir/download)。
     const context: Context | undefined = this.getUIContext().getHostContext();
     if (context) {

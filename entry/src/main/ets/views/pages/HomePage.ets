@@ -103,6 +103,10 @@ export struct HomePage {
   @State private listViewportH: number = 0;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
+  // 宿主真就绪信号:宿主每次真正就绪(onPageEnd,executor 已挂)时宿主自增此计数。
+  // 冷启动若越过看门狗才就绪,isArkWebReady 早被失败路径置真、@Watch 不再触发,列表会卡在失败态;
+  // 接住此信号在真就绪时补拉一次,把「卡死+手点重试」变成自动自愈。
+  @Prop @Watch('handleHostReadyEpoch') hostReadyEpoch: number = 0;
   @Prop accountUser: User = { id: 0, username: '' };
   @Prop isLoggedIn: boolean = false;
   @Prop isCheckingSession: boolean = false;
@@ -373,7 +377,11 @@ export struct HomePage {
 
         if (this.topics.length === 0) {
           Column() {
-            if (!this.isArkWebReady) {
+            // 门卫看「桥能否真发请求」而非 UI 解锁标志:看门狗/失败路径会把 isArkWebReady 置真但 executor
+            // 仍为空,那一刻发请求必被跳过。冷启动空窗统一显示品牌化「准备环境中」加载态,等宿主真就绪
+            // (hostReadyEpoch)再进 LoadStateView——此时要么已有数据、要么是真失败(CF/服务端)给重试,
+            // 从而不再硬闪「加载失败」。
+            if (!this.bridge.canFetch()) {
               Image($r('app.media.linuxdo_logo'))
                 .width(64)
                 .height(64)
@@ -820,8 +828,11 @@ export struct HomePage {
   }
 
   private async refreshLatestTopics(): Promise<void> {
-    if (!this.isArkWebReady) {
-      this.listMessage = '正在准备 ArkWeb 请求环境';
+    // 门卫看「桥能否真发请求」(executor 已挂),而非 UI 解锁标志 isArkWebReady:
+    // 看门狗/失败路径会把 isArkWebReady 置真但 executor 仍为空,此时若照发请求必被跳过、硬闪「加载失败」。
+    // 冷启动空窗里停在「连接中」软状态,等宿主真就绪(hostReadyEpoch)再自动补拉,避免错误闪屏。
+    if (!this.bridge.canFetch()) {
+      this.listMessage = '正在连接服务器…';
       return;
     }
 
@@ -952,6 +963,20 @@ export struct HomePage {
 
   private handleArkWebReadyChanged(): void {
     if (this.isArkWebReady && this.topics.length === 0) {
+      this.loadSiteMetadataIfNeeded();
+      this.refreshLatestTopics();
+    }
+    this.checkVersionAnnouncement();
+  }
+
+  // 宿主真就绪(executor 已挂):若列表此刻还空/还停在失败态,补拉一次。
+  // 这是冷启动越过看门狗场景的自愈点——失败路径先画了「加载失败」,真就绪后由此自动重拉,
+  // 无需用户手点重试。列表已有数据则不打扰。refreshLatestTopics 自带在途去重,重复触发无副作用。
+  private handleHostReadyEpoch(): void {
+    if (this.hostReadyEpoch <= 0) {
+      return;
+    }
+    if (this.topics.length === 0 || this.loadFailed) {
       this.loadSiteMetadataIfNeeded();
       this.refreshLatestTopics();
     }
