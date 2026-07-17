@@ -484,60 +484,55 @@ export struct HomePage {
     this.onOpenTopicById(topicId);
   }
 
+  // 入口无条件可点:环境未就绪/会话检查中只换图标,不禁用也不留空白。
+  // 网络不通时这里是够到 DoH 配置的唯一通路,一旦拦下用户就被关在门外只能干等超时。
   @Builder
   private AccountEntry() {
-    if (!this.hasCheckedSession && !this.isCheckingSession) {
-      Blank()
-        .width(42)
-        .height(42)
-    } else {
-      Button() {
-        Stack() {
-          if (this.isCheckingSession) {
-            LoadingProgress()
-              .width(22)
-              .height(22)
-              .color($r('app.color.brand'))
-          } else if (this.isLoggedIn) {
-            // 光圈在底层(先声明)、头像在顶层(后声明),头像后方一圈圈向外扩散。
-            Stack() {
-              PulsingHalo({ baseSize: 34, color: $r('app.color.brand') })
-              UserAvatar({
-                user: this.accountUser,
-                avatarSize: 34
-              })
-            }
-          } else {
-            SymbolGlyph($r('sys.symbol.person'))
-              .fontSize(28)
-              .fontColor([$r('app.color.brand')])
-              .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+    Button() {
+      Stack() {
+        if (this.isCheckingSession) {
+          LoadingProgress()
+            .width(22)
+            .height(22)
+            .color($r('app.color.brand'))
+        } else if (this.isLoggedIn) {
+          // 光圈在底层(先声明)、头像在顶层(后声明),头像后方一圈圈向外扩散。
+          Stack() {
+            PulsingHalo({ baseSize: 34, color: $r('app.color.brand') })
+            UserAvatar({
+              user: this.accountUser,
+              avatarSize: 34
+            })
           }
+        } else {
+          SymbolGlyph($r('sys.symbol.person'))
+            .fontSize(28)
+            .fontColor([$r('app.color.brand')])
+            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
         }
-        .width(38)
-        .height(38)
-        .alignContent(Alignment.Center)
       }
-      .width(42)
-      .height(42)
-      .borderRadius(21)
-      .backgroundColor(Color.Transparent)
-      .padding(0)
-      // 放行溢出:头像光圈会扩散到 42 之外,默认圆角裁剪会切掉,需关闭裁剪。
-      .clip(false)
-      .enabled(!this.isCheckingSession)
-      .onClick(() => {
-        this.onAccountClick();
-      })
-      // 长按头像:弹出输入框填帖子 ID,直接跳转到指定帖子详情。
-      // Button 自带点击识别器会抢占触摸,须用 priorityGesture 让长按优先于内置手势。
-      .priorityGesture(
-        LongPressGesture({ repeat: false, duration: 500 })
-          .onAction(() => {
-            this.jumpDialogController.open();
-          })
-      )
+      .width(38)
+      .height(38)
+      .alignContent(Alignment.Center)
     }
+    .width(42)
+    .height(42)
+    .borderRadius(21)
+    .backgroundColor(Color.Transparent)
+    .padding(0)
+    // 放行溢出:头像光圈会扩散到 42 之外,默认圆角裁剪会切掉,需关闭裁剪。
+    .clip(false)
+    .onClick(() => {
+      this.onAccountClick();
+    })
+    // 长按头像:弹出输入框填帖子 ID,直接跳转到指定帖子详情。
+    // Button 自带点击识别器会抢占触摸,须用 priorityGesture 让长按优先于内置手势。
+    .priorityGesture(
+      LongPressGesture({ repeat: false, duration: 500 })
+        .onAction(() => {
+          this.jumpDialogController.open();
+        })
+    )
   }
 
   // 打开抽屉前刷新一次抽屉配置(设置页/站点管理页可能刚改过),带滑入动画。
