@@ -559,6 +559,48 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
+  // 上传图片到 /uploads.json:base64 是压缩后图片字节的 base64。脚本在 host 文档内 atob 还原字节 →
+  // Blob → FormData → fetch(过 CF、带 cookie)。CSRF 复用同源逻辑;不手动设 Content-Type(FormData 自带 boundary)。
+  async uploadImage(base64: string, fileName: string, mimeType: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    const requestPath: string = '/uploads.json';
+    logNetwork(`UPLOAD ${requestPath} start fileName=${fileName} base64Length=${base64.length}`);
+
+    if (!this.executor) {
+      logNetwork(`UPLOAD ${requestPath} skipped: ArkWeb host is not ready`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 宿主尚未就绪。',
+          requiresChallenge: false
+        }
+      };
+    }
+
+    await this.whenHostReady();
+
+    try {
+      const referrer: string = options?.referrer ? options.referrer : '';
+      const rawResult: string = await this.executor.run(this.createUploadScript(base64, fileName, mimeType, referrer));
+      logNetwork(`UPLOAD ${requestPath} raw envelope received length=${rawResult.length}`);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
+    } catch (error) {
+      logNetwork(`UPLOAD ${requestPath} failed before response envelope`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 上传失败。',
+          requiresChallenge: false
+        }
+      };
+    }
+  }
+
   async putJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
     logNetwork(`PUT ${requestPath} start`);
@@ -864,6 +906,95 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
             'Discourse-Logged-In': 'true'
           },
           body: ${encodedBody}
+        };
+        const _ref = ${encodedReferrer};
+        if (_ref) {
+          fetchOptions.referrer = _ref;
+          fetchOptions.referrerPolicy = 'strict-origin-when-cross-origin';
+        }
+        return fetch(requestUrl.toString(), fetchOptions);
+      }).then((response) => {
+        response.text().then((body) => {
+          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+            statusCode: response.status,
+            contentType: response.headers.get('content-type') || '',
+            body: body,
+            csrfSource: csrfSource,
+            csrfLength: csrfLength
+          }));
+        }).catch(fail);
+      }).catch(fail);
+      return requestId;
+    })();`;
+  }
+
+  // 图片上传脚本:base64 → Uint8Array → Blob → FormData,POST /uploads.json。
+  // 复用同源 CSRF(优先 /session/csrf.json,兜底 meta)+ credentials:'include' 带 cookie。
+  // 关键:FormData 不能手动设 Content-Type,否则丢失 multipart boundary 导致后端解析失败。
+  // 字段对齐 Discourse composer 上传:upload_type=composer、name、type、file。
+  private createUploadScript(base64: string, fileName: string, mimeType: string, referrer: string): string {
+    const encodedBase64: string = JSON.stringify(base64);
+    const encodedFileName: string = JSON.stringify(fileName);
+    const encodedMimeType: string = JSON.stringify(mimeType);
+    const encodedReferrer: string = JSON.stringify(referrer);
+
+    return `(() => {
+      const requestId = '${REQUEST_ID_TOKEN}';
+      const requestUrl = new URL('/uploads.json', window.location.origin);
+      let csrfSource = 'none';
+      let csrfLength = 0;
+      const fail = (error) => {
+        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+          statusCode: 0,
+          contentType: '',
+          body: '',
+          errorMessage: String(error),
+          csrfSource: csrfSource,
+          csrfLength: csrfLength
+        }));
+      };
+      const metaCsrf = () => {
+        const el = document.querySelector('meta[name="csrf-token"]');
+        return el ? (el.getAttribute('content') || '') : '';
+      };
+      const readCsrf = () => {
+        return fetch(new URL('/session/csrf.json', window.location.origin).toString(), {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+        }).then((r) => r.json()).then((j) => (j && j.csrf) ? j.csrf : '').catch(() => '');
+      };
+      Promise.resolve(readCsrf()).then((token) => {
+        let csrf = token;
+        csrfSource = token ? 'session' : 'none';
+        if (!csrf) {
+          csrf = metaCsrf();
+          csrfSource = csrf ? 'meta' : 'none';
+        }
+        csrfLength = csrf ? csrf.length : 0;
+        const binary = atob(${encodedBase64});
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) { bytes[i] = binary.charCodeAt(i); }
+        const blob = new Blob([bytes], { type: ${encodedMimeType} });
+        const fd = new FormData();
+        fd.append('upload_type', 'composer');
+        fd.append('relativePath', 'null');
+        fd.append('name', ${encodedFileName});
+        fd.append('type', ${encodedMimeType});
+        fd.append('file', blob, ${encodedFileName});
+        const fetchOptions = {
+          method: 'POST',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: {
+            'Accept': '*/*',
+            'X-CSRF-Token': csrf,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Discourse-Present': 'true',
+            'Discourse-Logged-In': 'true'
+          },
+          body: fd
         };
         const _ref = ${encodedReferrer};
         if (_ref) {

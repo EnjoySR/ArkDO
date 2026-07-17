@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}</style>
+<!-- 离屏 markdown-it:只把编辑器 raw 编译成 HTML 字符串回传,不负责显示(显示交给原生 PostRichContent)。 -->
+<script src="markdown-it.min.js"></script>
+<script>
+// 配置对齐 Discourse 观感:html 允许有限内联标签、linkify 裸链成链、breaks 单换行成 <br>(Discourse 默认)。
+var md = window.markdownit
+  ? window.markdownit({ html: true, linkify: true, breaks: true, typographer: false })
+  : null;
+
+// Discourse 图片短码 ![文件名|宽x高](url):默认 markdown-it 把尺寸留在 alt 文本里、不写进 img 的
+// width/height 属性。而原生解析层 CookedHtmlParser 判「大图 vs 小表情」只看 width/height 属性,
+// 拿不到就把大图误当 18px 行内小图(「图文同段时图片超小」的根因)。这里自定义 image 渲染:
+// 从 alt 尾部解析 |宽x高 写进 width/height 属性,并把尺寸段从 alt 清掉(alt 只留文件名)。
+if (md) {
+  md.renderer.rules.image = function (tokens, idx, options, env, self) {
+    var token = tokens[idx];
+    var src = token.attrGet('src') || '';
+    var alt = token.content || '';
+    var w = '';
+    var h = '';
+    var m = alt.match(/\|(\d+)x(\d+)\s*$/);
+    if (m) {
+      w = m[1];
+      h = m[2];
+      alt = alt.slice(0, m.index);
+    }
+    var esc = md.utils.escapeHtml;
+    var out = '<img src="' + esc(src) + '" alt="' + esc(alt) + '"';
+    if (w) {
+      out += ' width="' + w + '" height="' + h + '"';
+    }
+    var title = token.attrGet('title');
+    if (title) {
+      out += ' title="' + esc(title) + '"';
+    }
+    out += '>';
+    return out;
+  };
+}
+
+function reportError(id, msg) {
+  if (window.ArkDOMd && window.ArkDOMd.onError) {
+    window.ArkDOMd.onError(id, String(msg));
+  }
+}
+function reportResult(id, html) {
+  if (window.ArkDOMd && window.ArkDOMd.onResult) {
+    window.ArkDOMd.onResult(id, html);
+  }
+}
+
+// id: 请求标识; raw: markdown 源码。输出编译后的 HTML 字符串。
+function renderMarkdown(id, raw) {
+  try {
+    if (!md) { reportError(id, 'markdown-it not loaded'); return; }
+    var html = md.render(raw || '');
+    reportResult(id, html);
+  } catch (e) {
+    reportError(id, e && e.message ? e.message : e);
+  }
+}
+</script>
+</head>
+<body></body>
+</html>

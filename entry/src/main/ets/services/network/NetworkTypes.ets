@@ -42,4 +42,8 @@ export interface JsonNetworkClient {
   putForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
   // DELETE + application/x-www-form-urlencoded body(撤销投票 DELETE /polls/vote 用),CSRF/cookie 同源自动处理。
   deleteForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
+  // 上传图片到 /uploads.json(multipart):base64 为压缩后图片字节的 base64,在 host webview 内还原成
+  // Blob 拼 FormData 提交(原生 netstack 会被 CF 挡,只有 webview fetch 能过盾并带会话 Cookie)。
+  // 返回 /uploads.json 的 JSON 响应文本(含 short_url 短码与真实 url),由上层解析。
+  uploadImage(base64: string, fileName: string, mimeType: string, options?: JsonRequestOptions): Promise<NetworkResult<string>>;
 }
