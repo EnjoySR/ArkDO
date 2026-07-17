@@ -43,16 +43,32 @@ export class PostDataSource implements IDataSource {
     }
   }
 
-  // 按 id 去重尾插(向下分页/发表新回复),返回实际新增条数。
+  // 按 id 去重、按楼号升序插到正确位置(向下分页/发表新回复),返回实际新增条数。
+  // 列表始终按 postNumber 有序:新回复楼号恒为当前最高 → 落到尾部(即时可见、钉在底部);
+  // 向下分页取到的是已加载窗口之后的一段,其楼号小于尾部新回复 → 插到新回复之前,避免
+  // "只加载首页时回帖、再上拉加载更多,新回帖被夹在旧楼中间"的时间错乱。
+  // fresh 是 stream 上一段连续区间(楼号升序、彼此小于插入点后的所有楼)→ 仍是单段连续 ADD 通知,
+  // 不破坏 maintainVisibleContentPosition。
   appendPosts(newPosts: TopicPost[]): number {
     const fresh: TopicPost[] = this.collectFresh(newPosts);
     if (fresh.length === 0) {
       return 0;
     }
-    const insertAt: number = this.posts.length;
-    this.posts = this.posts.concat(fresh);
+    fresh.sort((a: TopicPost, b: TopicPost) => a.postNumber - b.postNumber);
+    const insertAt: number = this.insertIndexForPostNumber(fresh[fresh.length - 1].postNumber);
+    this.posts = this.posts.slice(0, insertAt).concat(fresh).concat(this.posts.slice(insertAt));
     this.notifyAdd(insertAt, fresh.length);
     return fresh.length;
+  }
+
+  // 有序数组中首个楼号 > 目标的下标(该连续块的落点);全部 <= 目标时插到末尾。
+  private insertIndexForPostNumber(postNumber: number): number {
+    for (let index: number = 0; index < this.posts.length; index++) {
+      if (this.posts[index].postNumber > postNumber) {
+        return index;
+      }
+    }
+    return this.posts.length;
   }
 
   // 按 id 去重、按楼号升序头插(向上补更早楼层),返回实际新增条数。
