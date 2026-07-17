@@ -1,6 +1,7 @@
 import { curves, KeyboardAvoidMode } from '@kit.ArkUI';
 import window from '@ohos.window';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
+import { COMPOSER_GEOMETRY_ID } from '../pages/ComposerPage';
 
 // Discourse 经典蓝，作回复按钮背景（rgb(0,136,204)）。页面的悬浮回复按钮也复用此色。
 export const REPLY_BLUE: string = '#0088CC';
@@ -33,6 +34,12 @@ export struct CommentInputBar {
   // 返回 true 表示提交成功（浮层随即清空并关闭）；false 表示失败（保留内容供重试）。
   onSubmit: (text: string, typingMs: number, composerMs: number) => Promise<boolean> =
     (text: string, typingMs: number, composerMs: number) => Promise.resolve(false);
+  // 是否显示「展开到全屏编辑器」按钮：普通回复显示，boost（短文本，服务端上限 16 字）不显示。
+  showExpand: boolean = false;
+  // 点「展开」上抛当前已输入文本 + 当前键盘高度（vp），由页面关闭内联浮层并压入全屏编辑器
+  // （ComposerPage）无缝接续。带键盘高度是为了让全屏页首帧就按「有键盘」布局，避免从 0 起跳
+  // 导致工具栏先落底再上移的「回缩一下」。
+  onExpand: (currentText: string, keyboardHeight: number) => void = () => {};
   @State private text: string = '';
   @State private isSubmitting: boolean = false;
   // 当前键盘高度（vp）；0 表示键盘收起。
@@ -203,6 +210,22 @@ export struct CommentInputBar {
         .borderRadius(8)
         .clip(false)
 
+        // 展开按钮：仅普通回复显示（boost 短文本无需全屏编辑）。点击上抛当前文本，
+        // 由页面关闭内联浮层、压入全屏 Markdown 编辑器无缝接续。
+        if (this.showExpand) {
+          Button({ type: ButtonType.Circle, stateEffect: true }) {
+            SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
+              .fontSize(20)
+              .fontColor([$r('app.color.text_secondary')])
+          }
+          .width(40)
+          .height(40)
+          .backgroundColor($r('app.color.fill_subtle'))
+          .onClick(() => {
+            this.onExpand(this.text, this.keyboardHeight);
+          })
+        }
+
         // 回复按钮：圆形、蓝底。提交中显示白色 loading 转圈，否则显示白色 reply 图标。
         // 未达最短字数或提交中时降透明度提示不可用，重复点击由 submit() 内部拦截。
         Button({ type: ButtonType.Circle, stateEffect: true }) {
@@ -236,6 +259,10 @@ export struct CommentInputBar {
         width: { top: 1 },
         color: $r('app.color.border')
       })
+      // 一镜到底的源：整条底部输入栏（全宽）与全屏编辑器主面板同 id。放在整条 Row 而非左侧
+      // 窄输入框上——宽度本就是满的，生长基本只有竖直方向（从底部整条向上长满全屏），不再从
+      // 左下角斜着放大。boost 模式无目标，该 id 无配对、退化为普通渲染，无副作用。
+      .geometryTransition(COMPOSER_GEOMETRY_ID, { follow: true })
       // 键盘弹起：整条上移键盘高度，正好贴到键盘上沿；键盘收起：回落到底部。
       // 上移动画由 onAvoidAreaChange 里的 animateTo 驱动（此处不挂 .animation，避免影响图标渲染）。
       .margin({ bottom: this.keyboardHeight })

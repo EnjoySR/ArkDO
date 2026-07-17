@@ -178,6 +178,7 @@ export function isSolvedRouteParam(param: Object | undefined): boolean {
   return typeof candidate.username === 'string' && candidate.username.length > 0;
 }
 
+
 // 用户动态列表参数:filter 见 UserActionType(4=话题 5=回复 1=点赞,可逗号组合)。
 export interface ActivityRouteParam {
   username: string;

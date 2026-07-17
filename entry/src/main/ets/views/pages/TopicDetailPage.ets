@@ -19,6 +19,7 @@ import { TopicSummaryCard } from '../components/TopicSummaryCard';
 import { TopicPostItem } from '../components/TopicPostItem';
 import { ViewerImage } from '../components/ImageViewer';
 import { CommentInputBar, NO_MAX_CHARS, REPLY_BLUE } from '../components/CommentInputBar';
+import { ComposerPage, COMPOSER_ANIM_MS, COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from './ComposerPage';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { TopicScrubber } from '../components/TopicScrubber';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
@@ -125,6 +126,17 @@ export struct TopicDetailPage {
   onOpenLink: (url: string) => void = () => {};
   // 点楼层作者头像/昵称上抛给根导航,进他人主页。
   onOpenUser: (user: User) => void = () => {};
+  // 全屏 Markdown 编辑器浮层:内联挂在本页根 Stack(不走 Navigation),点内联输入条「展开」时
+  // 由 animateTo 从输入条几何生长铺满全屏(一镜到底)。
+  @State private showFullComposer: boolean = false;
+  // 全屏编辑器带入的初始正文(内联浮层已输入内容);顶栏标题/占位随定向回复目标而定。
+  @State private composerInitialText: string = '';
+  @State private composerHeaderTitle: string = '回复';
+  @State private composerFullPlaceholder: string = '写下你的回复…';
+  // 展开瞬间的键盘高度(vp),传给全屏编辑器做初值,首帧即按「有键盘」布局,消除「回缩一下」。
+  @State private composerInitialKb: number = 0;
+  // 返回键 tick 监听:RootTabPage 在详情页 NavDestination.onBackPressed 里 bump 此值,本页据此关浮层。
+  @StorageProp(COMPOSER_OVERLAY_BACK_TICK_KEY) @Watch('onComposerBackTick') private composerBackTick: number = 0;
   private categoryIndex: CategoryIndex = new CategoryIndex();
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
@@ -448,12 +460,42 @@ export struct TopicDetailPage {
           this.replyTargetPostNumber = 0;
           this.boostTargetPostId = 0;
         },
+        // 展开按钮:仅普通回复显示(boost 短文本无需全屏编辑)。
+        showExpand: this.boostTargetPostId <= 0,
+        // 一镜到底展开:把已输入文本带进全屏编辑器,由 openFullComposer 在同一 animateTo 里
+        // 关内联条、开全屏面板(几何配对生长)。保留 replyTargetPostNumber 供全屏提交读。
+        onExpand: (currentText: string, keyboardHeight: number) => {
+          this.openFullComposer(currentText, keyboardHeight);
+        },
         onSubmit: (text: string, typingMs: number, composerMs: number): Promise<boolean> => {
           // boost 模式走 createBoost;否则走普通回复。
           if (this.boostTargetPostId > 0) {
             return this.submitBoost(text);
           }
           return this.submitReply(text, typingMs, composerMs);
+        }
+      })
+    }
+
+    // 全屏 Markdown 编辑器浮层:从内联输入条一镜到底生长而来(geometryTransition)。
+    // onSubmit 复用 submitReply(成功即 appendPosts 追加新楼);提交成功置 submitted 标志,
+    // 关闭时据此淡出彻底关,取消则几何回落到内联输入条。
+    if (this.showFullComposer) {
+      ComposerPage({
+        bridge: this.bridge,
+        isArkWebReady: this.isArkWebReady,
+        headerTitle: this.composerHeaderTitle,
+        placeholder: this.composerFullPlaceholder,
+        initialText: this.composerInitialText,
+        initialKeyboardHeight: this.composerInitialKb,
+        minChars: 16,
+        onBack: () => {
+          // 提交成功(ComposerPage 内部 ok 后自调 onBack)与主动取消/返回,统一走淡出关闭。
+          this.closeFullComposer();
+        },
+        onSubmit: (raw: string, typingMs: number, composerMs: number): Promise<boolean> => {
+          // 复用内联回复链路:成功即 appendPosts 追加新楼,返回 true 由 ComposerPage 触发关闭。
+          return this.submitReply(raw, typingMs, composerMs);
         }
       })
     }
@@ -510,6 +552,41 @@ export struct TopicDetailPage {
       return username;
     }
     return '该用户';
+  }
+
+  // 点内联输入条「展开」:一镜到底把内联输入条几何生长为全屏编辑器。放进同一 animateTo,
+  // 内联输入条(showComposer)与全屏面板(showFullComposer)同 geometryTransition id 才能配对插值。
+  // 保留 replyTargetPostNumber(全屏提交仍走 submitReply 读它);boost 不展开(showExpand=false)。
+  private openFullComposer(currentText: string, keyboardHeight: number): void {
+    this.composerInitialText = currentText;
+    this.composerInitialKb = keyboardHeight;
+    const replyTo: number = this.replyTargetPostNumber;
+    this.composerHeaderTitle = replyTo > 0 ? `回复 #${replyTo} 楼` : '回复';
+    this.composerFullPlaceholder = replyTo > 0 ? `回复 #${replyTo} 楼…` : '写下你的回复…';
+    AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
+    this.getUIContext().animateTo({ duration: COMPOSER_ANIM_MS, curve: Curve.Friction }, () => {
+      this.showComposer = false;
+      this.showFullComposer = true;
+    });
+  }
+
+  // 关闭全屏编辑器:统一淡出回到帖子(提交成功新楼已在列表;取消即放弃)。不重现内联输入条——
+  // 否则它 aboutToAppear 又自动弹键盘、按键盘高度上移,观感是"回复条跑到上面";键盘由
+  // ComposerPage 卸载时主动收起,避免详情页被 OFFSET 顶起。
+  private closeFullComposer(): void {
+    AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, false);
+    this.getUIContext().animateTo({ duration: COMPOSER_ANIM_MS, curve: Curve.Friction }, () => {
+      this.showFullComposer = false;
+      this.showComposer = false;
+      this.replyTargetPostNumber = 0;
+    });
+  }
+
+  // 系统返回键(RootTabPage 在详情页 NavDestination.onBackPressed 里 bump tick):浮层开着就关。
+  private onComposerBackTick(): void {
+    if (this.showFullComposer) {
+      this.closeFullComposer();
+    }
   }
 
   // 发表评论:POST /posts。成功后把新楼层追加到列表底部,返回 true 令浮层关闭。

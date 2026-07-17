@@ -52,6 +52,7 @@ import { BadgesPage } from './BadgesPage';
 import { UserProfilePage } from './UserProfilePage';
 import { SolvedPostsPage } from './SolvedPostsPage';
 import { TopicDetailPage } from './TopicDetailPage';
+import { COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from './ComposerPage';
 import { WebViewPage } from './WebViewPage';
 
 const LOG_TAG: string = '[ArkDO][Root]';
@@ -314,9 +315,9 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
-      // 图片预览打开时优先消费返回键:预览从详情页打开,Navigation 栈非空,系统返回键
-      // 先到达栈顶 NavDestination(轮不到 Index @Entry 的 onBackPress),不拦会直接弹掉详情页。
-      .onBackPressed(() => this.consumeViewerBack())
+      // 详情页返回键优先消费本页内联浮层:全屏编辑器 > 图片预览。二者都从详情页打开、
+      // Navigation 栈非空,返回键先到栈顶 NavDestination(轮不到 Index @Entry),不拦会直接弹掉详情页。
+      .onBackPressed(() => this.consumeTopicDetailBack())
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
       .backgroundColor($r('app.color.page_bg'))
@@ -869,6 +870,18 @@ export struct RootTabPage {
     this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
       this.showImageViewer = true;
     });
+  }
+
+  // 详情页返回键统一入口:先看全屏编辑器浮层(可见则 bump tick 交详情页一镜回落),再看图片预览。
+  // 都没开返回 false 放行默认 pop(弹掉详情页)。挂在详情页 NavDestination 的 onBackPressed 上。
+  private consumeTopicDetailBack(): boolean {
+    const composerVisible: boolean = (AppStorage.get(COMPOSER_OVERLAY_VISIBLE_KEY) as boolean | undefined) ?? false;
+    if (composerVisible) {
+      const prev: number = (AppStorage.get(COMPOSER_OVERLAY_BACK_TICK_KEY) as number | undefined) ?? 0;
+      AppStorage.setOrCreate(COMPOSER_OVERLAY_BACK_TICK_KEY, prev + 1);
+      return true;
+    }
+    return this.consumeViewerBack();
   }
 
   // 图片预览打开时消费返回键:bump 信号计数,交 ImageViewer 决定翻回上一张还是关闭;
