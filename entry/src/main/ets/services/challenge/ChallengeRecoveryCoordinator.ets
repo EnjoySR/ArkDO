@@ -16,6 +16,9 @@ const RELOAD_RETRY_AT_POLL: number = 3;
 const MAX_POLL: number = 6;
 // 恢复成功后的冷却期:期间吞掉新挑战信号,杜绝"探测放行→重试请求→CF 抖动又拦→再弹"的弹跳。
 const COOLDOWN_MS: number = 30000;
+// 用户关掉弹窗放弃后的"等手动"保持期:期间吞掉自动挑战信号,只等用户点手动验证再弹。
+// 超时回 IDLE 允许后续自动重试,避免永久卡死(无"过盾成功"广播可依赖)。
+const DISMISS_HOLDOFF_MS: number = 60000;
 
 // CF 挑战恢复协调器:收到挑战信号后,优先在后台重载 host webview 让挑战 JS 静默跑通拿 cf_clearance,
 // 用接口探测判定是否放行;两次重载仍不通才升级到交互弹窗。状态机吞掉恢复中/冷却中的重复信号。
@@ -115,11 +118,24 @@ export class ChallengeRecoveryCoordinator {
     return true;
   }
 
-  // 用户手动关闭兜底弹窗且未解决:回到空闲,下次挑战再试。
+  // 用户手动关闭兜底弹窗且未解决:进入"等手动"保持期而非直接回 IDLE。
+  // 关键:回 IDLE 会让紧随其后的接口 429 立刻又触发一整轮后台静默探测(十几秒),期间弹窗还没到,
+  // 页面卡在"正在自动验证…"转圈的空白死窗口。改为进 DISMISSED——吞掉自动信号、停在终态手动入口,
+  // 只有用户点手动验证才重新弹窗;保持期超时回 IDLE 兜底,避免永久卡死。
   notifySheetDismissed(): void {
     if (this.state === ChallengeRecoveryState.AWAITING_SHEET) {
       Log.i(`${DIAG_TAG} stage=recoverySheetDismissed`);
-      this.reset();
+      // 放弃即窗口结束:还原持久化 DoH,等手动期间正常浏览走 SECURE_ONLY;再点手动时 escalate 会重新借用 AUTO。
+      this.endWindow();
+      this.clearPollTimer();
+      this.clearCooldownTimer();
+      this.setState(ChallengeRecoveryState.DISMISSED);
+      Log.i(`${DIAG_TAG} stage=recoveryDismissHoldoffStart ms=${DISMISS_HOLDOFF_MS}`);
+      this.cooldownTimer = setTimeout(() => {
+        this.cooldownTimer = -1;
+        this.setState(ChallengeRecoveryState.IDLE);
+        Log.i(`${DIAG_TAG} stage=recoveryDismissHoldoffEnd`);
+      }, DISMISS_HOLDOFF_MS);
     }
   }
 
@@ -180,6 +196,11 @@ export class ChallengeRecoveryCoordinator {
   private escalate(): void {
     Log.i(`${DIAG_TAG} stage=recoveryEscalate attempts=${this.pollCount}`);
     this.clearPollTimer();
+    // 清掉可能在跑的 DISMISSED 保持期计时:用户点手动验证从放弃态直接重新升级弹窗。
+    this.clearCooldownTimer();
+    // 幂等借用 AUTO:自动路径下窗口已开(no-op);从 DISMISSED/IDLE 纯手动升级时窗口未开,这里补开,
+    // 保证弹窗内 challenges.cloudflare.com 能回退系统 DNS 解出来。
+    this.beginWindow();
     this.setState(ChallengeRecoveryState.AWAITING_SHEET);
     this.onEscalateToSheet();
   }

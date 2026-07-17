@@ -9,7 +9,7 @@ import { PulsingHalo } from '../components/PulsingHalo';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
-import { ChallengeRecoveryEventBus, ChallengeRecoveryState } from '../../services/challenge/ChallengeRecoveryEventBus';
+import { LoadStateView } from '../components/LoadStateView';
 import { TopicReadState, TopicReadStateEventBus } from '../../services/session/TopicReadStateEventBus';
 import { NotificationEventBus, NotificationSnapshot } from '../../services/notification/NotificationEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
@@ -29,10 +29,6 @@ const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
 // 侧边抽屉宽度(关闭时向左平移此距离移出屏幕)。
 const DRAWER_WIDTH: number = 288;
-// 静默过验中"手动验证"按钮的延迟出现时间:保护快乐路径(通常几秒就静默过了),
-// 别让用户第一时间就把自己拽进全屏验证页。
-const MANUAL_VERIFY_DELAY_MS: number = 6000;
-
 // 版本公告弹窗:true=每次启动都弹(调试用);false=同一版本只弹一次(上线值)。
 const ANNOUNCE_ALWAYS_SHOW: boolean = false;
 // 诊断关键字:hilog / DevEco Log 里搜 ANNOUNCE_DIAG 看公告全链路日志。
@@ -53,12 +49,6 @@ export struct HomePage {
   @State private footerMessage: string = '上拉加载更多';
   @State private requiresChallenge: boolean = false;
   @State private loadFailed: boolean = false;
-  // 挑战恢复状态:驱动空态在"后台静默过验中 / 终态失败"两态间切换。
-  @State private recoveryState: ChallengeRecoveryState = ChallengeRecoveryEventBus.getCurrentState();
-  // 静默期"手动验证"按钮是否已延迟出现。
-  @State private showManualVerify: boolean = false;
-  private manualVerifyTimer: number = -1;
-  private unsubscribeRecoveryState?: () => void = undefined;
   @State private categories: TopicCategory[] = [];
   // 侧边版块抽屉开关。
   @State private showSideBar: boolean = false;
@@ -140,11 +130,6 @@ export struct HomePage {
         this.unreadNotifications = snapshot.unread;
       });
     }
-    if (!this.unsubscribeRecoveryState) {
-      this.unsubscribeRecoveryState = ChallengeRecoveryEventBus.subscribeState((state: ChallengeRecoveryState) => {
-        this.handleRecoveryStateChanged(state);
-      });
-    }
     this.refreshDrawerPrefs();
     this.syncSessionVersion();
     if (this.isArkWebReady && this.topics.length === 0) {
@@ -166,43 +151,6 @@ export struct HomePage {
     if (this.unsubscribeNotifications) {
       this.unsubscribeNotifications();
       this.unsubscribeNotifications = undefined;
-    }
-    if (this.unsubscribeRecoveryState) {
-      this.unsubscribeRecoveryState();
-      this.unsubscribeRecoveryState = undefined;
-    }
-    this.clearManualVerifyTimer();
-  }
-
-  // 挑战恢复状态迁移:进入静默态时延迟放出"手动验证"按钮;离开则清掉计时器。
-  private handleRecoveryStateChanged(state: ChallengeRecoveryState): void {
-    this.recoveryState = state;
-    if (state === ChallengeRecoveryState.RESOLVING) {
-      this.showManualVerify = false;
-      this.clearManualVerifyTimer();
-      this.manualVerifyTimer = setTimeout(() => {
-        this.manualVerifyTimer = -1;
-        this.showManualVerify = true;
-      }, MANUAL_VERIFY_DELAY_MS);
-    } else {
-      this.clearManualVerifyTimer();
-      this.showManualVerify = false;
-    }
-  }
-
-  // "手动验证"按钮:静默/空闲态请求协调器接管弹页;冷却态无活跃挑战,退化为普通刷新。
-  private onManualVerify(): void {
-    if (this.recoveryState === ChallengeRecoveryState.COOLDOWN) {
-      this.refreshLatestTopics();
-      return;
-    }
-    ChallengeRecoveryEventBus.requestManual();
-  }
-
-  private clearManualVerifyTimer(): void {
-    if (this.manualVerifyTimer >= 0) {
-      clearTimeout(this.manualVerifyTimer);
-      this.manualVerifyTimer = -1;
     }
   }
 
@@ -317,76 +265,18 @@ export struct HomePage {
                 .fontSize(15)
                 .fontColor($r('app.color.text_secondary'))
                 .textAlign(TextAlign.Center)
-            } else if (this.requiresChallenge) {
-              // 挑战态:后台静默过验中 / 终态失败(升级弹窗被关掉未通过)。
-              if (this.recoveryState === ChallengeRecoveryState.RESOLVING) {
-                LoadingProgress()
-                  .width(28)
-                  .height(28)
-                  .color($r('app.color.brand'))
-                  .margin({ bottom: 12 })
-
-                Text('正在自动验证访问，请稍候…')
-                  .fontSize(15)
-                  .fontColor($r('app.color.warning'))
-                  .textAlign(TextAlign.Center)
-
-                // 静默几秒仍未过才放出手动入口,避免把快乐路径提前拽进全屏验证页。
-                if (this.showManualVerify) {
-                  Button('手动验证')
-                    .fontSize(15)
-                    .fontColor($r('app.color.brand'))
-                    .backgroundColor($r('app.color.surface_muted'))
-                    .borderRadius(20)
-                    .padding({ left: 28, right: 28, top: 8, bottom: 8 })
-                    .margin({ top: 16 })
-                    .onClick(() => {
-                      this.onManualVerify();
-                    })
-                }
-              } else {
-                Text('访问验证未完成')
-                  .fontSize(15)
-                  .fontColor($r('app.color.warning'))
-                  .textAlign(TextAlign.Center)
-
-                Button('手动验证')
-                  .fontSize(15)
-                  .fontColor($r('app.color.brand'))
-                  .backgroundColor($r('app.color.surface_muted'))
-                  .borderRadius(20)
-                  .padding({ left: 28, right: 28, top: 8, bottom: 8 })
-                  .margin({ top: 16 })
-                  .onClick(() => {
-                    this.onManualVerify();
-                  })
-              }
             } else {
-              if (this.isInitialLoading) {
-                LoadingProgress()
-                  .width(28)
-                  .height(28)
-                  .color($r('app.color.brand'))
-                  .margin({ bottom: 12 })
-              }
-
-              Text(this.listMessage)
-                .fontSize(15)
-                .fontColor($r('app.color.text_secondary'))
-                .textAlign(TextAlign.Center)
-
-              if (this.loadFailed && !this.isInitialLoading) {
-                Button('重试')
-                  .fontSize(15)
-                  .fontColor($r('app.color.brand'))
-                  .backgroundColor($r('app.color.surface_muted'))
-                  .borderRadius(20)
-                  .padding({ left: 28, right: 28, top: 8, bottom: 8 })
-                  .margin({ top: 16 })
-                  .onClick(() => {
-                    this.refreshLatestTopics();
-                  })
-              }
+              // 加载/失败/CF 挑战三态统一走共享组件:挑战态由组件接管全局恢复状态,
+              // 静默过验中转圈、数秒后放出"手动验证",终态直接给手动入口。二级页复用同一份,不再各写一套。
+              LoadStateView({
+                isLoading: this.isInitialLoading,
+                message: this.listMessage,
+                requiresChallenge: this.requiresChallenge,
+                showRetry: this.loadFailed && !this.isInitialLoading,
+                onRetry: () => {
+                  this.refreshLatestTopics();
+                }
+              })
             }
           }
           .width('100%')

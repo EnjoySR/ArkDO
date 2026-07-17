@@ -7,7 +7,11 @@ export enum ChallengeRecoveryState {
   IDLE = 0,
   RESOLVING = 1,
   AWAITING_SHEET = 2,
-  COOLDOWN = 3
+  COOLDOWN = 3,
+  // 用户关掉兜底弹窗且未过盾:进入"已放弃、等手动"保持期。期间吞掉后续自动挑战信号(不再后台重跑探测,
+  // 杜绝"关弹窗→接口又 429→从头静默探测十几秒才再弹"的空白死窗口),页面停在"访问验证未完成 + 手动验证"。
+  // 只有用户点手动验证才重新弹窗;保持期超时回 IDLE,避免永久卡死。
+  DISMISSED = 4
 }
 
 export type ChallengeRecoveryStateListener = (state: ChallengeRecoveryState) => void;
