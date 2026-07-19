@@ -14,6 +14,7 @@ import { needsRelayConsent, PushRelayConfig, readCustomBaseUrl, resolvePushRelay
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { SETTINGS_DOH_TICK } from '../../common/constants/StorageKeys';
+import { PageHeader } from '../components/PageHeader';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
 
@@ -250,29 +251,12 @@ export struct SettingsPage {
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
       Column() {
-        Row({ space: 8 }) {
-          Button({ type: ButtonType.Circle, stateEffect: true }) {
-            SymbolGlyph($r('sys.symbol.chevron_left'))
-              .fontSize(28)
-              .fontColor([$r('app.color.text_primary')])
-              .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-          }
-          .width(40)
-          .height(40)
-          .backgroundColor($r('app.color.surface_muted'))
-          .onClick(() => {
+        PageHeader({
+          title: '设置',
+          onBack: () => {
             this.onBack();
-          })
-
-          Text('设置')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary'))
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .height(56)
-        .padding({ left: 12, right: 8 })
+          }
+        })
 
         Scroll() {
           Column() {

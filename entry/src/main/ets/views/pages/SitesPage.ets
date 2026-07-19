@@ -5,6 +5,7 @@ import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { SITES_TICK } from '../../common/constants/StorageKeys';
+import { PageHeader } from '../components/PageHeader';
 
 const LOG_TAG: string = '[ArkDO][SitesPage]';
 
@@ -42,6 +43,7 @@ struct SiteEditDialog {
     this.url = this.initialUrl;
     this.showInDrawer = this.initialShow;
   }
+
 
   build() {
     // 原生鸿蒙 AlertDialog 风格:大圆角卡片、标题居中、内容区、底部两枚文字按钮由发丝线分隔。
@@ -215,6 +217,23 @@ export struct SitesPage {
     .margin({ top: CARD_GAP })
   }
 
+  // 头栏尾部新增按钮。
+  @Builder
+  private HeaderAddButton() {
+    Button({ type: ButtonType.Circle, stateEffect: true }) {
+      SymbolGlyph($r('sys.symbol.plus'))
+        .fontSize(22)
+        .fontColor([$r('app.color.text_primary')])
+        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+    }
+    .width(40)
+    .height(40)
+    .backgroundColor($r('app.color.surface_muted'))
+    .onClick(() => {
+      this.openAddDialog();
+    })
+  }
+
   build() {
     Stack() {
       // 背景层:灰底延伸进顶部状态栏与底部导航条区域;内容层不扩展,照常避让。
@@ -263,42 +282,16 @@ export struct SitesPage {
 
   @Builder
   private TitleBar() {
-    Row({ space: 8 }) {
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.chevron_left'))
-          .fontSize(28)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
-      .onClick(() => {
+    PageHeader({
+      title: '我的站点',
+      paddingRight: 12,
+      onBack: () => {
         this.onBack();
-      })
-
-      Text('我的站点')
-        .fontSize(20)
-        .fontWeight(FontWeight.Bold)
-        .fontColor($r('app.color.text_primary'))
-        .layoutWeight(1)
-
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.plus'))
-          .fontSize(22)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+      },
+      trailing: (): void => {
+        this.HeaderAddButton();
       }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
-      .onClick(() => {
-        this.openAddDialog();
-      })
-    }
-    .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 12 })
+    })
   }
 
   // 空态:这个功能的说明书。讲清「是什么 / 凭什么比浏览器强 / 现在该干嘛」三件事。

@@ -11,6 +11,7 @@ import {
   ConnectRingItem,
   ConnectVetoItem
 } from '../../models/ConnectLevel';
+import { PageHeader } from '../components/PageHeader';
 
 const LOG_TAG: string = '[ArkDO][LevelProgress]';
 
@@ -157,29 +158,13 @@ export struct LevelProgressPage {
 
   @Builder
   private TitleBar() {
-    Row({ space: 8 }) {
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.chevron_left'))
-          .fontSize(28)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
-      .onClick(() => {
+    PageHeader({
+      title: '等级进度',
+      paddingRight: 12,
+      onBack: () => {
         this.onBack();
-      })
-
-      Text('等级进度')
-        .fontSize(20)
-        .fontWeight(FontWeight.Bold)
-        .fontColor($r('app.color.text_primary'))
-        .layoutWeight(1)
-    }
-    .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 12 })
+      }
+    })
   }
 
   // ==================== 主卡片 ====================

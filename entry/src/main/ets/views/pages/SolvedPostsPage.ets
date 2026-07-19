@@ -8,6 +8,7 @@ import { UserProfileService } from '../../services/user/UserProfileService';
 import { TopicMetadataBadges } from '../components/TopicBadges';
 import { LoadStateView } from '../components/LoadStateView';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { PageHeader } from '../components/PageHeader';
 
 const LOG_TAG: string = '[ArkDO][SolvedPostsPage]';
 const PAGE_PADDING: number = 16;
@@ -51,29 +52,12 @@ export struct SolvedPostsPage {
 
   build() {
     Column() {
-      Row({ space: 8 }) {
-        Button({ type: ButtonType.Circle, stateEffect: true }) {
-          SymbolGlyph($r('sys.symbol.chevron_left'))
-            .fontSize(28)
-            .fontColor([$r('app.color.text_primary')])
-            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-        }
-        .width(40)
-        .height(40)
-        .backgroundColor($r('app.color.surface_muted'))
-        .onClick(() => {
+      PageHeader({
+        title: this.getPageTitle(),
+        onBack: () => {
           this.onBack();
-        })
-
-        Text(this.getPageTitle())
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-          .layoutWeight(1)
-      }
-      .width('100%')
-      .height(56)
-      .padding({ left: 12, right: 8 })
+        }
+      })
 
       this.Content()
     }

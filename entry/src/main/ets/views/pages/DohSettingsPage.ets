@@ -4,6 +4,7 @@ import { DohManager, DohResolveMode, DohServer } from '../../services/network/Do
 import { DohSpeedTester, DohTestResult } from '../../services/network/DohSpeedTester';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
+import { PageHeader } from '../components/PageHeader';
 
 const LOG_TAG: string = '[ArkDO][DohPage]';
 
@@ -36,6 +37,7 @@ struct AddDohDialog {
   onInvalid: (reason: string) => void = () => {};
   @State private name: string = '';
   @State private url: string = '';
+
 
   build() {
     // 原生鸿蒙 AlertDialog 风格:大圆角卡片、标题居中、内容区、底部两枚文字按钮由发丝线分隔。
@@ -162,6 +164,23 @@ export struct DohSettingsPage {
     this.reload();
   }
 
+  // 头栏尾部新增按钮。
+  @Builder
+  private HeaderAddButton() {
+    Button({ type: ButtonType.Circle, stateEffect: true }) {
+      SymbolGlyph($r('sys.symbol.plus'))
+        .fontSize(24)
+        .fontColor([$r('app.color.text_primary')])
+        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+    }
+    .width(40)
+    .height(40)
+    .backgroundColor($r('app.color.surface_muted'))
+    .onClick(() => {
+      this.addDialog.open();
+    })
+  }
+
   build() {
     Stack() {
       Column()
@@ -225,42 +244,16 @@ export struct DohSettingsPage {
 
   @Builder
   private TitleBar() {
-    Row({ space: 8 }) {
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.chevron_left'))
-          .fontSize(28)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
-      .onClick(() => {
+    PageHeader({
+      title: 'DoH 配置',
+      paddingRight: 12,
+      onBack: () => {
         this.onBack();
-      })
-
-      Text('DoH 配置')
-        .fontSize(20)
-        .fontWeight(FontWeight.Bold)
-        .fontColor($r('app.color.text_primary'))
-        .layoutWeight(1)
-
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.plus'))
-          .fontSize(24)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+      },
+      trailing: (): void => {
+        this.HeaderAddButton();
       }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
-      .onClick(() => {
-        this.addDialog.open();
-      })
-    }
-    .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 12 })
+    })
   }
 
   @Builder

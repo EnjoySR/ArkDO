@@ -12,6 +12,7 @@ import { TopicMetadataBadges } from '../components/TopicBadges';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
+import { PageHeader } from '../components/PageHeader';
 
 const LOG_TAG: string = '[ArkDO][BookmarksPage]';
 const PAGE_PADDING: number = 16;
@@ -48,40 +49,32 @@ export struct BookmarksPage {
     this.loadInitial();
   }
 
+
+  // 头栏尾部书签计数。必须是无参 @Builder 直读 this.bookmarks——
+  // @Builder 的按值参数不随 @State 重绘,把 count 传进来会导致数字刷不上屏。
+  @Builder
+  private HeaderCount() {
+    if (this.bookmarks.length > 0) {
+      Text(`${this.bookmarks.length}`)
+        .fontSize(14)
+        .fontColor($r('app.color.text_faint'))
+        .font({ family: 'HarmonyOS Sans' })
+        .padding({ right: 8 })
+    }
+  }
+
   build() {
     Column() {
       // 顶栏
-      Row({ space: 8 }) {
-        Button({ type: ButtonType.Circle, stateEffect: true }) {
-          SymbolGlyph($r('sys.symbol.chevron_left'))
-            .fontSize(28)
-            .fontColor([$r('app.color.text_primary')])
-            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-        }
-        .width(40)
-        .height(40)
-        .backgroundColor($r('app.color.surface_muted'))
-        .onClick(() => {
+      PageHeader({
+        title: '书签',
+        onBack: () => {
           this.onBack();
-        })
-
-        Text('书签')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-          .layoutWeight(1)
-
-        if (this.bookmarks.length > 0) {
-          Text(`${this.bookmarks.length}`)
-            .fontSize(14)
-            .fontColor($r('app.color.text_faint'))
-            .font({ family: 'HarmonyOS Sans' })
-            .padding({ right: 8 })
+        },
+        trailing: (): void => {
+          this.HeaderCount();
         }
-      }
-      .width('100%')
-      .height(56)
-      .padding({ left: 12, right: 8 })
+      })
 
       this.Content()
     }

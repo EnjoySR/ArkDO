@@ -13,6 +13,7 @@ import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { submitNewTopic } from '../../services/topic/CreateTopicFlow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { DRAFTS_COMPOSER_BACK_TICK_KEY, DRAFTS_COMPOSER_VISIBLE_KEY, DRAFTS_REFRESH_TICK_KEY } from '../../common/constants/StorageKeys';
+import { PageHeader } from '../components/PageHeader';
 
 const LOG_TAG: string = '[ArkDO][DraftsPage]';
 const PAGE_PADDING: number = 16;
@@ -85,6 +86,18 @@ export struct DraftsPage {
     }
   }
 
+
+  // 头栏尾部草稿计数。无参 @Builder 直读 this.drafts:@Builder 按值参数不随 @State 重绘。
+  @Builder
+  private HeaderCount() {
+    if (this.drafts.length > 0) {
+      Text(`${this.drafts.length}`)
+        .fontSize(14)
+        .fontColor($r('app.color.text_faint'))
+        .padding({ right: 8 })
+    }
+  }
+
   build() {
     // 根 Stack:列表在底,续写浮层盖在上面(与首页发帖浮层同路子)。
     Stack({ alignContent: Alignment.TopStart }) {
@@ -123,36 +136,15 @@ export struct DraftsPage {
   private ListRoot() {
     Column() {
       // 顶栏
-      Row({ space: 8 }) {
-        Button({ type: ButtonType.Circle, stateEffect: true }) {
-          SymbolGlyph($r('sys.symbol.chevron_left'))
-            .fontSize(28)
-            .fontColor([$r('app.color.text_primary')])
-            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-        }
-        .width(40)
-        .height(40)
-        .backgroundColor($r('app.color.surface_muted'))
-        .onClick(() => {
+      PageHeader({
+        title: '我的草稿',
+        onBack: () => {
           this.onBack();
-        })
-
-        Text('我的草稿')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-          .layoutWeight(1)
-
-        if (this.drafts.length > 0) {
-          Text(`${this.drafts.length}`)
-            .fontSize(14)
-            .fontColor($r('app.color.text_faint'))
-            .padding({ right: 8 })
+        },
+        trailing: (): void => {
+          this.HeaderCount();
         }
-      }
-      .width('100%')
-      .height(56)
-      .padding({ left: 12, right: 8 })
+      })
 
       this.Content()
     }

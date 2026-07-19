@@ -7,6 +7,7 @@ import { JsonNetworkClient, NetworkResult } from '../../services/network/Network
 import { NotificationListItem } from '../components/NotificationListItem';
 import { LoadStateView } from '../components/LoadStateView';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { PageHeader } from '../components/PageHeader';
 
 const LOG_TAG: string = '[ArkDO][NotificationPage]';
 const PAGE_SIZE: number = 30;
@@ -38,43 +39,35 @@ export struct NotificationPage {
     this.loadInitial();
   }
 
+
+  // 头栏尾部「全部已读」。无参 @Builder 直读状态:@Builder 按值参数不随 @State 重绘,
+  // 传 hasUnread 的布尔值进来会导致读完之后按钮不消失。
+  @Builder
+  private HeaderMarkAllRead() {
+    if (this.hasUnread()) {
+      Text('全部已读')
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.brand'))
+        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .onClick(() => {
+          this.markAllRead();
+        })
+    }
+  }
+
   build() {
     Column() {
       // 顶栏
-      Row({ space: 8 }) {
-        Button({ type: ButtonType.Circle, stateEffect: true }) {
-          SymbolGlyph($r('sys.symbol.chevron_left'))
-            .fontSize(28)
-            .fontColor([$r('app.color.text_primary')])
-            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-        }
-        .width(40)
-        .height(40)
-        .backgroundColor($r('app.color.surface_muted'))
-        .onClick(() => {
+      PageHeader({
+        title: '通知',
+        onBack: () => {
           this.onBack();
-        })
-
-        Text('通知')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-          .layoutWeight(1)
-
-        if (this.hasUnread()) {
-          Text('全部已读')
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.brand'))
-            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-            .onClick(() => {
-              this.markAllRead();
-            })
+        },
+        trailing: (): void => {
+          this.HeaderMarkAllRead();
         }
-      }
-      .width('100%')
-      .height(56)
-      .padding({ left: 12, right: 8 })
+      })
       .border({
         width: { bottom: 1 },
         color: $r('app.color.border')
