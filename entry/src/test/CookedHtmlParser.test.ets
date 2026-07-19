@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { CookedHtmlParser, RichBlock, RichBlockType, RichInlineNode, RichInlineType } from '../main/ets/services/content/CookedHtmlParser';
+import { CookedHtmlParser, RichBlock, RichBlockType, RichInlineNode, RichInlineType, RichTableRow } from '../main/ets/services/content/CookedHtmlParser';
 
 export default function cookedHtmlParserTest() {
   describe('cookedHtmlParserTest', () => {
@@ -233,15 +233,30 @@ export default function cookedHtmlParserTest() {
       expect(!!inlines[1].spoiler).assertFalse();
     });
 
-    it('marksUnsupportedDiscourseBlocksAsTodo', 0, () => {
+    // 表格早期走 UNSUPPORTED 占位,现已原生化成 TABLE 结构块(tableBlockFrom 在
+    // detectUnsupportedKind 之前拦截),故断言改为结构化行/单元格。
+    it('parsesTableIntoStructuredTableBlock', 0, () => {
       const html: string = '<table><tr><td>A</td></tr></table>';
 
       const blocks: RichBlock[] = CookedHtmlParser.parse(html);
 
       expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.TABLE);
+      const rows: RichTableRow[] = blocks[0].tableRows ?? [];
+      expect(rows.length).assertEqual(1);
+      expect(rows[0].cells.length).assertEqual(1);
+      expect(rows[0].cells[0].inlines[0].text).assertEqual('A');
+    });
+
+    // UNSUPPORTED 通道本身仍在用(iframe 类嵌入等),继续覆盖:占位块要带类型名与正文摘要。
+    it('marksUnsupportedDiscourseBlocksAsTodo', 0, () => {
+      const html: string = '<iframe src="https://www.youtube.com/embed/abc">B</iframe>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
       expect(blocks[0].type).assertEqual(RichBlockType.UNSUPPORTED);
-      expect(blocks[0].unsupportedKind).assertEqual('表格');
-      expect(blocks[0].text).assertEqual('A');
+      expect(blocks[0].unsupportedKind).assertEqual('视频/嵌入内容');
     });
 
     it('parsesAudioIntoAudioBlockWithResolvedSource', 0, () => {

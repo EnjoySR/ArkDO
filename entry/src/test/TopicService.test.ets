@@ -47,6 +47,11 @@ class FakeBridge implements JsonNetworkClient {
     this.postedBody = body;
     return Promise.resolve(this.result);
   }
+
+  // 接口占位:本套测试不触及图片上传,只为满足 JsonNetworkClient 而实现。
+  uploadImage(base64: string, fileName: string, mimeType: string): Promise<NetworkResult<string>> {
+    return Promise.resolve(this.result);
+  }
 }
 
 class SequenceBridge implements JsonNetworkClient {
@@ -88,6 +93,14 @@ class SequenceBridge implements JsonNetworkClient {
 
   putForm(path: string, body: string): Promise<NetworkResult<string>> {
     this.requestedPaths.push(path);
+    const result: NetworkResult<string> = this.results[this.index];
+    this.index++;
+    return Promise.resolve(result);
+  }
+
+  // 接口占位:本套测试不触及图片上传,只为满足 JsonNetworkClient 而实现。
+  // 与其它方法一致从序列取值,避免误用时静默返回错位的结果。
+  uploadImage(base64: string, fileName: string, mimeType: string): Promise<NetworkResult<string>> {
     const result: NetworkResult<string> = this.results[this.index];
     this.index++;
     return Promise.resolve(result);

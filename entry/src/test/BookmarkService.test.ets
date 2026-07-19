@@ -37,6 +37,11 @@ class FakeBridge implements JsonNetworkClient {
     this.requestedPath = path;
     return Promise.resolve(this.result);
   }
+
+  // 接口占位:本套测试不触及图片上传,只为满足 JsonNetworkClient 而实现。
+  uploadImage(base64: string, fileName: string, mimeType: string): Promise<NetworkResult<string>> {
+    return Promise.resolve(this.result);
+  }
 }
 
 function ok(payload: string): NetworkResult<string> {

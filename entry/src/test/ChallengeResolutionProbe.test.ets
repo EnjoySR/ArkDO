@@ -46,6 +46,12 @@ class FakeProbeClient implements JsonNetworkClient {
     this.notifyChallenge = options?.notifyChallenge;
     return Promise.resolve(this.result);
   }
+
+  // 接口占位:本套测试不触及图片上传,只为满足 JsonNetworkClient 而实现。
+  uploadImage(base64: string, fileName: string, mimeType: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    this.notifyChallenge = options?.notifyChallenge;
+    return Promise.resolve(this.result);
+  }
 }
 
 export default function challengeResolutionProbeTest() {

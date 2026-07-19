@@ -47,6 +47,12 @@ class SpyBridge implements JsonNetworkClient {
     return Promise.resolve(this.result);
   }
 
+  uploadImage(base64: string, fileName: string, mimeType: string): Promise<NetworkResult<string>> {
+    // 接口占位:本套测试不触及图片上传,只为满足 JsonNetworkClient 而实现。
+    this.lastMethod = 'UPLOAD_IMAGE';
+    return Promise.resolve(this.result);
+  }
+
   deleteForm(path: string, body: string): Promise<NetworkResult<string>> {
     this.lastMethod = 'DELETE_FORM';
     this.lastPath = path;
