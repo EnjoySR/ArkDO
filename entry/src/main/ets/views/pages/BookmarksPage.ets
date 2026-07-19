@@ -11,6 +11,7 @@ import { LoadStateView } from '../components/LoadStateView';
 import { TopicMetadataBadges } from '../components/TopicBadges';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { showToast as promptToast } from '../../common/utils/Toast';
 
 const LOG_TAG: string = '[ArkDO][BookmarksPage]';
 const PAGE_PADDING: number = 16;
@@ -434,11 +435,7 @@ export struct BookmarksPage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    } catch (err) {
-      Log.i(`${LOG_TAG} toast failed: ${message}`);
-    }
+    promptToast(this.getUIContext(), message);
   }
 
   private faIcon(name: string): FaIconDefinition {

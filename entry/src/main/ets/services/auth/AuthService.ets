@@ -1,5 +1,6 @@
 import { User } from '../../models/User';
-import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
+import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
+import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 
 const CURRENT_SESSION_PATH: string = '/session/current.json';
 
@@ -92,24 +93,10 @@ export class AuthService {
   }
 
   private forwardFailure(response: NetworkResult<string>): NetworkResult<User | undefined> {
-    return {
-      success: false,
-      statusCode: response.statusCode,
-      challengeState: response.challengeState,
-      error: response.error
-    };
+    return forwardFailure<User | undefined>(response);
   }
 
   private unexpectedResponse(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<User | undefined> {
-    return {
-      success: false,
-      statusCode: statusCode,
-      challengeState: challengeState,
-      error: {
-        code: NetworkErrorCode.UNEXPECTED_RESPONSE,
-        message: message,
-        requiresChallenge: challengeState !== ChallengeState.NONE
-      }
-    };
+    return unexpectedResponse<User | undefined>(statusCode, challengeState, message);
   }
 }

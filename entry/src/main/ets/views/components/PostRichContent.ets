@@ -24,6 +24,7 @@ import { MathRenderService, MathImage } from '../../services/content/MathRenderS
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 import { APP_IS_WIDE_STORAGE_KEY } from '../../common/utils/BreakpointManager';
 import { display } from '@kit.ArkUI';
+import { showToast as promptToast, TOAST_SHORT_MS } from '../../common/utils/Toast';
 
 const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
@@ -130,6 +131,14 @@ export struct PostRichContent {
   // 组件是否仍挂载:异步续体(如引用卡拉全文的 .then)跨越网络往返落地时,组件可能已被 LazyForEach 回收
   // 或返回上一页销毁;续体前置守卫,避免在已卸载组件上 getUIContext().animateTo(null) 抛异常/无效写 @State。
   private isActive: boolean = false;
+  // cooked HTML 的解析结果缓存。刻意用普通字段而非 @State:它是纯派生数据,
+  // 写它不该触发重渲染(在 build() 里回填,置 @State 会自触发死循环)。
+  // 用独立有效位而非拿空串当哨兵——空正文是合法输入,会与哨兵撞键导致缓存永不命中。
+  private parsedCacheValid: boolean = false;
+  private parsedCacheKey: string = '';
+  private parsedCacheValue: RichBlock[] = [];
+  // 引用卡折叠预览的解析缓存,按被引用正文原文分键。同一组件实例内引用卡数量有限,不设淘汰。
+  private quotePreviewCache: Map<string, RichBlock[]> = new Map();
 
   aboutToAppear(): void {
     this.isActive = true;
@@ -703,7 +712,16 @@ export struct PostRichContent {
         return blocks;
       }
     }
-    return CookedHtmlParser.parse(block.text ? block.text : '');
+    // 折叠/加载中走截断预览。这条分支原先每帧都重解析一次 aside 里的 blockquote
+    // (展开分支有 quoteFullBlocksCached 兜着,唯独预览分支漏了缓存),按 path 记忆化。
+    const key: string = block.text ? block.text : '';
+    const cached: RichBlock[] | undefined = this.quotePreviewCache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const parsed: RichBlock[] = CookedHtmlParser.parse(key);
+    this.quotePreviewCache.set(key, parsed);
+    return parsed;
   }
 
   private faIconOf(id: string): FaIconDefinition {
@@ -873,7 +891,7 @@ export struct PostRichContent {
       const data: pasteboard.PasteData =
         pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
       pasteboard.getSystemPasteboard().setData(data).then(() => {
-        this.getUIContext().getPromptAction().showToast({ message: '已复制', duration: 1500 });
+        promptToast(this.getUIContext(), '已复制', TOAST_SHORT_MS);
       }).catch((err: Object) => {
         Log.e(`${LOG_TAG} copy code failed: ${JSON.stringify(err)}`);
       });
@@ -1483,6 +1501,21 @@ export struct PostRichContent {
   }
 
   private getRenderableBlocks(): RichBlock[] {
+    // 记忆化:本方法在 build() / prepareMath() / collectImages() 里各调一次,
+    // 而每次调用都要把整帖 cooked HTML 完整扫一遍(块级+行内两遍扫描)。
+    // 长帖在滚动时会把这份解析重复到每帧,是本组件最大的一处无谓开销。
+    // cookedHtml 变了(编辑/换楼复用组件实例)才重算,故用它自身当缓存键。
+    if (this.parsedCacheValid && this.parsedCacheKey === this.cookedHtml) {
+      return this.parsedCacheValue;
+    }
+    const blocks: RichBlock[] = this.buildRenderableBlocks();
+    this.parsedCacheKey = this.cookedHtml;
+    this.parsedCacheValue = blocks;
+    this.parsedCacheValid = true;
+    return blocks;
+  }
+
+  private buildRenderableBlocks(): RichBlock[] {
     const parsed: RichBlock[] = CookedHtmlParser.parse(this.cookedHtml);
     if (parsed.length > 0) {
       return parsed;

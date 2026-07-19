@@ -14,7 +14,8 @@ import {
 } from '../../models/UserProfile';
 import { User } from '../../models/User';
 import { HtmlText } from '../content/HtmlText';
-import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
+import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
+import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 
 // 个人中心「最近活动」默认取前几条(发布话题 + 回复)。
 const RECENT_ACTIVITY_LIMIT: number = 3;
@@ -833,24 +834,10 @@ export class UserProfileService {
   }
 
   private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
-    return {
-      success: false,
-      statusCode: response.statusCode,
-      challengeState: response.challengeState,
-      error: response.error
-    };
+    return forwardFailure<T>(response);
   }
 
   private unexpectedResponse<T>(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<T> {
-    return {
-      success: false,
-      statusCode: statusCode,
-      challengeState: challengeState,
-      error: {
-        code: NetworkErrorCode.UNEXPECTED_RESPONSE,
-        message: message,
-        requiresChallenge: challengeState !== ChallengeState.NONE
-      }
-    };
+    return unexpectedResponse<T>(statusCode, challengeState, message);
   }
 }

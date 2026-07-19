@@ -3,13 +3,14 @@ import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
 import { SiteIconStore } from '../../services/site/SiteIconStore';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { showToast as promptToast } from '../../common/utils/Toast';
+import { SITES_TICK } from '../../common/constants/StorageKeys';
 
 const LOG_TAG: string = '[ArkDO][SitesPage]';
 
 // AppStorage 计数键:RootTabPage 在本页 NavDestination onShown 时自增,驱动本页重读站点。
 // 打开站点后 favicon 才落盘,而 NavDestination 常驻不重建(aboutToAppear 不会再跑),
 // 从 WEB 页 pop 回来必须靠它把新图标读进来。同 SETTINGS_DOH_TICK 的处境。
-export const SITES_TICK: string = 'sites_tick';
 
 // 与设置页同款鸿蒙卡片分组:灰底 + 无描边圆角卡片。
 const PAGE_MARGIN: number = 12;
@@ -812,10 +813,6 @@ export struct SitesPage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    } catch (err) {
-      Log.i(`${LOG_TAG} toast failed: ${message}`);
-    }
+    promptToast(this.getUIContext(), message);
   }
 }

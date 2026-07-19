@@ -23,6 +23,7 @@ import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { BadgeTile } from '../components/BadgeTile';
 import { UserAvatar } from '../components/UserAvatar';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { showToast as promptToast } from '../../common/utils/Toast';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
 
@@ -432,37 +433,6 @@ export struct ProfilePage {
     .layoutWeight(1)
   }
 
-  @Builder
-  private QuickEntry(symbol: Resource, label: string, badgeCount: number, highPriority: boolean, love: boolean, path: string) {
-    Column() {
-      Badge({
-        count: badgeCount,
-        maxCount: 99,
-        position: BadgePosition.RightTop,
-        style: {
-          badgeSize: 16,
-          fontSize: 10,
-          badgeColor: highPriority ? $r('app.color.ld_danger') : $r('app.color.ld_accent'),
-          // BadgeStyle 的描边默认红色,不与底色同色会在角标外露一圈红边。
-          borderColor: highPriority ? $r('app.color.ld_danger') : $r('app.color.ld_accent'),
-          borderWidth: 0
-        }
-      }) {
-        SymbolGlyph(symbol)
-          .fontSize(24)
-          .fontColor([love ? $r('app.color.ld_love') : $r('app.color.text_primary')])
-      }
-      Text(label)
-        .fontSize(12)
-        .fontColor($r('app.color.text_primary'))
-        .margin({ top: 7 })
-    }
-    .layoutWeight(1)
-    .onClick(() => {
-      this.openWebPath(path, label);
-    })
-  }
-
   // 无角标、走自定义点击的快捷入口(书签/点赞等已原生化的入口)。love=true 时图标用点赞粉。
   @Builder
   private QuickEntryNative(symbol: Resource, label: string, love: boolean, onEntryClick: () => void) {
@@ -700,13 +670,6 @@ export struct ProfilePage {
     .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 14, bottom: 4 })
   }
 
-  @Builder
-  private ChevronIcon() {
-    SymbolGlyph($r('sys.symbol.chevron_right'))
-      .fontSize(14)
-      .fontColor([$r('app.color.text_faint')])
-  }
-
   // ==================== 数据加载 ====================
 
   // 资料/摘要/活动/分类并行加载,各自落地各自的 @State;
@@ -846,11 +809,7 @@ export struct ProfilePage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    } catch (err) {
-      Log.i(`${LOG_TAG} toast failed: ${message}`);
-    }
+    promptToast(this.getUIContext(), message);
   }
 
   // ==================== 事件 ====================
@@ -1026,12 +985,5 @@ export struct ProfilePage {
       return;
     }
     this.onOpenWeb(`${AppConstants.BASE_URL}/u/${encodeURIComponent(username)}${subPath}`, title);
-  }
-
-  private openWebPath(path: string, title?: string): void {
-    if (path.length === 0) {
-      return;
-    }
-    this.onOpenWeb(`${AppConstants.BASE_URL}${path}`, title);
   }
 }

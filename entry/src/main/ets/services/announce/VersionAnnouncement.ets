@@ -109,9 +109,15 @@ export class VersionAnnouncementService {
     if (!res.success || res.data === undefined) {
       return undefined;
     }
-    const parsed: RawTopic = JSON.parse(res.data) as RawTopic;
-    const posts: RawPost[] = parsed.post_stream?.posts ?? [];
-    return posts.length > 0 ? posts[0] : undefined;
+    // 单条畸形响应只跳过这一楼,不能让异常冒到外层 catch 去中止整轮补拉扫描。
+    try {
+      const parsed: RawTopic = JSON.parse(res.data) as RawTopic;
+      const posts: RawPost[] = parsed.post_stream?.posts ?? [];
+      return posts.length > 0 ? posts[0] : undefined;
+    } catch (error) {
+      Log.w(`${LOG_TAG} 补拉楼 id=${id} 响应不是有效 JSON,跳过`);
+      return undefined;
+    }
   }
 
   // 单楼匹配:命中当前版本标记则剥离标记返回可展示正文,否则返回 null。source 仅用于日志。

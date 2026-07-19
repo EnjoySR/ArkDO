@@ -2,7 +2,8 @@ import { Bookmark, BookmarkPage } from '../../models/Bookmark';
 import { TopicTag } from '../../models/Topic';
 import { User } from '../../models/User';
 import { HtmlText } from '../content/HtmlText';
-import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
+import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
+import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 
 interface DiscourseBookmarkListResponse {
   user_bookmark_list?: DiscourseBookmarkList;
@@ -220,24 +221,10 @@ export class BookmarkService {
   }
 
   private forwardFailure(response: NetworkResult<string>): NetworkResult<BookmarkPage> {
-    return {
-      success: false,
-      statusCode: response.statusCode,
-      challengeState: response.challengeState,
-      error: response.error
-    };
+    return forwardFailure<BookmarkPage>(response);
   }
 
   private unexpectedResponse(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<BookmarkPage> {
-    return {
-      success: false,
-      statusCode: statusCode,
-      challengeState: challengeState,
-      error: {
-        code: NetworkErrorCode.UNEXPECTED_RESPONSE,
-        message: message,
-        requiresChallenge: challengeState !== ChallengeState.NONE
-      }
-    };
+    return unexpectedResponse<BookmarkPage>(statusCode, challengeState, message);
   }
 }

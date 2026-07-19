@@ -30,6 +30,7 @@ import { HolographicText } from '../components/HolographicText';
 import { BadgeTile } from '../components/BadgeTile';
 import { UserAvatar } from '../components/UserAvatar';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { showToast as promptToast } from '../../common/utils/Toast';
 
 const LOG_TAG: string = '[ArkDO][UserProfile]';
 
@@ -1326,11 +1327,7 @@ export struct UserProfilePage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    } catch (err) {
-      Log.i(`${LOG_TAG} toast failed: ${message}`);
-    }
+    promptToast(this.getUIContext(), message);
   }
 
   // ==================== 展示辅助 ====================

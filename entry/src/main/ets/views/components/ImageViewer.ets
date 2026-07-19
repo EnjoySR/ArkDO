@@ -12,8 +12,6 @@ export interface ViewerImage {
 
 // 预览可见态镜像 + 系统返回键信号:浮层不进 Navigation 栈,返回键由 Index @Entry 拦截并
 // bump 计数,经 RootTabPage 以 @Param 传入本组件消费(非首图翻回上一张,首图才关闭)。
-export const IMAGE_VIEWER_VISIBLE_KEY: string = 'imageViewerVisible';
-export const IMAGE_VIEWER_BACK_TICK_KEY: string = 'imageViewerBackTick';
 
 const MIN_SCALE: number = 1;
 const MAX_SCALE: number = 4;

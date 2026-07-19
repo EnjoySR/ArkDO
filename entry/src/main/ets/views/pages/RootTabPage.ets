@@ -37,13 +37,8 @@ import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { LoginGate } from '../../services/session/LoginGate';
 import { ArkWebHost } from '../components/ArkWebHost';
 import { MathRenderHost } from '../components/MathRenderHost';
-import {
-  IMAGE_VIEWER_BACK_TICK_KEY,
-  IMAGE_VIEWER_VISIBLE_KEY,
-  ImageViewer,
-  ViewerImage
-} from '../components/ImageViewer';
-import { SEARCH_OVERLAY_BACK_TICK_KEY, SEARCH_OVERLAY_VISIBLE_KEY, SearchOverlay } from '../components/SearchOverlay';
+import { ImageViewer, ViewerImage } from '../components/ImageViewer';
+import { SearchOverlay } from '../components/SearchOverlay';
 import { ensureFaIconsLoaded } from '../components/FaIcon';
 import { ensureTagIconsLoaded } from '../components/TagIconRegistry';
 import { CfChallengePage } from './CfChallengePage';
@@ -51,20 +46,24 @@ import { HomePage } from './HomePage';
 import { LoginPage } from './LoginPage';
 import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
-import { SettingsPage, SETTINGS_DOH_TICK } from './SettingsPage';
+import { SettingsPage } from './SettingsPage';
 import { DohSettingsPage } from './DohSettingsPage';
-import { SitesPage, SITES_TICK } from './SitesPage';
+import { SitesPage } from './SitesPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { BookmarksPage } from './BookmarksPage';
-import { DraftsPage, DRAFTS_COMPOSER_BACK_TICK_KEY, DRAFTS_COMPOSER_VISIBLE_KEY, DRAFTS_REFRESH_TICK_KEY } from './DraftsPage';
+import { DraftsPage } from './DraftsPage';
 import { ActivityListPage } from './ActivityListPage';
 import { ReadTopicsPage } from './ReadTopicsPage';
 import { BadgesPage } from './BadgesPage';
 import { UserProfilePage } from './UserProfilePage';
 import { SolvedPostsPage } from './SolvedPostsPage';
 import { TopicDetailPage } from './TopicDetailPage';
-import { COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from './ComposerPage';
+import { bumpTick, COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY, DRAFTS_COMPOSER_BACK_TICK_KEY,
+  DRAFTS_COMPOSER_VISIBLE_KEY, DRAFTS_REFRESH_TICK_KEY, IMAGE_VIEWER_BACK_TICK_KEY, IMAGE_VIEWER_VISIBLE_KEY,
+  SEARCH_OVERLAY_BACK_TICK_KEY, SEARCH_OVERLAY_VISIBLE_KEY, SETTINGS_DOH_TICK, SITES_TICK } from '../../common/constants/StorageKeys';
 import { WebViewPage } from './WebViewPage';
+import { showToast as promptToast } from '../../common/utils/Toast';
+import { MATH_HOST_ACTIVE_KEY } from '../../services/content/MathRenderService';
 
 const LOG_TAG: string = '[ArkDO][Root]';
 // 推送自愈的单账号连续失败上限:超过就停手,等下次冷启动或 token 轮换再试,
@@ -97,7 +96,7 @@ export struct RootTabPage {
   @State private isSheetVisible: boolean = false;
   @State private activeSheet: RootSheet = RootSheet.NONE;
   // 公式离屏引擎挂载门控:由 MathRenderService.retain/release 经 AppStorage 翻转。
-  @StorageProp('mathHostActive') private mathHostActive: boolean = false;
+  @StorageProp(MATH_HOST_ACTIVE_KEY) private mathHostActive: boolean = false;
   // 宽屏标志(平板横屏 / 大屏):驱动 Navigation 双栏 Split;手机、平板竖屏恒为 false 走单栏 Stack。
   // @Watch 在宽<->窄切换(旋转)时同步右栏空占位:进宽屏且空栈时垫占位,回窄屏时移除占位。
   @StorageProp(APP_IS_WIDE_STORAGE_KEY) @Watch('onWideChanged') private appIsWide: boolean = false;
@@ -128,7 +127,6 @@ export struct RootTabPage {
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   private notificationService: NotificationService = new NotificationService(this.bridge);
   private pushPermissionService: PushNotificationPermissionService = new PushNotificationPermissionService();
-  private pushSubscriptionService?: PushSubscriptionService = undefined;
   private navPathStack: NavPathStack = new NavPathStack();
   // 手势激活闸:仅此为 true 时 customNavContentTransition 才接管 PROFILE 的 push;
   // 点头像那条路照走系统默认转场,互不干扰。
@@ -652,8 +650,7 @@ export struct RootTabPage {
       // 从 DoH 配置页 pop 回来时本页重新可见,自增 AppStorage 计数,让设置页 @StorageProp 重读
       // DoH 摘要(此刻本页已在前台,变更能可靠触发重渲染;单纯 @Prop 不会流入 NavDestination 子树)。
       .onShown(() => {
-        const prev: number = (AppStorage.get(SETTINGS_DOH_TICK) as number | undefined) ?? 0;
-        AppStorage.setOrCreate(SETTINGS_DOH_TICK, prev + 1);
+        bumpTick(SETTINGS_DOH_TICK);
       })
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
@@ -687,8 +684,7 @@ export struct RootTabPage {
       .hideTitleBar(true)
       // 从站点的 WEB 页 pop 回来时本页重新可见,自增计数让站点页重读——favicon 此刻可能刚落盘。
       .onShown(() => {
-        const prev: number = (AppStorage.get(SITES_TICK) as number | undefined) ?? 0;
-        AppStorage.setOrCreate(SITES_TICK, prev + 1);
+        bumpTick(SITES_TICK);
       })
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
@@ -777,8 +773,7 @@ export struct RootTabPage {
       // 从帖子详情 pop 回来时本页重新可见:自增计数让草稿页重拉列表。
       // 续写发表后草稿已在服务端删除,不重拉的话返回时那条还挂在列表里(要手动下拉才消失)。
       .onShown(() => {
-        const prev: number = (AppStorage.get(DRAFTS_REFRESH_TICK_KEY) as number | undefined) ?? 0;
-        AppStorage.setOrCreate(DRAFTS_REFRESH_TICK_KEY, prev + 1);
+        bumpTick(DRAFTS_REFRESH_TICK_KEY);
       })
       // 续写浮层开着时返回键先关浮层,不 pop 掉草稿页。
       .onBackPressed(() => this.consumeDraftsBack())
@@ -1305,12 +1300,11 @@ export struct RootTabPage {
   // 中继地址/密钥每次都重新解析:用户可能刚在设置页改过自建地址,缓存住会用错服务器。
   private pushSubscriptionServiceRef(context: common.Context): PushSubscriptionService {
     const config: PushRelayConfig = resolvePushRelayConfig(context);
-    this.pushSubscriptionService = new PushSubscriptionService(
+    return new PushSubscriptionService(
       this.bridge,
       new HarmonyPushTokenProvider(),
       new HttpPushRelayClient(config.baseUrl, config.apiKey)
     );
-    return this.pushSubscriptionService;
   }
 
   // 登出前清理系统推送。必须在 AuthService.logout 之前跑完:linux.do 退订要带登录 cookie,
@@ -1375,11 +1369,7 @@ export struct RootTabPage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    } catch (err) {
-      Log.i(`${LOG_TAG} toast failed: ${message}`);
-    }
+    promptToast(this.getUIContext(), message);
   }
 
   private openWebPage(url: string, title?: string, siteId?: string): void {
@@ -1454,8 +1444,7 @@ export struct RootTabPage {
   private consumeDraftsBack(): boolean {
     const visible: boolean = (AppStorage.get(DRAFTS_COMPOSER_VISIBLE_KEY) as boolean | undefined) ?? false;
     if (visible) {
-      const prev: number = (AppStorage.get(DRAFTS_COMPOSER_BACK_TICK_KEY) as number | undefined) ?? 0;
-      AppStorage.setOrCreate(DRAFTS_COMPOSER_BACK_TICK_KEY, prev + 1);
+      bumpTick(DRAFTS_COMPOSER_BACK_TICK_KEY);
       return true;
     }
     return false;
@@ -1464,8 +1453,7 @@ export struct RootTabPage {
   private consumeTopicDetailBack(): boolean {
     const composerVisible: boolean = (AppStorage.get(COMPOSER_OVERLAY_VISIBLE_KEY) as boolean | undefined) ?? false;
     if (composerVisible) {
-      const prev: number = (AppStorage.get(COMPOSER_OVERLAY_BACK_TICK_KEY) as number | undefined) ?? 0;
-      AppStorage.setOrCreate(COMPOSER_OVERLAY_BACK_TICK_KEY, prev + 1);
+      bumpTick(COMPOSER_OVERLAY_BACK_TICK_KEY);
       return true;
     }
     return this.consumeViewerBack();
@@ -1477,8 +1465,7 @@ export struct RootTabPage {
     if (!this.showImageViewer) {
       return false;
     }
-    const prev: number = (AppStorage.get(IMAGE_VIEWER_BACK_TICK_KEY) as number | undefined) ?? 0;
-    AppStorage.setOrCreate(IMAGE_VIEWER_BACK_TICK_KEY, prev + 1);
+    bumpTick(IMAGE_VIEWER_BACK_TICK_KEY);
     return true;
   }
 

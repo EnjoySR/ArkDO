@@ -1,5 +1,6 @@
 import { TopicCategory } from '../../models/Topic';
-import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
+import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
+import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 
 interface DiscourseSiteResponse {
   categories?: DiscourseCategory[];
@@ -125,24 +126,10 @@ export class SiteService {
   }
 
   private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
-    return {
-      success: false,
-      statusCode: response.statusCode,
-      challengeState: response.challengeState,
-      error: response.error
-    };
+    return forwardFailure<T>(response);
   }
 
   private unexpectedResponse<T>(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<T> {
-    return {
-      success: false,
-      statusCode: statusCode,
-      challengeState: challengeState,
-      error: {
-        code: NetworkErrorCode.UNEXPECTED_RESPONSE,
-        message: message,
-        requiresChallenge: challengeState !== ChallengeState.NONE
-      }
-    };
+    return unexpectedResponse<T>(statusCode, challengeState, message);
   }
 }

@@ -5,11 +5,14 @@ import { TopicCategory } from '../../models/Topic';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { DraftService } from '../../services/draft/DraftService';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
-import { CreateTopicOutcome, TagSuggestion, TopicService } from '../../services/topic/TopicService';
+import { TagSuggestion } from '../../services/topic/TopicService';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
 import { LoadStateView } from '../components/LoadStateView';
 import { ComposerPage } from './ComposerPage';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { submitNewTopic } from '../../services/topic/CreateTopicFlow';
+import { showToast as promptToast } from '../../common/utils/Toast';
+import { DRAFTS_COMPOSER_BACK_TICK_KEY, DRAFTS_COMPOSER_VISIBLE_KEY, DRAFTS_REFRESH_TICK_KEY } from '../../common/constants/StorageKeys';
 
 const LOG_TAG: string = '[ArkDO][DraftsPage]';
 const PAGE_PADDING: number = 16;
@@ -18,11 +21,8 @@ const PAGE_PADDING: number = 16;
 const DRAFT_REFRESH_DELAY_MS: number = 320;
 // 草稿页续写浮层的可见态 + 返回键信号:浮层内联挂在本页根 Stack,不进 Navigation 栈,
 // 返回键须由本页所在 NavDestination.onBackPressed 拦截(RootTabPage 里接)。
-export const DRAFTS_COMPOSER_VISIBLE_KEY: string = 'draftsComposerVisible';
-export const DRAFTS_COMPOSER_BACK_TICK_KEY: string = 'draftsComposerBackTick';
 // 本页重新可见时自增(RootTabPage 在 NavDestination.onShown 里 bump),用于重新拉草稿列表:
 // 从帖子详情续写并发表后草稿已在服务端删除,不重拉的话返回时列表里还挂着那条。
-export const DRAFTS_REFRESH_TICK_KEY: string = 'draftsRefreshTick';
 
 @Component
 export struct DraftsPage {
@@ -370,22 +370,11 @@ export struct DraftsPage {
     if (!this.bridge) {
       return false;
     }
-    const result: NetworkResult<CreateTopicOutcome> = await new TopicService(this.bridge)
-      .createTopic(title, categoryId, raw, tags, typingMs, composerMs);
-
-    if (result.success && result.data) {
-      const outcome: CreateTopicOutcome = result.data;
-      if (outcome.pending) {
-        this.getUIContext().getPromptAction().showToast({ message: '帖子已提交，等待审核', duration: 2000 });
-      } else if (typeof outcome.topicId === 'number') {
-        this.getUIContext().getPromptAction().showToast({ message: '帖子已发布', duration: 1500 });
-        this.onOpenTopic(outcome.topicId, title);
-      }
-      return true;
-    }
-    const reason: string = result.error ? result.error.message : '发布失败，请稍后重试。';
-    this.getUIContext().getPromptAction().showToast({ message: reason, duration: 2500 });
-    return false;
+    return submitNewTopic(
+      this.bridge,
+      (message: string, duration: number) => promptToast(this.getUIContext(), message, duration),
+      title, categoryId, raw, tags, typingMs, composerMs,
+      (topicId: number) => this.onOpenTopic(topicId, title));
   }
 
   private async loadCategories(): Promise<void> {

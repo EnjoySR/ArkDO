@@ -1,5 +1,8 @@
 import { AppConstants } from '../../common/constants/AppConstants';
 import { TopicCategory } from '../../models/Topic';
+import { findClosingTag, findOpenTag, findTagEnd, getTagName, isBlockTag, isClosingTag, isHeadingTag,
+  isSelfClosingTag, shouldReadChildrenAsPlainText } from './html/HtmlLexer';
+import { bestSrcFromTag, extractAttr, hasClass, hasClassContaining, parsePositiveNumber } from './html/HtmlAttrs';
 
 // 行内小图(emoji/小图标)的尺寸上限,与渲染层 PostRichContent.SMALL_IMAGE_MAX 对齐:
 // 宽或高超过它的独立 <img>(或动图)视为整幅内容图,提升为 IMAGE 块,不再压成 18px 行内图。
@@ -317,32 +320,32 @@ export class CookedHtmlParser {
         pendingInlineHtml = `${pendingInlineHtml}${html.substring(index, nextTagStart)}`;
       }
 
-      const tagEnd: number = CookedHtmlParser.findTagEnd(html, nextTagStart);
+      const tagEnd: number = findTagEnd(html, nextTagStart);
       if (tagEnd < 0) {
         pendingInlineHtml = `${pendingInlineHtml}${html.substring(nextTagStart)}`;
         break;
       }
 
       const openTag: string = html.substring(nextTagStart, tagEnd + 1);
-      if (CookedHtmlParser.isClosingTag(openTag)) {
+      if (isClosingTag(openTag)) {
         // 行内元素的闭标签(</a></span></strong>…)属于当前 pending 行内内容,必须保留;
         // 否则未包 <p> 的裸文本(如引用预览、blockquote 直排文本)里 <a>…</a> 会失衡,
         // 闭标签被丢弃后其后文本被误当作未闭合链接的一部分整段染蓝可点。仅块级闭标签可安全跳过。
-        if (!CookedHtmlParser.isBlockTag(CookedHtmlParser.getTagName(openTag))) {
+        if (!isBlockTag(getTagName(openTag))) {
           pendingInlineHtml = `${pendingInlineHtml}${openTag}`;
         }
         index = tagEnd + 1;
         continue;
       }
 
-      const tagName: string = CookedHtmlParser.getTagName(openTag);
+      const tagName: string = getTagName(openTag);
       if (tagName.length === 0) {
         pendingInlineHtml = `${pendingInlineHtml}${openTag}`;
         index = tagEnd + 1;
         continue;
       }
 
-      if (!CookedHtmlParser.isBlockTag(tagName)) {
+      if (!isBlockTag(tagName)) {
         pendingInlineHtml = `${pendingInlineHtml}${openTag}`;
         index = tagEnd + 1;
         continue;
@@ -365,14 +368,14 @@ export class CookedHtmlParser {
         continue;
       }
 
-      const closeStart: number = CookedHtmlParser.findClosingTag(html, tagEnd + 1, tagName);
+      const closeStart: number = findClosingTag(html, tagEnd + 1, tagName);
       if (closeStart < 0) {
         pendingInlineHtml = `${pendingInlineHtml}${openTag}`;
         index = tagEnd + 1;
         continue;
       }
 
-      const closeEnd: number = CookedHtmlParser.findTagEnd(html, closeStart);
+      const closeEnd: number = findTagEnd(html, closeStart);
       if (closeEnd < 0) {
         index = html.length;
         continue;
@@ -406,7 +409,7 @@ export class CookedHtmlParser {
       return CookedHtmlParser.mixedBlocks(innerHtml);
     }
 
-    if (CookedHtmlParser.isHeadingTag(tagName)) {
+    if (isHeadingTag(tagName)) {
       return [{
         type: RichBlockType.HEADING,
         level: Number(tagName.substring(1)),
@@ -414,7 +417,7 @@ export class CookedHtmlParser {
       }];
     }
 
-    if (tagName === 'aside' && CookedHtmlParser.hasClass(openTag, 'quote')) {
+    if (tagName === 'aside' && hasClass(openTag, 'quote')) {
       // Discourse 话题/帖子引用:头部(头像+标题链接+分类徽章)抽成结构化数据,正文取截断预览,
       // 渲染成带头部的引用卡。兼容新式 quote-title__text-content 与老式 <div class="title"> 两种标记。
       // 判据是标题里有没有指向话题的 <a> 链接:有=跨帖引用→卡片;无(同帖内引用楼层,只显示「用户名:」)
@@ -425,7 +428,7 @@ export class CookedHtmlParser {
       }
     }
 
-    if (tagName === 'blockquote' || (tagName === 'aside' && CookedHtmlParser.hasClass(openTag, 'quote'))) {
+    if (tagName === 'blockquote' || (tagName === 'aside' && hasClass(openTag, 'quote'))) {
       let quoteBlocks: RichBlock[] = CookedHtmlParser.parseBlocks(innerHtml);
       if (tagName === 'aside') {
         // Discourse 引用：<aside class="quote"> 内的 <blockquote> 才是引用正文，
@@ -446,7 +449,7 @@ export class CookedHtmlParser {
 
     // Discourse 链接预览：<aside class="onebox ...">，或个别站点用 <div class="onebox">。
     // 抽出 header.source(favicon+域名) 与 article.onebox-body(标题/描述/缩略图)渲染成卡片。
-    if ((tagName === 'aside' || tagName === 'div') && CookedHtmlParser.hasClassContaining(openTag, 'onebox')) {
+    if ((tagName === 'aside' || tagName === 'div') && hasClassContaining(openTag, 'onebox')) {
       return [CookedHtmlParser.oneboxBlock(innerHtml)];
     }
 
@@ -464,9 +467,9 @@ export class CookedHtmlParser {
 
     // discourse-poll:<div class="poll" data-poll-name="...">。产出轻量 POLL 占位块(只带 name),
     // 保持它在正文流的正确位置;真正的票数/选项/交互由渲染层按 name 关联 TopicPost.polls 的动态数据。
-    if (CookedHtmlParser.hasClassContaining(openTag, 'poll') ||
-      CookedHtmlParser.extractAttr(openTag, 'data-poll-name').length > 0) {
-      const pollName: string = CookedHtmlParser.extractAttr(openTag, 'data-poll-name');
+    if (hasClassContaining(openTag, 'poll') ||
+      extractAttr(openTag, 'data-poll-name').length > 0) {
+      const pollName: string = extractAttr(openTag, 'data-poll-name');
       return [{
         type: RichBlockType.POLL,
         pollName: pollName.length > 0 ? pollName : 'poll'
@@ -475,8 +478,8 @@ export class CookedHtmlParser {
 
     // discourse-spoiler-alert 块级剧透:<div class="spoiler">(web 端揭示后变 spoiled)。
     // 内部照常递归解析,遮蔽交给渲染层,避免旧「待实现」占位把明文泄出来。
-    if (CookedHtmlParser.hasClassContaining(openTag, 'spoiler') ||
-      CookedHtmlParser.hasClassContaining(openTag, 'spoiled')) {
+    if (hasClassContaining(openTag, 'spoiler') ||
+      hasClassContaining(openTag, 'spoiled')) {
       const spoilerBlocks: RichBlock[] = CookedHtmlParser.parseBlocks(innerHtml);
       return [{
         type: RichBlockType.SPOILER,
@@ -493,7 +496,7 @@ export class CookedHtmlParser {
 
     // discourse-math 块级公式:<div class="math">裸 LaTeX</div>。API 只给源码,排版交渲染层的
     // 离屏引擎;这里只抽出 LaTeX 存进 MATH 块的 text。须在 detectUnsupportedKind 之前拦截。
-    if (CookedHtmlParser.hasClass(openTag, 'math')) {
+    if (hasClass(openTag, 'math')) {
       const latex: string = CookedHtmlParser.toPlainText(innerHtml);
       return latex.length > 0 ? [{ type: RichBlockType.MATH, text: latex }] : [];
     }
@@ -562,16 +565,16 @@ export class CookedHtmlParser {
   // 解析 Discourse 话题引用 <aside class="quote" data-topic data-post> 的头部与预览。
   // 缺少目标 topic 时返回 undefined,让调用方回退成普通引用。
   private static topicQuoteFromAside(openTag: string, innerHtml: string): RichBlock | undefined {
-    const topicId: number = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(openTag, 'data-topic'));
+    const topicId: number = parsePositiveNumber(extractAttr(openTag, 'data-topic'));
     if (topicId <= 0) {
       return undefined;
     }
-    const postNumber: number = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(openTag, 'data-post'));
+    const postNumber: number = parsePositiveNumber(extractAttr(openTag, 'data-post'));
 
     // 头像:title 区里 class 含 avatar 的 <img>。
     const avatarTag: string = CookedHtmlParser.firstImgWithClass(innerHtml, 'avatar');
     const avatarUrl: string = avatarTag.length > 0
-      ? CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(avatarTag, 'src')) : '';
+      ? CookedHtmlParser.resolveUrl(extractAttr(avatarTag, 'src')) : '';
 
     // 标题 + 链接:优先取新式 quote-title__text-content;取不到再退回老式 <div class="title"> 的内部。
     let titleContent: string = CookedHtmlParser.firstElementInnerByClass(innerHtml, 'quote-title__text-content');
@@ -579,7 +582,7 @@ export class CookedHtmlParser {
       titleContent = CookedHtmlParser.firstElementInnerByClass(innerHtml, 'title');
     }
     // 用户名(头像身份,兼作缺显示名时的兜底标题)。
-    const username: string = CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.extractAttr(openTag, 'data-username'));
+    const username: string = CookedHtmlParser.decodeHtmlEntities(extractAttr(openTag, 'data-username'));
 
     // 标题文字取第一个 <a>(话题链接,class 无 badge)的内部;href 取该开标签的 href 属性。
     const titleAnchor: string = CookedHtmlParser.firstTopicTitleAnchor(titleContent);
@@ -591,14 +594,14 @@ export class CookedHtmlParser {
       // 跨话题引用:title 里带话题链接 → 标题取链接文字、href 取链接、分类取徽章。
       title = CookedHtmlParser.decodeHtmlEntities(
         CookedHtmlParser.toPlainText(CookedHtmlParser.firstElementInner(titleContent, 'a')));
-      href = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(titleAnchor, 'href'));
+      href = CookedHtmlParser.resolveUrl(extractAttr(titleAnchor, 'href'));
       // 分类徽章:badge-category span 上带 data-category-id + --category-badge-* 变量 + 名字 + 图标 svg。
       category = CookedHtmlParser.categoryFromBadge(titleContent);
     } else {
       isReply = true;
       // 同帖回复引用:title 只有「显示名:」无链接 → 用 aside 属性组卡。
       // 标题取 data-display-name(缺则退 data-username);跳转按 data-topic/data-post 自拼站内帖链接。
-      let displayName: string = CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.extractAttr(openTag, 'data-display-name'));
+      let displayName: string = CookedHtmlParser.decodeHtmlEntities(extractAttr(openTag, 'data-display-name'));
       if (displayName.length === 0) {
         displayName = username;
       }
@@ -649,12 +652,12 @@ export class CookedHtmlParser {
       if (start < 0) {
         return '';
       }
-      const end: number = CookedHtmlParser.findTagEnd(titleContent, start);
+      const end: number = findTagEnd(titleContent, start);
       if (end < 0) {
         return '';
       }
       const tag: string = titleContent.substring(start, end + 1);
-      if (!CookedHtmlParser.hasClassContaining(tag, 'badge-category')) {
+      if (!hasClassContaining(tag, 'badge-category')) {
         return tag;
       }
       cursor = end + 1;
@@ -669,18 +672,18 @@ export class CookedHtmlParser {
       return undefined;
     }
     const spanOpen: string = CookedHtmlParser.firstOpenTagByClass(badgeInner, 'badge-category');
-    const idText: string = CookedHtmlParser.extractAttr(spanOpen, 'data-category-id');
-    const id: number = CookedHtmlParser.parsePositiveNumber(idText);
+    const idText: string = extractAttr(spanOpen, 'data-category-id');
+    const id: number = parsePositiveNumber(idText);
     const name: string = CookedHtmlParser.decodeHtmlEntities(
       CookedHtmlParser.toPlainText(CookedHtmlParser.firstElementInnerByClass(badgeInner, 'badge-category__name')));
     if (name.length === 0) {
       return undefined;
     }
-    const style: string = CookedHtmlParser.extractAttr(spanOpen, 'style');
+    const style: string = extractAttr(spanOpen, 'style');
     const color: string = CookedHtmlParser.cssVar(style, '--category-badge-color');
     const textColor: string = CookedHtmlParser.cssVar(style, '--category-badge-text-color');
     // 图标:徽章内最内层 <svg id="xxx">(外层是 fa 包装 svg)。取 id 作图标名交 getCategoryIcon 归一。
-    const iconId: string = CookedHtmlParser.extractAttr(CookedHtmlParser.lastSvgWithId(badgeInner), 'id');
+    const iconId: string = extractAttr(CookedHtmlParser.lastSvgWithId(badgeInner), 'id');
 
     const category: TopicCategory = {
       id: id > 0 ? id : 0,
@@ -710,12 +713,12 @@ export class CookedHtmlParser {
       if (start < 0) {
         return '';
       }
-      const end: number = CookedHtmlParser.findTagEnd(html, start);
+      const end: number = findTagEnd(html, start);
       if (end < 0) {
         return '';
       }
       const tag: string = html.substring(start, end + 1);
-      if (CookedHtmlParser.hasClassContaining(tag, keyword)) {
+      if (hasClassContaining(tag, keyword)) {
         return tag;
       }
       cursor = end + 1;
@@ -733,12 +736,12 @@ export class CookedHtmlParser {
       if (start < 0) {
         break;
       }
-      const end: number = CookedHtmlParser.findTagEnd(html, start);
+      const end: number = findTagEnd(html, start);
       if (end < 0) {
         break;
       }
       const tag: string = html.substring(start, end + 1);
-      if (CookedHtmlParser.extractAttr(tag, 'id').length > 0) {
+      if (extractAttr(tag, 'id').length > 0) {
         found = tag;
       }
       cursor = end + 1;
@@ -755,12 +758,12 @@ export class CookedHtmlParser {
       if (start < 0) {
         return '';
       }
-      const end: number = CookedHtmlParser.findTagEnd(html, start);
+      const end: number = findTagEnd(html, start);
       if (end < 0) {
         return '';
       }
       const tag: string = html.substring(start, end + 1);
-      if (!CookedHtmlParser.isClosingTag(tag) && CookedHtmlParser.hasClassContaining(tag, keyword)) {
+      if (!isClosingTag(tag) && hasClassContaining(tag, keyword)) {
         return tag;
       }
       cursor = end + 1;
@@ -777,14 +780,14 @@ export class CookedHtmlParser {
       if (start < 0) {
         return '';
       }
-      const end: number = CookedHtmlParser.findTagEnd(html, start);
+      const end: number = findTagEnd(html, start);
       if (end < 0) {
         return '';
       }
       const tag: string = html.substring(start, end + 1);
-      if (!CookedHtmlParser.isClosingTag(tag) && CookedHtmlParser.hasClassContaining(tag, keyword)) {
-        const name: string = CookedHtmlParser.getTagName(tag);
-        const closeStart: number = CookedHtmlParser.findClosingTag(html, end + 1, name);
+      if (!isClosingTag(tag) && hasClassContaining(tag, keyword)) {
+        const name: string = getTagName(tag);
+        const closeStart: number = findClosingTag(html, end + 1, name);
         if (closeStart < 0) {
           return '';
         }
@@ -802,11 +805,11 @@ export class CookedHtmlParser {
     if (open < 0) {
       return '';
     }
-    const openEnd: number = CookedHtmlParser.findTagEnd(html, open);
+    const openEnd: number = findTagEnd(html, open);
     if (openEnd < 0) {
       return '';
     }
-    const closeStart: number = CookedHtmlParser.findClosingTag(html, openEnd + 1, tagName);
+    const closeStart: number = findClosingTag(html, openEnd + 1, tagName);
     if (closeStart < 0) {
       return '';
     }
@@ -999,16 +1002,16 @@ export class CookedHtmlParser {
         buffer = `${buffer}${html.substring(index, tagStart)}`;
       }
 
-      const tagEnd: number = CookedHtmlParser.findTagEnd(html, tagStart);
+      const tagEnd: number = findTagEnd(html, tagStart);
       if (tagEnd < 0) {
         buffer = `${buffer}${html.substring(tagStart)}`;
         break;
       }
 
       const tag: string = html.substring(tagStart, tagEnd + 1);
-      const tagName: string = CookedHtmlParser.getTagName(tag);
-      const closing: boolean = CookedHtmlParser.isClosingTag(tag);
-      const selfClosing: boolean = CookedHtmlParser.isSelfClosingTag(tag);
+      const tagName: string = getTagName(tag);
+      const closing: boolean = isClosingTag(tag);
+      const selfClosing: boolean = isSelfClosingTag(tag);
 
       if (tagName === 'br') {
         flush();
@@ -1025,15 +1028,15 @@ export class CookedHtmlParser {
       } else if (tagName === 'span') {
         // discourse-math 行内公式:<span class="math">裸 LaTeX</span>。整体抽成一个 MATH token,
         // 里面的 LaTeX 不再当纯文本泄进正文流(否则会显示 \frac{...} 之类源码)。
-        if (!closing && !selfClosing && CookedHtmlParser.hasClass(tag, 'math')) {
+        if (!closing && !selfClosing && hasClass(tag, 'math')) {
           flush();
-          const mathClose: number = CookedHtmlParser.findClosingTag(html, tagEnd + 1, 'span');
+          const mathClose: number = findClosingTag(html, tagEnd + 1, 'span');
           if (mathClose > tagEnd) {
             const latex: string = CookedHtmlParser.toPlainText(html.substring(tagEnd + 1, mathClose));
             if (latex.length > 0) {
               out.push({ type: RichInlineType.MATH, text: latex });
             }
-            const mathCloseEnd: number = CookedHtmlParser.findTagEnd(html, mathClose);
+            const mathCloseEnd: number = findTagEnd(html, mathClose);
             index = mathCloseEnd >= 0 ? mathCloseEnd + 1 : mathClose;
             continue;
           }
@@ -1042,7 +1045,7 @@ export class CookedHtmlParser {
         if (closing) {
           state.spanSpoilerStack.pop();
         } else if (!selfClosing) {
-          state.spanSpoilerStack.push(CookedHtmlParser.hasClassContaining(tag, 'spoiler'));
+          state.spanSpoilerStack.push(hasClassContaining(tag, 'spoiler'));
         }
       } else if (tagName === 'a') {
         flush();
@@ -1050,18 +1053,18 @@ export class CookedHtmlParser {
           state.hrefStack.pop();
           state.attachmentStack.pop();
         } else {
-          const resolvedHref: string = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(tag, 'href'));
+          const resolvedHref: string = CookedHtmlParser.resolveUrl(extractAttr(tag, 'href'));
           state.hrefStack.push(resolvedHref);
           // 附件下载链接:显式 class="attachment",或指向 /uploads/ 的站内链接。
-          const isAttachment: boolean = CookedHtmlParser.hasClass(tag, 'attachment') ||
+          const isAttachment: boolean = hasClass(tag, 'attachment') ||
             /^https?:\/\/[^\/]*linux\.do\/uploads\//i.test(resolvedHref) ||
             resolvedHref.indexOf('/uploads/') === 0;
           state.attachmentStack.push(isAttachment);
         }
       } else if (tagName === 'img' && !closing) {
         flush();
-        const src: string = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(tag, 'src'));
-        const alt: string = CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.extractAttr(tag, 'alt'));
+        const src: string = CookedHtmlParser.resolveUrl(extractAttr(tag, 'src'));
+        const alt: string = CookedHtmlParser.decodeHtmlEntities(extractAttr(tag, 'alt'));
         if (src.length > 0) {
           const imageToken: RichInlineNode = {
             type: RichInlineType.IMAGE,
@@ -1077,12 +1080,12 @@ export class CookedHtmlParser {
         } else if (alt.length > 0) {
           appendText(alt);
         }
-      } else if (!selfClosing && !closing && CookedHtmlParser.shouldReadChildrenAsPlainText(tagName)) {
-        const closeStart: number = CookedHtmlParser.findClosingTag(html, tagEnd + 1, tagName);
+      } else if (!selfClosing && !closing && shouldReadChildrenAsPlainText(tagName)) {
+        const closeStart: number = findClosingTag(html, tagEnd + 1, tagName);
         if (closeStart > tagEnd) {
           const inner: string = html.substring(tagEnd + 1, closeStart);
           appendText(CookedHtmlParser.toPlainText(inner));
-          const closeEnd: number = CookedHtmlParser.findTagEnd(html, closeStart);
+          const closeEnd: number = findTagEnd(html, closeStart);
           index = closeEnd >= 0 ? closeEnd + 1 : closeStart;
           continue;
         }
@@ -1176,15 +1179,15 @@ export class CookedHtmlParser {
       if (openStart < 0) {
         break;
       }
-      const openEnd: number = CookedHtmlParser.findTagEnd(innerHtml, openStart);
+      const openEnd: number = findTagEnd(innerHtml, openStart);
       if (openEnd < 0) {
         break;
       }
-      const closeStart: number = CookedHtmlParser.findClosingTag(innerHtml, openEnd + 1, 'li');
+      const closeStart: number = findClosingTag(innerHtml, openEnd + 1, 'li');
       if (closeStart < 0) {
         break;
       }
-      const closeEnd: number = CookedHtmlParser.findTagEnd(innerHtml, closeStart);
+      const closeEnd: number = findTagEnd(innerHtml, closeStart);
       const itemHtml: string = innerHtml.substring(openEnd + 1, closeStart);
       // 列表项里裹了块级图(lightbox/大图)时,走 mixedBlocks 把文字与图片拆成块级序列;
       // 纯文字/行内(含 emoji)项保持原有的行内快路径。findImageUnit 只认块级图,emoji 不触发。
@@ -1235,15 +1238,15 @@ export class CookedHtmlParser {
     const rows: RichTableRow[] = [];
     let search: number = 0;
     while (search < tableHtml.length) {
-      const trStart: number = CookedHtmlParser.findOpenTag(tableHtml, 'tr', search);
+      const trStart: number = findOpenTag(tableHtml, 'tr', search);
       if (trStart < 0) {
         break;
       }
-      const trOpenEnd: number = CookedHtmlParser.findTagEnd(tableHtml, trStart);
+      const trOpenEnd: number = findTagEnd(tableHtml, trStart);
       if (trOpenEnd < 0) {
         break;
       }
-      const trClose: number = CookedHtmlParser.findClosingTag(tableHtml, trOpenEnd + 1, 'tr');
+      const trClose: number = findClosingTag(tableHtml, trOpenEnd + 1, 'tr');
       if (trClose < 0) {
         break;
       }
@@ -1253,7 +1256,7 @@ export class CookedHtmlParser {
         const allHeader: boolean = cells.every((cell: RichTableCell) => cell.header === true);
         rows.push({ cells, header: allHeader });
       }
-      const trCloseEnd: number = CookedHtmlParser.findTagEnd(tableHtml, trClose);
+      const trCloseEnd: number = findTagEnd(tableHtml, trClose);
       search = trCloseEnd >= 0 ? trCloseEnd + 1 : trClose + 1;
     }
     return rows;
@@ -1263,19 +1266,19 @@ export class CookedHtmlParser {
     const cells: RichTableCell[] = [];
     let index: number = 0;
     while (index < rowHtml.length) {
-      const thStart: number = CookedHtmlParser.findOpenTag(rowHtml, 'th', index);
-      const tdStart: number = CookedHtmlParser.findOpenTag(rowHtml, 'td', index);
+      const thStart: number = findOpenTag(rowHtml, 'th', index);
+      const tdStart: number = findOpenTag(rowHtml, 'td', index);
       if (thStart < 0 && tdStart < 0) {
         break;
       }
       const isHeader: boolean = thStart >= 0 && (tdStart < 0 || thStart < tdStart);
       const cellStart: number = isHeader ? thStart : tdStart;
       const cellTag: string = isHeader ? 'th' : 'td';
-      const openEnd: number = CookedHtmlParser.findTagEnd(rowHtml, cellStart);
+      const openEnd: number = findTagEnd(rowHtml, cellStart);
       if (openEnd < 0) {
         break;
       }
-      const closeStart: number = CookedHtmlParser.findClosingTag(rowHtml, openEnd + 1, cellTag);
+      const closeStart: number = findClosingTag(rowHtml, openEnd + 1, cellTag);
       if (closeStart < 0) {
         break;
       }
@@ -1284,7 +1287,7 @@ export class CookedHtmlParser {
         inlines: CookedHtmlParser.parseInlines(cellHtml),
         header: isHeader
       });
-      const closeEnd: number = CookedHtmlParser.findTagEnd(rowHtml, closeStart);
+      const closeEnd: number = findTagEnd(rowHtml, closeStart);
       index = closeEnd >= 0 ? closeEnd + 1 : closeStart + 1;
     }
     return cells;
@@ -1317,7 +1320,7 @@ export class CookedHtmlParser {
     const headerHtml: string = headerInner.length > 0 ? headerInner : innerHtml;
     const faviconTag: string = CookedHtmlParser.firstTagMatch(headerHtml, /<img\b[^>]*>/i);
     if (faviconTag.length > 0) {
-      const favSrc: string = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(faviconTag, 'src'));
+      const favSrc: string = CookedHtmlParser.resolveUrl(extractAttr(faviconTag, 'src'));
       if (favSrc.length > 0) {
         block.faviconUrl = favSrc;
       }
@@ -1340,7 +1343,7 @@ export class CookedHtmlParser {
 
     const thumbTag: string = CookedHtmlParser.firstTagMatch(bodyHtml, /<img\b[^>]*>/i);
     if (thumbTag.length > 0) {
-      const thumbSrc: string = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(thumbTag, 'src'));
+      const thumbSrc: string = CookedHtmlParser.resolveUrl(extractAttr(thumbTag, 'src'));
       if (thumbSrc.length > 0) {
         block.thumbnailUrl = thumbSrc;
       }
@@ -1365,34 +1368,21 @@ export class CookedHtmlParser {
 
   // 取 html 中首个 <tagName ...>...</tagName> 的内层 HTML(标签名需按词边界匹配,避免 p 命中 picture)。
   private static extractElementInner(html: string, tagName: string): string {
-    const openStart: number = CookedHtmlParser.findOpenTag(html, tagName, 0);
+    const openStart: number = findOpenTag(html, tagName, 0);
     if (openStart < 0) {
       return '';
     }
-    const openEnd: number = CookedHtmlParser.findTagEnd(html, openStart);
+    const openEnd: number = findTagEnd(html, openStart);
     if (openEnd < 0) {
       return '';
     }
-    const closeStart: number = CookedHtmlParser.findClosingTag(html, openEnd + 1, tagName);
+    const closeStart: number = findClosingTag(html, openEnd + 1, tagName);
     if (closeStart < 0) {
       return '';
     }
     return html.substring(openEnd + 1, closeStart);
   }
 
-  private static findOpenTag(html: string, tagName: string, fromIndex: number): number {
-    const lower: string = html.toLowerCase();
-    const needle: string = `<${tagName.toLowerCase()}`;
-    let index: number = lower.indexOf(needle, fromIndex);
-    while (index >= 0) {
-      const after: string = lower.charAt(index + needle.length);
-      if (after === '' || after === '>' || after === '/' || after === ' ' || after === '\t' || after === '\n' || after === '\r') {
-        return index;
-      }
-      index = lower.indexOf(needle, index + needle.length);
-    }
-    return -1;
-  }
 
   private static firstTagMatch(html: string, pattern: RegExp): string {
     const match: RegExpMatchArray | null = html.match(pattern);
@@ -1404,7 +1394,7 @@ export class CookedHtmlParser {
     if (openTag.length === 0) {
       return '';
     }
-    return CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(openTag, 'href'));
+    return CookedHtmlParser.resolveUrl(extractAttr(openTag, 'href'));
   }
 
   private static firstAnchorText(html: string): string {
@@ -1454,8 +1444,8 @@ export class CookedHtmlParser {
 
   private static detectUnsupportedKind(tagName: string, openTag: string, innerHtml: string): string {
     const combined: string = `${openTag}\n${innerHtml}`.toLowerCase();
-    if (CookedHtmlParser.hasClassContaining(openTag, 'poll') ||
-      CookedHtmlParser.extractAttr(openTag, 'data-poll-name').length > 0 ||
+    if (hasClassContaining(openTag, 'poll') ||
+      extractAttr(openTag, 'data-poll-name').length > 0 ||
       combined.indexOf('data-poll-name') >= 0) {
       return '投票';
     }
@@ -1469,11 +1459,11 @@ export class CookedHtmlParser {
       return '视频/嵌入内容';
     }
 
-    if (CookedHtmlParser.hasClassContaining(openTag, 'onebox')) {
+    if (hasClassContaining(openTag, 'onebox')) {
       return '链接预览';
     }
 
-    if (CookedHtmlParser.hasClassContaining(openTag, 'math') ||
+    if (hasClassContaining(openTag, 'math') ||
       combined.indexOf('math-container') >= 0 ||
       combined.indexOf('<math') >= 0) {
       return '数学公式';
@@ -1492,14 +1482,14 @@ export class CookedHtmlParser {
     const linkedImageMatch: RegExpMatchArray | null = withoutBreaks.match(/^<a\b[^>]*>(<img\b[^>]*>)<\/a>$/i);
     if (linkedImageMatch) {
       const linkMatch: RegExpMatchArray | null = withoutBreaks.match(/^<a\b[^>]*>/i);
-      return CookedHtmlParser.imageBlockFromTag(linkedImageMatch[1], linkMatch ? CookedHtmlParser.extractAttr(linkMatch[0], 'href') : '');
+      return CookedHtmlParser.imageBlockFromTag(linkedImageMatch[1], linkMatch ? extractAttr(linkMatch[0], 'href') : '');
     }
 
     const uploadPreviewMatch: RegExpMatchArray | null =
       withoutBreaks.match(/^<a\b[^>]*>(<img\b[^>]*>)<\/a>\s*<a\b[^>]*>[^<]*<\/a>$/i);
     if (uploadPreviewMatch) {
       const linkMatch: RegExpMatchArray | null = withoutBreaks.match(/^<a\b[^>]*>/i);
-      return CookedHtmlParser.imageBlockFromTag(uploadPreviewMatch[1], linkMatch ? CookedHtmlParser.extractAttr(linkMatch[0], 'href') : '');
+      return CookedHtmlParser.imageBlockFromTag(uploadPreviewMatch[1], linkMatch ? extractAttr(linkMatch[0], 'href') : '');
     }
     return undefined;
   }
@@ -1529,16 +1519,16 @@ export class CookedHtmlParser {
       if (nextTag < 0) {
         break;
       }
-      const tagEnd: number = CookedHtmlParser.findTagEnd(html, nextTag);
+      const tagEnd: number = findTagEnd(html, nextTag);
       if (tagEnd < 0) {
         break;
       }
 
       const tag: string = html.substring(nextTag, tagEnd + 1);
-      const name: string = CookedHtmlParser.getTagName(tag);
+      const name: string = getTagName(tag);
       if (name === 'a') {
-        pendingHref = CookedHtmlParser.isClosingTag(tag) ? '' : CookedHtmlParser.extractAttr(tag, 'href');
-      } else if (name === 'img' && !CookedHtmlParser.isClosingTag(tag)) {
+        pendingHref = isClosingTag(tag) ? '' : extractAttr(tag, 'href');
+      } else if (name === 'img' && !isClosingTag(tag)) {
         const block: RichBlock | undefined = CookedHtmlParser.imageBlockFromTag(tag, pendingHref);
         if (block) {
           blocks.push(block);
@@ -1586,19 +1576,19 @@ export class CookedHtmlParser {
       if (tagStart < 0) {
         return undefined;
       }
-      const tagEnd: number = CookedHtmlParser.findTagEnd(html, tagStart);
+      const tagEnd: number = findTagEnd(html, tagStart);
       if (tagEnd < 0) {
         return undefined;
       }
       const tag: string = html.substring(tagStart, tagEnd + 1);
-      const name: string = CookedHtmlParser.getTagName(tag);
-      if ((name === 'div' || name === 'a') && !CookedHtmlParser.isClosingTag(tag) &&
-        CookedHtmlParser.hasClassContaining(tag, 'lightbox')) {
-        const closeStart: number = CookedHtmlParser.findClosingTag(html, tagEnd + 1, name);
+      const name: string = getTagName(tag);
+      if ((name === 'div' || name === 'a') && !isClosingTag(tag) &&
+        hasClassContaining(tag, 'lightbox')) {
+        const closeStart: number = findClosingTag(html, tagEnd + 1, name);
         if (closeStart < 0) {
           return undefined;
         }
-        const closeEnd: number = CookedHtmlParser.findTagEnd(html, closeStart);
+        const closeEnd: number = findTagEnd(html, closeStart);
         const unitEnd: number = closeEnd >= 0 ? closeEnd + 1 : closeStart;
         const unit: LightboxUnit = {
           before: html.substring(0, tagStart),
@@ -1607,7 +1597,7 @@ export class CookedHtmlParser {
         };
         return unit;
       }
-      if (name === 'img' && !CookedHtmlParser.isClosingTag(tag) &&
+      if (name === 'img' && !isClosingTag(tag) &&
         CookedHtmlParser.isBlockLevelImageTag(tag)) {
         const unit: LightboxUnit = {
           before: html.substring(0, tagStart),
@@ -1624,14 +1614,14 @@ export class CookedHtmlParser {
   // 判断一个独立 <img> 是否应按整幅图片块渲染:emoji 永远行内;动图(class="animated")或标注了
   // 大尺寸(宽或高 > INLINE_IMAGE_MAX)的图提升为块级。无尺寸又非动图的裸图保持行内(安全默认)。
   private static isBlockLevelImageTag(tag: string): boolean {
-    if (CookedHtmlParser.hasClassContaining(tag, 'emoji')) {
+    if (hasClassContaining(tag, 'emoji')) {
       return false;
     }
-    if (CookedHtmlParser.hasClassContaining(tag, 'animated')) {
+    if (hasClassContaining(tag, 'animated')) {
       return true;
     }
-    const width: number = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(tag, 'width'));
-    const height: number = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(tag, 'height'));
+    const width: number = parsePositiveNumber(extractAttr(tag, 'width'));
+    const height: number = parsePositiveNumber(extractAttr(tag, 'height'));
     return width > INLINE_IMAGE_MAX || height > INLINE_IMAGE_MAX;
   }
 
@@ -1641,7 +1631,7 @@ export class CookedHtmlParser {
     // srcset 一般给到 2x(506×750),清晰度够且远小于原图(href,如 940×1388/132KB)——
     // 正文图最宽也就铺满屏宽,上原图纯属浪费流量与解码内存。
     const src: string = CookedHtmlParser.resolveUrl(
-      CookedHtmlParser.bestSrcFromTag(tag));
+      bestSrcFromTag(tag));
     if (src.length === 0) {
       return undefined;
     }
@@ -1649,9 +1639,9 @@ export class CookedHtmlParser {
     const block: RichBlock = {
       type: RichBlockType.IMAGE,
       src,
-      alt: CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.extractAttr(tag, 'alt')),
-      width: CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(tag, 'width')),
-      height: CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(tag, 'height'))
+      alt: CookedHtmlParser.decodeHtmlEntities(extractAttr(tag, 'alt')),
+      width: parsePositiveNumber(extractAttr(tag, 'width')),
+      height: parsePositiveNumber(extractAttr(tag, 'height'))
     };
 
     const resolvedHref: string = CookedHtmlParser.resolveUrl(href);
@@ -1686,16 +1676,16 @@ export class CookedHtmlParser {
       if (tagStart < 0) {
         break;
       }
-      const tagEnd: number = CookedHtmlParser.findTagEnd(rest, tagStart);
+      const tagEnd: number = findTagEnd(rest, tagStart);
       if (tagEnd < 0) {
         break;
       }
       const openTag: string = rest.substring(tagStart, tagEnd + 1);
-      const closeStart: number = CookedHtmlParser.findClosingTag(rest, tagEnd + 1, mediaTag);
+      const closeStart: number = findClosingTag(rest, tagEnd + 1, mediaTag);
       if (closeStart < 0) {
         break;
       }
-      const closeEnd: number = CookedHtmlParser.findTagEnd(rest, closeStart);
+      const closeEnd: number = findTagEnd(rest, closeStart);
       const mediaInner: string = rest.substring(tagEnd + 1, closeStart);
       const mediaBlock: RichBlock | undefined = CookedHtmlParser.mediaBlockFromElement(mediaTag, openTag, mediaInner);
       if (!mediaBlock) {
@@ -1725,11 +1715,11 @@ export class CookedHtmlParser {
     let mediaType: string = '';
     const sourceMatch: RegExpMatchArray | null = innerHtml.match(/<source\b[^>]*>/i);
     if (sourceMatch) {
-      src = CookedHtmlParser.extractAttr(sourceMatch[0], 'src');
-      mediaType = CookedHtmlParser.extractAttr(sourceMatch[0], 'type');
+      src = extractAttr(sourceMatch[0], 'src');
+      mediaType = extractAttr(sourceMatch[0], 'type');
     }
     if (src.length === 0) {
-      src = CookedHtmlParser.extractAttr(openTag, 'src');
+      src = extractAttr(openTag, 'src');
     }
     const resolvedSrc: string = CookedHtmlParser.resolveUrl(src);
     if (resolvedSrc.length === 0) {
@@ -1744,14 +1734,14 @@ export class CookedHtmlParser {
       block.mediaType = mediaType;
     }
     if (tagName === 'video') {
-      block.width = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(openTag, 'width'));
-      block.height = CookedHtmlParser.parsePositiveNumber(CookedHtmlParser.extractAttr(openTag, 'height'));
+      block.width = parsePositiveNumber(extractAttr(openTag, 'width'));
+      block.height = parsePositiveNumber(extractAttr(openTag, 'height'));
     }
     return block;
   }
 
   private static extractCodeLanguage(codeOpenTag: string): string {
-    const className: string = CookedHtmlParser.extractAttr(codeOpenTag, 'class');
+    const className: string = extractAttr(codeOpenTag, 'class');
     const languageMatch: RegExpMatchArray | null = className.match(/(?:lang|language)-([a-zA-Z0-9_+-]+)/);
     if (!languageMatch) {
       return '';
@@ -1821,167 +1811,18 @@ export class CookedHtmlParser {
   // 从 <img> 选出最清晰的可用地址:srcset 里倍率最大的一档,没有 srcset 则回退 src。
   // srcset 形如 "url1, url2 1.5x, url3 2x"(首项无描述符即 1x)。逗号也可能出现在 URL 里,
   // 故按「逗号 + 空白」切分而非裸逗号。宽度描述符(w)本项目未见,一并兼容:按数值取最大。
-  private static bestSrcFromTag(tag: string): string {
-    const src: string = CookedHtmlParser.extractAttr(tag, 'src');
-    const srcset: string = CookedHtmlParser.extractAttr(tag, 'srcset');
-    if (srcset.length === 0) {
-      return src;
-    }
 
-    const candidates: string[] = srcset.split(/,\s+/);
-    let bestUrl: string = '';
-    let bestScale: number = 0;
-    for (let index: number = 0; index < candidates.length; index++) {
-      const entry: string = candidates[index].trim();
-      if (entry.length === 0) {
-        continue;
-      }
-      const parts: string[] = entry.split(/\s+/);
-      const url: string = parts[0];
-      if (url.length === 0) {
-        continue;
-      }
-      // 无描述符 = 1x;有则去掉尾部 x/w 取数值。解析不出就按 1 算,不至于丢掉这一档。
-      let scale: number = 1;
-      if (parts.length > 1) {
-        const parsed: number = Number.parseFloat(parts[1].replace(/[xw]$/i, ''));
-        if (!Number.isNaN(parsed) && parsed > 0) {
-          scale = parsed;
-        }
-      }
-      if (scale > bestScale) {
-        bestScale = scale;
-        bestUrl = url;
-      }
-    }
-    return bestUrl.length > 0 ? bestUrl : src;
-  }
 
-  private static extractAttr(tag: string, attrName: string): string {
-    const pattern: RegExp = new RegExp(`${attrName}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i');
-    const match: RegExpMatchArray | null = tag.match(pattern);
-    if (!match) {
-      return '';
-    }
-    return match[2] ? match[2] : (match[3] ? match[3] : (match[4] ? match[4] : ''));
-  }
 
-  private static hasClass(tag: string, className: string): boolean {
-    const classes: string = CookedHtmlParser.extractAttr(tag, 'class').toLowerCase();
-    return classes.split(/\s+/).indexOf(className.toLowerCase()) >= 0;
-  }
 
-  private static hasClassContaining(tag: string, keyword: string): boolean {
-    const classes: string[] = CookedHtmlParser.extractAttr(tag, 'class').toLowerCase().split(/\s+/);
-    const lowerKeyword: string = keyword.toLowerCase();
-    for (let index: number = 0; index < classes.length; index++) {
-      if (classes[index].indexOf(lowerKeyword) >= 0) {
-        return true;
-      }
-    }
-    return false;
-  }
 
-  private static parsePositiveNumber(raw: string): number {
-    const value: number = parseInt(raw, 10);
-    if (isNaN(value) || value <= 0) {
-      return 0;
-    }
-    return value;
-  }
 
-  private static findTagEnd(html: string, tagStart: number): number {
-    let quote: string = '';
-    for (let index: number = tagStart; index < html.length; index++) {
-      const ch: string = html.charAt(index);
-      if ((ch === '"' || ch === "'") && quote.length === 0) {
-        quote = ch;
-      } else if (ch === quote) {
-        quote = '';
-      } else if (ch === '>' && quote.length === 0) {
-        return index;
-      }
-    }
-    return -1;
-  }
 
-  private static findClosingTag(html: string, fromIndex: number, tagName: string): number {
-    const lower: string = html.toLowerCase();
-    const lowerTag: string = tagName.toLowerCase();
-    let depth: number = 1;
-    let index: number = fromIndex;
 
-    while (index < lower.length) {
-      const nextOpen: number = lower.indexOf(`<${lowerTag}`, index);
-      const nextClose: number = lower.indexOf(`</${lowerTag}`, index);
-      if (nextClose < 0) {
-        return -1;
-      }
 
-      if (nextOpen >= 0 && nextOpen < nextClose) {
-        const openEnd: number = CookedHtmlParser.findTagEnd(html, nextOpen);
-        if (openEnd < 0) {
-          return -1;
-        }
-        const openTag: string = html.substring(nextOpen, openEnd + 1);
-        if (!CookedHtmlParser.isSelfClosingTag(openTag)) {
-          depth++;
-        }
-        index = openEnd + 1;
-        continue;
-      }
 
-      depth--;
-      if (depth === 0) {
-        return nextClose;
-      }
-      const closeEnd: number = CookedHtmlParser.findTagEnd(html, nextClose);
-      index = closeEnd >= 0 ? closeEnd + 1 : nextClose + lowerTag.length + 3;
-    }
 
-    return -1;
-  }
 
-  private static getTagName(tag: string): string {
-    const match: RegExpMatchArray | null = tag.match(/^<\/?\s*([a-zA-Z0-9]+)/);
-    return match ? match[1].toLowerCase() : '';
-  }
-
-  private static isClosingTag(tag: string): boolean {
-    return /^<\//.test(tag);
-  }
-
-  private static isSelfClosingTag(tag: string): boolean {
-    const tagName: string = CookedHtmlParser.getTagName(tag);
-    return /\/\s*>$/.test(tag) || tagName === 'br' || tagName === 'img' || tagName === 'hr';
-  }
-
-  private static isHeadingTag(tagName: string): boolean {
-    return /^h[1-6]$/.test(tagName);
-  }
-
-  private static isBlockTag(tagName: string): boolean {
-    return tagName === 'p' ||
-      tagName === 'blockquote' ||
-      tagName === 'aside' ||
-      tagName === 'pre' ||
-      tagName === 'ul' ||
-      tagName === 'ol' ||
-      tagName === 'hr' ||
-      tagName === 'img' ||
-      tagName === 'div' ||
-      tagName === 'figure' ||
-      tagName === 'table' ||
-      tagName === 'details' ||
-      tagName === 'audio' ||
-      tagName === 'video' ||
-      tagName === 'iframe' ||
-      CookedHtmlParser.isHeadingTag(tagName);
-  }
-
-  private static shouldReadChildrenAsPlainText(tagName: string): boolean {
-    return tagName === 'script' || tagName === 'style';
-  }
 
   private static hasBlockContent(block: RichBlock): boolean {
     if (block.type === RichBlockType.PARAGRAPH || block.type === RichBlockType.HEADING) {

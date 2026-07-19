@@ -22,10 +22,12 @@ import { TopicSummaryCard } from '../components/TopicSummaryCard';
 import { TopicPostItem } from '../components/TopicPostItem';
 import { ViewerImage } from '../components/ImageViewer';
 import { CommentInputBar, NO_MAX_CHARS, REPLY_BLUE } from '../components/CommentInputBar';
-import { ComposerPage, COMPOSER_ANIM_MS, COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from './ComposerPage';
+import { ComposerPage, COMPOSER_ANIM_MS } from './ComposerPage';
+import { COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { TopicScrubber } from '../components/TopicScrubber';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { showToast as promptToast } from '../../common/utils/Toast';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
@@ -984,11 +986,7 @@ export struct TopicDetailPage {
   }
 
   private showComposerToast(message: string, duration: number): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: duration });
-    } catch (error) {
-      // Toast 失败不影响主流程。
-    }
+    promptToast(this.getUIContext(), message, duration);
   }
 
   // 提交成功后浮层随即关闭(键盘收起),提示延后到收场结束再弹,避免 toast 被重新锚定而跳动。

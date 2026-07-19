@@ -18,6 +18,7 @@ import { DraftService, SaveTopicDraftInput } from '../../services/draft/DraftSer
 import { DraftTagRef } from '../../models/Draft';
 import { PostRichContent } from '../components/PostRichContent';
 import { applyAction, EditState, MdAction } from '../../utils/markdownInsert';
+import { showToast as promptToast, TOAST_SHORT_MS } from '../../common/utils/Toast';
 
 const LOG_TAG: string = '[ArkDO][Composer]';
 // 一次最多选图张数(对齐 Discourse composer 手感)。
@@ -39,8 +40,6 @@ export const COMPOSER_GEOMETRY_ID: string = 'arkdo-composer-surface';
 export const COMPOSER_ANIM_MS: number = 280;
 // 全屏编辑器浮层可见态镜像 + 系统返回键信号:浮层内联挂在详情页根 Stack,不进 Navigation 栈,
 // 返回键须由详情页所在 NavDestination.onBackPressed 拦截——可见时 bump BACK_TICK,详情页监听后关闭。
-export const COMPOSER_OVERLAY_VISIBLE_KEY: string = 'composerOverlayVisible';
-export const COMPOSER_OVERLAY_BACK_TICK_KEY: string = 'composerOverlayBackTick';
 
 // 分类选择器一行的入参(@Builder 单对象约束)。
 interface PickerRowParams {
@@ -452,11 +451,7 @@ export struct ComposerPage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 1500 });
-    } catch (error) {
-      // Toast 失败不影响主流程。
-    }
+    promptToast(this.getUIContext(), message, TOAST_SHORT_MS);
   }
 
   // 应用一次工具栏格式动作:纯函数算出新文本与选区,回写并把光标/选区还原到期望位置。

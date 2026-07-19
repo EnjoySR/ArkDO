@@ -20,6 +20,7 @@ import bookmarkServiceTest from './BookmarkService.test';
 import pushSubscriptionServiceTest from './PushSubscriptionService.test';
 import pushNotificationNavigationTest from './PushNotificationNavigation.test';
 import notificationMarkReadTest from './NotificationMarkRead.test';
+import htmlLexerTest from './HtmlLexer.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -43,4 +44,5 @@ export default function testsuite() {
   pushSubscriptionServiceTest();
   pushNotificationNavigationTest();
   notificationMarkReadTest();
+  htmlLexerTest();
 }

@@ -2,6 +2,7 @@ import { curves, KeyboardAvoidMode } from '@kit.ArkUI';
 import window from '@ohos.window';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { COMPOSER_GEOMETRY_ID } from '../pages/ComposerPage';
+import { showToast as promptToast } from '../../common/utils/Toast';
 
 // Discourse 经典蓝，作回复按钮背景（rgb(0,136,204)）。页面的悬浮回复按钮也复用此色。
 export const REPLY_BLUE: string = '#0088CC';
@@ -110,11 +111,7 @@ export struct CommentInputBar {
   }
 
   private showToast(message: string, duration: number): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: duration });
-    } catch (error) {
-      // Toast 失败不影响主流程。
-    }
+    promptToast(this.getUIContext(), message, duration);
   }
 
   private trimmedLength(): number {

@@ -2,7 +2,7 @@ import { Log } from '../../services/logging/Log';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { DownloadService } from '../../services/content/DownloadService';
 import { FileLogger } from '../../services/logging/FileLogger';
-import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
+import { THEME_MODE_STORAGE_KEY, ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import { DohManager, DohServer } from '../../services/network/DohManager';
 import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
 import { ChallengeShortcutPrefs } from '../../services/challenge/ChallengeShortcutPrefs';
@@ -12,12 +12,13 @@ import { PushRegistrationResult, PushStatusResult } from '../../services/push/Pu
 import { nextPushRefreshStart, PushRefreshStart } from '../../services/push/PushRefreshGate';
 import { needsRelayConsent, PushRelayConfig, readCustomBaseUrl, resolvePushRelayConfig, saveCustomBaseUrl, saveRelayConsent } from '../../services/push/PushRelayConfig';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { showToast as promptToast } from '../../common/utils/Toast';
+import { SETTINGS_DOH_TICK } from '../../common/constants/StorageKeys';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
 
 // AppStorage 计数键:RootTabPage 在设置页 NavDestination onShown 时自增,驱动设置页重读
 // DoH 摘要(单纯的 @Prop 不会随父 @State 流入已创建的 NavDestination 子树)。
-export const SETTINGS_DOH_TICK: string = 'settings_doh_tick';
 
 // 与个人中心同款鸿蒙设置页式卡片分组:灰底 + 无描边圆角卡片。
 const PAGE_MARGIN: number = 12;
@@ -61,7 +62,7 @@ export struct SettingsPage {
   onSendTestPush: () => Promise<PushStatusResult> = async () => {
     return { enabled: false, message: '推送服务未就绪' };
   };
-  @StorageLink('themeMode') themeMode: ThemeMode = ThemeMode.SYSTEM;
+  @StorageLink(THEME_MODE_STORAGE_KEY) themeMode: ThemeMode = ThemeMode.SYSTEM;
   // RootTabPage 在本页 NavDestination onShown 时自增此 AppStorage 计数(本页此刻已在前台,
   // @StorageProp 变更能可靠触发重渲染)。被 DoH 配置页覆盖后 pop 回来常驻不重建,靠它
   // @Watch 重读 DoH 摘要——不依赖 @Prop 流入(NavDestination 子树不随父 @State 重建)。
@@ -1229,11 +1230,7 @@ export struct SettingsPage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    } catch (err) {
-      Log.i(`${LOG_TAG} toast failed: ${message}`);
-    }
+    promptToast(this.getUIContext(), message);
   }
 }
 

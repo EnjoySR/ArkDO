@@ -1,6 +1,7 @@
 import { Draft, DraftAction, DraftPage, DraftTagRef } from '../../models/Draft';
 import { AppConstants } from '../../common/constants/AppConstants';
-import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
+import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
+import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 
 // 保存新主题草稿的入参。tags 用 {id,name} 对象(与官方 composer 存的结构一致)。
 export interface SaveTopicDraftInput {
@@ -360,24 +361,10 @@ export class DraftService {
   }
 
   private forwardFailure(response: NetworkResult<string>): NetworkResult<DraftPage> {
-    return {
-      success: false,
-      statusCode: response.statusCode,
-      challengeState: response.challengeState,
-      error: response.error
-    };
+    return forwardFailure<DraftPage>(response);
   }
 
   private unexpectedResponse(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<DraftPage> {
-    return {
-      success: false,
-      statusCode: statusCode,
-      challengeState: challengeState,
-      error: {
-        code: NetworkErrorCode.UNEXPECTED_RESPONSE,
-        message: message,
-        requiresChallenge: challengeState !== ChallengeState.NONE
-      }
-    };
+    return unexpectedResponse<DraftPage>(statusCode, challengeState, message);
   }
 }

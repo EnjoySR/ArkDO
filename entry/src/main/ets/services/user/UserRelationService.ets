@@ -1,5 +1,6 @@
 import { EndorsableCategoriesResult, EndorsableCategory } from '../../models/UserProfile';
 import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
+import { forwardFailure, unexpectedFrom } from '../network/NetworkResults';
 
 // 关注/认可等「对他人的写操作」。与只读的 UserProfileService 分开:
 // 一个取数、一个改状态,混在一起职责不清。CSRF/cookie 由 bridge 同源自动处理。
@@ -121,24 +122,10 @@ export class UserRelationService {
   }
 
   private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
-    return {
-      success: false,
-      statusCode: response.statusCode,
-      challengeState: response.challengeState,
-      error: response.error
-    };
+    return forwardFailure<T>(response);
   }
 
   private unexpected<T>(response: NetworkResult<string>, message: string): NetworkResult<T> {
-    return {
-      success: false,
-      statusCode: response.statusCode,
-      challengeState: response.challengeState,
-      error: {
-        code: NetworkErrorCode.UNEXPECTED_RESPONSE,
-        message: message,
-        requiresChallenge: response.challengeState !== ChallengeState.NONE
-      }
-    };
+    return unexpectedFrom<T>(response, message);
   }
 }

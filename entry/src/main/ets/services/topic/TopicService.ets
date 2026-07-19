@@ -2,9 +2,10 @@ import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
 import { AcceptedAnswer, Poll, PollOption, PollVoteResult, PostBoost, PostReaction, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
-import { ChallengeState, JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
+import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { FeedKey } from '../site/FeedPrefs';
+import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 
 // linux.do shared issue（"俺也一样"）toggle 端点:同一 POST 翻转(点/撤),form body 只带 topic_id。
 const SHARED_ISSUE_TOGGLE_PATH: string = '/solution/shared_issue';
@@ -1500,24 +1501,10 @@ export class TopicService {
   }
 
   private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
-    return {
-      success: false,
-      statusCode: response.statusCode,
-      challengeState: response.challengeState,
-      error: response.error
-    };
+    return forwardFailure<T>(response);
   }
 
   private unexpectedResponse<T>(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<T> {
-    return {
-      success: false,
-      statusCode: statusCode,
-      challengeState: challengeState,
-      error: {
-        code: NetworkErrorCode.UNEXPECTED_RESPONSE,
-        message: message,
-        requiresChallenge: challengeState !== ChallengeState.NONE
-      }
-    };
+    return unexpectedResponse<T>(statusCode, challengeState, message);
   }
 }

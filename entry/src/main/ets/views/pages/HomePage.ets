@@ -20,15 +20,18 @@ import { CategoryDrawer } from '../components/CategoryDrawer';
 import { HomeFab } from '../components/HomeFab';
 import { ComposerPage } from './ComposerPage';
 import { LoginGate } from '../../services/session/LoginGate';
-import { CreateTopicOutcome } from '../../services/topic/TopicService';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
-import { SEARCH_OVERLAY_VISIBLE_KEY, SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
+import { SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
+import { SEARCH_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { PostRichContent } from '../components/PostRichContent';
 import { VersionAnnouncement, VersionAnnouncementService } from '../../services/announce/VersionAnnouncement';
 import { bundleManager } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { FrameCallback } from '@kit.ArkUI';
+import { showToast as promptToast } from '../../common/utils/Toast';
+import { submitNewTopic } from '../../services/topic/CreateTopicFlow';
+import { HOME_COMPOSER_BACK_TICK_KEY, HOME_COMPOSER_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -49,8 +52,6 @@ const FAB_TOP_HIDE_RATIO: number = 1.2;
 // 首页发帖浮层可见态镜像 + 返回键信号:浮层内联挂在首页根 Stack,不进 Navigation 栈。
 // 首页坐在 navBar(非 NavDestination),系统返回键须由 @Entry(Index)的 onBackPress 拦截——
 // 可见时 bump BACK_TICK,首页监听后关闭。与详情页回帖浮层各用一套 key,互不干扰。
-export const HOME_COMPOSER_VISIBLE_KEY: string = 'homeComposerVisible';
-export const HOME_COMPOSER_BACK_TICK_KEY: string = 'homeComposerBackTick';
 // 回顶动画:只有最后一屏走动画,这是那一屏的时长。
 const SCROLL_TOP_MS: number = 380;
 // 瞬移落地的重试上限:惯性未停时 scrollTo 可能被"顶回去",逐帧再钉;超过则放弃动画直接到顶,
@@ -303,25 +304,11 @@ export struct HomePage {
 
   // 发新主题:POST /posts。成功后跳进新帖详情;进审核队列则只提示。返回 true 令浮层关闭。
   private async submitNewTopic(title: string, categoryId: number, raw: string, tags: string[], typingMs: number, composerMs: number): Promise<boolean> {
-    const result: NetworkResult<CreateTopicOutcome> = await new TopicService(this.bridge)
-      .createTopic(title, categoryId, raw, tags, typingMs, composerMs);
-
-    if (result.success && result.data) {
-      const outcome: CreateTopicOutcome = result.data;
-      if (outcome.pending) {
-        this.getUIContext().getPromptAction().showToast({ message: '帖子已提交，等待审核', duration: 2000 });
-      } else if (typeof outcome.topicId === 'number') {
-        // 直接发布:跳进新帖。浮层由 onSubmit 返回 true 后自行关闭,跳转排在其后。
-        const newTopicId: number = outcome.topicId;
-        this.getUIContext().getPromptAction().showToast({ message: '帖子已发布', duration: 1500 });
-        this.onOpenTopicById(newTopicId);
-      }
-      return true;
-    }
-
-    const reason: string = result.error ? result.error.message : '发布失败，请稍后重试。';
-    this.getUIContext().getPromptAction().showToast({ message: reason, duration: 2500 });
-    return false;
+    return submitNewTopic(
+      this.bridge,
+      (message: string, duration: number) => promptToast(this.getUIContext(), message, duration),
+      title, categoryId, raw, tags, typingMs, composerMs,
+      (topicId: number) => this.onOpenTopicById(topicId));
   }
 
   // 手指位移(向左为负)换算成 0~1 进度,夹在区间内。
@@ -900,11 +887,7 @@ export struct HomePage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    } catch (err) {
-      Log.i(`${LOG_TAG} toast failed: ${message}`);
-    }
+    promptToast(this.getUIContext(), message);
   }
 
   private async refreshLatestTopics(): Promise<void> {
@@ -966,7 +949,9 @@ export struct HomePage {
   }
 
   private async loadMoreTopics(): Promise<void> {
-    if (!this.isArkWebReady) {
+    // 门卫与 refreshLatestTopics 保持一致:看 bridge.canFetch()(executor 已挂)而非 UI 解锁标志
+    // isArkWebReady。看门狗/失败路径会把 isArkWebReady 置真但 executor 仍为空,此时照发请求必被跳过。
+    if (!this.bridge.canFetch()) {
       this.footerMessage = '正在准备 ArkWeb 请求环境';
       return;
     }

@@ -1,7 +1,6 @@
 import { RootTabPage } from '../views/pages/RootTabPage';
-import { SEARCH_OVERLAY_BACK_TICK_KEY, SEARCH_OVERLAY_VISIBLE_KEY } from '../views/components/SearchOverlay';
-import { IMAGE_VIEWER_BACK_TICK_KEY, IMAGE_VIEWER_VISIBLE_KEY } from '../views/components/ImageViewer';
-import { HOME_COMPOSER_BACK_TICK_KEY, HOME_COMPOSER_VISIBLE_KEY } from '../views/pages/HomePage';
+import { bumpTick, HOME_COMPOSER_BACK_TICK_KEY, HOME_COMPOSER_VISIBLE_KEY, IMAGE_VIEWER_BACK_TICK_KEY,
+  IMAGE_VIEWER_VISIBLE_KEY, SEARCH_OVERLAY_BACK_TICK_KEY, SEARCH_OVERLAY_VISIBLE_KEY } from '../common/constants/StorageKeys';
 
 @Entry
 @Component
@@ -26,19 +25,16 @@ struct Index {
   onBackPress(): boolean {
     // 图片预览在最顶层,优先消费:bump 信号,ImageViewer 决定翻回上一张还是关闭。
     if (this.imageViewerVisible) {
-      const prev: number = (AppStorage.get(IMAGE_VIEWER_BACK_TICK_KEY) as number | undefined) ?? 0;
-      AppStorage.setOrCreate(IMAGE_VIEWER_BACK_TICK_KEY, prev + 1);
+      bumpTick(IMAGE_VIEWER_BACK_TICK_KEY);
       return true;
     }
     if (this.searchOverlayVisible) {
-      const prev: number = (AppStorage.get(SEARCH_OVERLAY_BACK_TICK_KEY) as number | undefined) ?? 0;
-      AppStorage.setOrCreate(SEARCH_OVERLAY_BACK_TICK_KEY, prev + 1);
+      bumpTick(SEARCH_OVERLAY_BACK_TICK_KEY);
       return true;
     }
     // 首页发帖浮层:开着就消费返回键,bump tick 让 HomePage 关闭。
     if (this.homeComposerVisible) {
-      const prev: number = (AppStorage.get(HOME_COMPOSER_BACK_TICK_KEY) as number | undefined) ?? 0;
-      AppStorage.setOrCreate(HOME_COMPOSER_BACK_TICK_KEY, prev + 1);
+      bumpTick(HOME_COMPOSER_BACK_TICK_KEY);
       return true;
     }
     return false;

@@ -5,6 +5,7 @@ import { common, Want } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { showToast as promptToast } from '../../common/utils/Toast';
 
 const LOG_TAG: string = '[ArkDO][WebViewPage]';
 
@@ -332,11 +333,7 @@ export struct WebViewPage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    } catch (error) {
-      Log.i(`${LOG_TAG} toast failed: ${message}`);
-    }
+    promptToast(this.getUIContext(), message);
   }
 
   // 系统/侧滑返回优先在网页内回退一级;无历史时才退出本页。

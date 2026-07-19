@@ -24,8 +24,6 @@ const MAX_SEARCH_PAGE: number = 10;
 
 // AppStorage 键:浮层可见态镜像 + 系统返回键关闭信号(Index @Entry 与 RootTabPage 共用)。
 // 浮层不进 Navigation 栈,系统返回键需由 @Entry 拦截:可见时 bump BACK_TICK,RootTabPage 监听后关闭。
-export const SEARCH_OVERLAY_VISIBLE_KEY: string = 'searchOverlayVisible';
-export const SEARCH_OVERLAY_BACK_TICK_KEY: string = 'searchOverlayBackTick';
 // 一镜到底共享元素 id:顶栏放大镜(源)与浮层前导放大镜(目标)标同一 id,由 openSearch 的 animateTo 插值。
 export const SEARCH_ICON_GEOMETRY_ID: string = 'arkdo-search-icon';
 

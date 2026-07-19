@@ -3,6 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { DohManager, DohResolveMode, DohServer } from '../../services/network/DohManager';
 import { DohSpeedTester, DohTestResult } from '../../services/network/DohSpeedTester';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { showToast as promptToast } from '../../common/utils/Toast';
 
 const LOG_TAG: string = '[ArkDO][DohPage]';
 
@@ -651,10 +652,6 @@ export struct DohSettingsPage {
   }
 
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    } catch (err) {
-      Log.i(`${LOG_TAG} toast failed: ${message}`);
-    }
+    promptToast(this.getUIContext(), message);
   }
 }
