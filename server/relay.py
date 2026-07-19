@@ -7,7 +7,7 @@ Listens on 127.0.0.1:8787; put a TLS reverse proxy (e.g. Caddy) in front and for
 /wp/* and /subscription/* here. See server/README.md for deployment.
 Deps: stdlib + `cryptography` (system site-packages). No pip needed.
 """
-import json, os, base64, secrets, threading, datetime, time, urllib.parse, urllib.request, urllib.error
+import json, os, re, base64, secrets, threading, datetime, time, urllib.parse, urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from cryptography.hazmat.primitives.asymmetric import ec, padding
 from cryptography.hazmat.primitives import serialization, hashes
@@ -413,14 +413,22 @@ def build_click_data(message: dict, title: str) -> dict:
 
 
 def notification_icon_name(message: dict) -> str:
-    """从 icon URL 反推 Discourse 通知类型名。取不到/取不准时返回空串。"""
+    """从 icon URL 反推 Discourse 通知类型名。取不到/取不准时返回空串。
+
+    Discourse 会给静态资源加指纹,文件名形如 replied-860768a7.png,必须把
+    末尾的 -<十六进制> 剥掉才能拿到干净的类型名。不剥的话 private_message-xxxx
+    匹配不上私信列表,分流启用后私信会被误降级成订阅类。
+    """
     icon = message.get("icon")
     if not isinstance(icon, str) or not icon:
         return ""
     tail = icon.split("?")[0].rsplit("/", 1)[-1]
     if not tail.endswith(".png"):
         return ""
-    return tail[:-4].strip().lower()
+    name = tail[:-4].strip().lower()
+    # 指纹是纯十六进制且有一定长度;类型名本身含 - 的部分(如 private_message
+    # 用的是下划线)不会被误伤。
+    return re.sub(r"-[0-9a-f]{8,}$", "", name)
 
 
 def resolve_category(message: dict) -> str:
