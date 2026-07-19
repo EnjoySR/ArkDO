@@ -1,0 +1,23 @@
+# ArkDO 推送中继的反向代理示例(Caddy)。Caddy 会自动申请并续期 Let's Encrypt 证书。
+#
+# 前提:push.example.com 的 A 记录已指向本机公网 IP,且 80/443 可从公网访问
+# (Let's Encrypt 的 HTTP-01 挑战要走 80 端口;这是服务器间通信,不受 HSTS 影响)。
+
+push.example.com {
+    # /wp/*          Discourse 投递加密推送的入口(不能加任何鉴权/限流,理由见 README)
+    # /subscription/* App 注册与注销订阅
+    # /register      旧版路径,兼容用
+    @relay path /wp/* /register /subscription/*
+    handle @relay {
+        reverse_proxy 127.0.0.1:8787
+    }
+
+    # 其余路径一律 404:中继不对外提供任何页面,别给扫描器可探测的表面。
+    handle {
+        respond "" 404
+    }
+}
+
+# ⚠️ 强烈建议给中继用独立域名,不要和你其它服务共用主域。
+# 中继地址会随 App 公开,而证书透明度日志(crt.sh)可按主域枚举出全部子域——
+# 共用主域等于把同域下的其它服务(如自建 DoH)一并暴露。

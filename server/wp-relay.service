@@ -1,0 +1,23 @@
+[Unit]
+Description=ArkDO WebPush -> Huawei Push Kit relay
+After=network.target
+
+[Service]
+Type=simple
+# 用非 root 账号跑。该账号需能读 PUSHKIT_SERVICE_ACCOUNT_FILE(建议 640 root:<该账号>)。
+User=ubuntu
+WorkingDirectory=/opt/wp-relay
+EnvironmentFile=-/etc/wp-relay.env
+ExecStart=/usr/bin/python3 /opt/wp-relay/relay.py
+Restart=always
+RestartSec=2
+
+# 加固:中继只需读写自己的工作目录与那份服务账号 JSON。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/wp-relay
+
+[Install]
+WantedBy=multi-user.target

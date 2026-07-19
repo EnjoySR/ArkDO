@@ -24,3 +24,6 @@ design/
 .claude/settings.local.json
 # SSH 部署工具产生的本地记录,与项目无关。
 deployments.log
+# Python 字节码缓存(中继本地调试产生)。
+__pycache__/
+*.pyc
