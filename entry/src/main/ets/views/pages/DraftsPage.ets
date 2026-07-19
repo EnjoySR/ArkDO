@@ -244,7 +244,7 @@ export struct DraftsPage {
       .alignItems(VerticalAlign.Center)
 
       // 标题
-      Text(item.title)
+      Text(item.displayTitle)
         .fontSize(16)
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
@@ -293,7 +293,8 @@ export struct DraftsPage {
     }
     if (item.action === DraftAction.REPLY && item.topicId !== undefined) {
       // 带上草稿正文:落地后详情页自动弹回复框并回填,不用用户再点一次「回复」。
-      this.onOpenTopicWithDraft(item.topicId, item.title, item.reply, item.draftKey, item.sequence);
+      // 这里的 title 是给详情页当页面标题用的,取 displayTitle(回帖草稿它就是所回主题的标题)。
+      this.onOpenTopicWithDraft(item.topicId, item.displayTitle, item.reply, item.draftKey, item.sequence);
       return;
     }
     const path: string = this.username.length > 0 ? `/u/${this.username}/activity/drafts` : '/my/activity/drafts';
@@ -305,6 +306,7 @@ export struct DraftsPage {
   private openComposerForDraft(item: Draft): void {
     this.resumeDraftKey = item.draftKey;
     this.resumeSequence = item.sequence;
+    // 回填用真实 title(可能为空),不能用 displayTitle——否则「(无标题草稿)」会被写进标题输入框。
     this.resumeTitle = item.title;
     this.resumeCategoryId = item.categoryId !== undefined ? item.categoryId : -1;
     this.resumeText = item.reply;

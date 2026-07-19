@@ -6,8 +6,12 @@ export interface Draft {
   draftKey: string;
   sequence: number;
   action: DraftAction;
-  // 列表展示标题:新主题/私信取 data.title;回帖取顶层 title(即所回主题的标题)。
+  // 真实标题:新主题/私信取 data.title,回帖取顶层 title(所回主题的标题)。**可能为空**
+  // (只写了正文没写标题的草稿)。续写回填必须用它,不能用 displayTitle——否则占位串会被
+  // 当成真标题灌进标题输入框。
   title: string;
+  // 列表展示用:title 为空时回退占位文案。仅用于渲染,不可回填。
+  displayTitle: string;
   // 正文预览(已做轻度清洗:图片占位换成「[图片]」)。
   excerpt: string;
   createdAt: string;

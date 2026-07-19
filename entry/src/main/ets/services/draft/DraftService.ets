@@ -272,16 +272,19 @@ export class DraftService {
     const data: DiscourseDraftData = this.parseData(source.data);
     const action: DraftAction = this.toAction(data.action);
 
-    // 标题:新主题/私信取 data.title;回帖取顶层 title(所回主题标题)。都空则占位。
+    // 标题:新主题/私信取 data.title;回帖取顶层 title(所回主题标题)。
+    // 真实标题允许为空(只写了正文的草稿),占位只加在 displayTitle 上——续写回填读 title,
+    // 混用会把占位串写进标题输入框。
     const dataTitle: string = typeof data.title === 'string' ? data.title.trim() : '';
     const topTitle: string = typeof source.title === 'string' ? source.title.trim() : '';
-    const title: string = dataTitle.length > 0 ? dataTitle : (topTitle.length > 0 ? topTitle : '(无标题草稿)');
+    const title: string = dataTitle.length > 0 ? dataTitle : topTitle;
 
     const draft: Draft = {
       draftKey: source.draft_key,
       sequence: typeof source.sequence === 'number' ? source.sequence : 0,
       action: action,
       title: title,
+      displayTitle: title.length > 0 ? title : '(无标题草稿)',
       excerpt: DraftService.cleanExcerpt(source.excerpt, data.reply),
       createdAt: typeof source.created_at === 'string' ? source.created_at : '',
       tags: this.mapTags(data.tags),

@@ -194,6 +194,12 @@ export struct ComposerPage {
       this.uploadService = new UploadService(this.bridge);
       this.draftService = new DraftService(this.bridge);
     }
+    // 带入正文里若有 upload:// 短码(草稿续写/编辑旧帖的老图片),挂载即后台解析真实直链。
+    // 不 await:用户此刻多半在打字,等他点预览时映射早已就绪,省掉点预览那一下的网络等待
+    // (经 ArkWeb 桥的请求实测可达数秒)。解析失败无害,预览时还会再试一次。
+    if (this.initialText.length > 0 && this.uploadService) {
+      this.uploadService.prefetchShortUrls(this.initialText);
+    }
     // 草稿续写:把带入的标题/分类/标签灌进 @State,并沿用原草稿的 key/序号继续自动存。
     if (this.composeTopic) {
       this.title = this.initialTitle;
@@ -1309,6 +1315,30 @@ export struct ComposerPage {
         .width('100%')
         .height('100%')
         .align(Alignment.TopStart)
+      }
+
+      // 预览准备中的指示:切到预览前要解析图片短码 + 编译 markdown,老图片未预取时可能等上几秒。
+      // 没有这层反馈,用户点了预览会觉得「界面僵住没反应」。Block 拦交互,避免等待期间重复点。
+      if (this.isPreviewLoading) {
+        Column() {
+          Row({ space: 10 }) {
+            LoadingProgress()
+              .width(20)
+              .height(20)
+              .color($r('app.color.brand'))
+            Text('正在生成预览…')
+              .fontSize(14)
+              .fontColor($r('app.color.text_secondary'))
+          }
+          .padding({ left: 18, right: 18, top: 12, bottom: 12 })
+          .backgroundColor($r('app.color.surface_card'))
+          .borderRadius(12)
+          .shadow({ radius: 16, color: '#26000000', offsetY: 4 })
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .hitTestBehavior(HitTestMode.Block)
       }
     }
     .layoutWeight(1)
