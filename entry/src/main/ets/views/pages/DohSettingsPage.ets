@@ -115,7 +115,7 @@ struct AddDohDialog {
     }
     .width('86%')
     .backgroundColor($r('app.color.surface_card'))
-    .borderRadius(32)
+    .borderRadius($r('sys.float.ohos_id_corner_radius_dialog'))
     .clip(true)
   }
 
