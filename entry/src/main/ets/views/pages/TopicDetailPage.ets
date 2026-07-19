@@ -33,7 +33,10 @@ const POSTS_CACHED_COUNT: number = 4;
 // 向上预取阈值(posts 下标):离已加载区间顶部还剩这么多楼就开始"拉数据"——只入 pendingEarlier 缓存,
 // 不碰数据源。拉取纯后台、不动画面,故提前量给足,让数据在视口进入插入安全窗之前就备好。
 const EARLIER_PREFETCH_INDEX: number = 25;
-// 顶部"正在加载/定位"悬浮胶囊开关:暂时隐藏(产品观感待定),置 true 即恢复。
+// 顶部"正在加载更早的回复"悬浮胶囊开关:向上补楼是后台预取、用户没发起过动作,
+// 弹提示反而打扰,故默认隐藏(产品观感待定,置 true 即恢复)。
+// 注意:跳楼/回顶定位(isRewindowing)不受此开关管——那是用户主动点击触发的,
+// 必须给反馈,否则点了没动静会以为没点上(实测在百楼外点标题回顶要等一会儿)。
 const SHOW_LOADING_CAPSULE: boolean = false;
 // 提交成功的 toast 延后到浮层完全收场(遮罩淡出 220ms、键盘收起约 270ms)之后再弹,
 // 否则 toast 存活期横跨键盘收起的布局变化,会被重新锚定而在屏幕上跳一下。
@@ -88,6 +91,8 @@ export struct TopicDetailPage {
   private currentEndListIndex: number = 0;
   // 跳未加载楼的重开窗口请求进行中(防重入 + 顶部悬浮胶囊提示)。请求期间旧列表原样保留,不白屏。
   @State private isRewindowing: boolean = false;
+  // 本次换窗是不是「回一楼」(点顶栏标题):只影响加载胶囊的文案。
+  @State private rewindowingToTop: boolean = false;
   // List 重建开关:翻转值使 build 里的 if/else 换分支,同一帧销毁旧 List、全新重建
   // (新 List 挂新 PostDataSource 实例 + initialIndex 生效)。这是原地换窗不经过加载页的关键。
   @State private listEpochEven: boolean = true;
@@ -382,6 +387,9 @@ export struct TopicDetailPage {
         bookmarked: this.topicBookmarked,
         onBack: () => {
           this.onBack();
+        },
+        onTitleClick: () => {
+          this.jumpToFirstPost();
         }
       })
 
@@ -449,14 +457,14 @@ export struct TopicDetailPage {
     }
 
     // 向上补楼 / 跳楼定位的加载指示:悬浮小胶囊,不参与 List 布局(头插时列表零跳动的前提)。
-    if (SHOW_LOADING_CAPSULE && (this.isLoadingEarlier || this.isRewindowing)) {
+    if (this.isRewindowing || (SHOW_LOADING_CAPSULE && this.isLoadingEarlier)) {
       Row() {
         LoadingProgress()
           .width(14)
           .height(14)
           .color($r('app.color.brand'))
           .margin({ right: 6 })
-        Text(this.isRewindowing ? '正在定位楼层' : '正在加载更早的回复')
+        Text(this.isRewindowing ? (this.rewindowingToTop ? '正在回到一楼' : '正在定位楼层') : '正在加载更早的回复')
           .fontSize(12)
           .fontColor($r('app.color.text_secondary'))
       }
@@ -803,6 +811,24 @@ export struct TopicDetailPage {
     await this.rewindowToPost(postNumber);
   }
 
+  // 点顶栏标题回到一楼。与 jumpToPostNumber 的区别:不做落地高亮——回顶是导航动作,
+  // 闪一下反而突兀(高亮是给「跳到某条具体楼层」用的,要提示「就是这条」)。
+  // 一楼已在当前窗口内则直接滚到列表顶(含摘要卡);翻页翻远了导致一楼已不在窗口,
+  // 走 rewindowToPost 重新以一楼为中心拉一屏(即你说的「在最后面也能直接加载 1 楼数据」)。
+  private async jumpToFirstPost(): Promise<void> {
+    if (!this.detail || this.isRewindowing) {
+      return;
+    }
+    const index: number = this.dataSource.findIndexByPostNumber(1);
+    if (index >= 0) {
+      // 滚到 0 而非 index+1:0 是摘要卡,回顶应该连标题/分类一起露出来。
+      this.scroller.scrollToIndex(0, true);
+      return;
+    }
+    // 一楼已不在当前窗口(翻页翻远了):以一楼为锚重拉一窗,asTop 让它落到摘要卡且不闪高亮。
+    await this.rewindowToPost(1, true);
+  }
+
   // 引用卡 arrow-up:被引用楼在本帖 → 滚动定位;跨帖 → 走 fallbackUrl 开详情(经 LinkRouter)。
   private jumpToQuote(topicId: number, postNumber: number, fallbackUrl: string): void {
     if (topicId === this.param.topicId && postNumber > 0) {
@@ -844,17 +870,22 @@ export struct TopicDetailPage {
   // 绝不对活 List 发 onDataReloaded——那会让 maintainVisibleContentPosition 的头插补偿
   // 永久失效(实测),这正是"新建 List 没问题、原地 reset 有问题"的根因;旧 List 至死只持有
   // 旧数据源实例,新数据源的任何通知都到不了它。
-  private async rewindowToPost(postNumber: number): Promise<void> {
+  // asTop=true:回顶语义(点顶栏标题)。首帧落到摘要卡而非目标楼、且不武装落地高亮——
+  // 高亮是「跳到某条具体楼层」的提示,回顶闪一下只会突兀。必须在本方法内区分:
+  // initialListIndex 由 listEpochEven 翻转触发的 List 重建当帧消费,调用方在 await 之后再改就晚了。
+  private async rewindowToPost(postNumber: number, asTop: boolean = false): Promise<void> {
     if (!this.detail || this.isRewindowing) {
       return;
     }
     this.isRewindowing = true;
+    this.rewindowingToTop = asTop;
     const topicId: number = this.detail.id;
     const slug: string | undefined = this.detail.slug ?? this.param.slug;
 
     const result: NetworkResult<TopicDetail> =
       await new TopicService(this.bridge).getTopicDetail(topicId, slug, postNumber);
     this.isRewindowing = false;
+    this.rewindowingToTop = false;
 
     if (!result.success || !result.data || result.data.posts.length === 0) {
       // 失败:旧列表还在原位,只提示。
@@ -875,8 +906,11 @@ export struct TopicDetailPage {
     this.updateLastVisitedAnchor();
 
     const targetIndex: number = Math.max(0, nextSource.findIndexAtOrAfterPostNumber(postNumber));
-    this.initialListIndex = targetIndex + 1;
-    this.armTargetFlash(nextSource.getData(targetIndex).id);
+    // 回顶:落到 0(摘要卡,标题/分类一并露出)且不高亮;跳楼层:落到该楼并高亮提示「就是这条」。
+    this.initialListIndex = asTop ? 0 : targetIndex + 1;
+    if (!asTop) {
+      this.armTargetFlash(nextSource.getData(targetIndex).id);
+    }
     this.detail = result.data;
     // 翻转分支 → 旧 List 销毁、新 List 以新数据源 + initialIndex 重建,同帧完成,无加载页。
     this.listEpochEven = !this.listEpochEven;

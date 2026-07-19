@@ -18,6 +18,9 @@ export struct TopicDetailHeader {
   // 已收藏:图层 B 帖子标题最前内联灰色书签标记,排在已解决勾选框之前。
   @Prop bookmarked: boolean = false;
   onBack: () => void = () => {};
+  // 点顶栏帖子标题回一楼。只在图层 B(帖子标题)显示时可点——摘要仍在视口内时一楼就在眼前,
+  // 且那时显示的是「帖子详情」静态标题,点它没有意义(图层 B 的 hitTestBehavior 已天然做到这点)。
+  onTitleClick: () => void = () => {};
 
   build() {
     Row({ space: 8 }) {
@@ -92,6 +95,10 @@ export struct TopicDetailHeader {
         .translate({ y: this.summaryVisible ? 8 : 0 })
         .hitTestBehavior(this.summaryVisible ? HitTestMode.None : HitTestMode.Default)
         .animation({ duration: 250, curve: Curve.EaseInOut })
+        // 整行(标题 + 徽章)都是回一楼的热区。摘要可见时 hitTestBehavior 为 None,点不到,无需再判。
+        .onClick(() => {
+          this.onTitleClick();
+        })
       }
       .layoutWeight(1)
       .alignContent(Alignment.Start)
