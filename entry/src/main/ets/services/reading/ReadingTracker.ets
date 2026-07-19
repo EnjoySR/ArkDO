@@ -1,5 +1,6 @@
 import { Log } from '../logging/Log';
 import { ChallengeState, NetworkResult } from '../network/NetworkTypes';
+import { ChallengeShortcutEventBus } from '../challenge/ChallengeShortcutEventBus';
 
 // ArkTS 版 Discourse screen-track:详情页停留时按 1 秒 tick 累加在屏楼层时间,
 // 满足条件即 POST /topics/timings 上报;上报成功后回调标记这些楼层已读(蓝点淡出)。
@@ -310,6 +311,8 @@ export class ReadingTracker {
       this.lastFlush = 0;
       if (result.success) {
         this.ajaxFailures = 0;
+        // 上报通了说明盾已经不拦了:收起右上角的过盾快捷入口(若正显示)。
+        ChallengeShortcutEventBus.notifyCleared();
         for (let index: number = 0; index < postNumbers.length; index++) {
           this.readPosts.add(postNumbers[index]);
         }
@@ -328,6 +331,9 @@ export class ReadingTracker {
         this.afterMinReporting(startedAt, () => this.setReporting(postNumbers, false));
         if (result.challengeState !== ChallengeState.NONE) {
           // 命中 CF 质询:请求隐藏 host 静默刷新 clearance,成功后重试一次(Method B 验证路径)。
+          // 同时播出「正被盾拦着」——本请求是 notifyChallenge:false(后台上报不弹验证页,免得
+          // 打断阅读),撞盾对用户完全静默,只能靠详情页右上角亮个快捷入口来告知(需用户开了开关)。
+          ChallengeShortcutEventBus.notifyBlocked();
           this.handleChallenge(item);
         } else {
           this.handleFailure(item, result.statusCode);

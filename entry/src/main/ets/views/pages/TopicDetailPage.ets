@@ -10,6 +10,8 @@ import { LoginGate } from '../../services/session/LoginGate';
 import { TopicReadController } from '../../services/reading/TopicReadController';
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
 import { DraftService } from '../../services/draft/DraftService';
+import { ChallengeShortcutEventBus } from '../../services/challenge/ChallengeShortcutEventBus';
+import { ChallengeShortcutPrefs } from '../../services/challenge/ChallengeShortcutPrefs';
 import { BookmarkToggleResult, PostActions } from '../../services/topic/PostActions';
 import { PostDataSource } from '../../services/topic/PostDataSource';
 import { PostStreamPager } from '../../services/topic/PostStreamPager';
@@ -93,6 +95,9 @@ export struct TopicDetailPage {
   @State private isRewindowing: boolean = false;
   // 本次换窗是不是「回一楼」(点顶栏标题):只影响加载胶囊的文案。
   @State private rewindowingToTop: boolean = false;
+  // 阅读时 timings 被 CF 拦下:right-top 亮过盾快捷入口(还需用户在设置里开了开关)。
+  @State private challengeBlocked: boolean = false;
+  private unsubscribeChallengeShortcut?: () => void = undefined;
   // List 重建开关:翻转值使 build 里的 if/else 换分支,同一帧销毁旧 List、全新重建
   // (新 List 挂新 PostDataSource 实例 + initialIndex 生效)。这是原地换窗不经过加载页的关键。
   @State private listEpochEven: boolean = true;
@@ -146,6 +151,8 @@ export struct TopicDetailPage {
   );
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   onBack: () => void = () => {};
+  // 打开 CF 过盾页(顶栏快捷入口触发)。导航栈与弹层都在宿主 RootTabPage 手里,故上抛。
+  onOpenChallenge: () => void = () => {};
   // 图片预览上抛给根组件渲染:双栏(平板横屏)下须盖满整窗而非仅右详情栏,故提到 RootTabPage 根级。
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击上抛给根导航:站内帖子链接跳原生详情,其余打开通用 WebView。
@@ -190,6 +197,15 @@ export struct TopicDetailPage {
       });
     }
 
+    // 过盾快捷入口:载入开关(默认关)并订阅「是否正被盾拦着」。取初值是因为可能在别的页面就已撞过盾。
+    ChallengeShortcutPrefs.load(getContext(this));
+    this.challengeBlocked = ChallengeShortcutEventBus.isBlocked();
+    if (!this.unsubscribeChallengeShortcut) {
+      this.unsubscribeChallengeShortcut = ChallengeShortcutEventBus.subscribe((blocked: boolean) => {
+        this.challengeBlocked = blocked;
+      });
+    }
+
     this.readController.attach();
 
     if (this.isArkWebReady && !this.detail) {
@@ -205,6 +221,11 @@ export struct TopicDetailPage {
     if (this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged();
       this.unsubscribeSessionChanged = undefined;
+    }
+
+    if (this.unsubscribeChallengeShortcut) {
+      this.unsubscribeChallengeShortcut();
+      this.unsubscribeChallengeShortcut = undefined;
     }
 
     if (this.unsubscribeLoginState) {
@@ -390,6 +411,11 @@ export struct TopicDetailPage {
         },
         onTitleClick: () => {
           this.jumpToFirstPost();
+        },
+        // 两个条件同时满足才亮:用户开了设置开关 && 本次阅读确实被盾拦下。
+        showChallengeShortcut: ChallengeShortcutPrefs.isEnabled() && this.challengeBlocked,
+        onChallengeShortcutClick: () => {
+          this.onOpenChallenge();
         }
       })
 

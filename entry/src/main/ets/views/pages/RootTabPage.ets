@@ -14,6 +14,7 @@ import { User } from '../../models/User';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
 import { ChallengeRecoveryCoordinator } from '../../services/challenge/ChallengeRecoveryCoordinator';
 import { ChallengeRecoveryEventBus } from '../../services/challenge/ChallengeRecoveryEventBus';
+import { ChallengeShortcutEventBus } from '../../services/challenge/ChallengeShortcutEventBus';
 import { AuthService } from '../../services/auth/AuthService';
 import { NotificationService } from '../../services/notification/NotificationService';
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
@@ -432,6 +433,12 @@ export struct RootTabPage {
           isArkWebReady: this.isArkWebReady,
           onBack: () => {
             this.popNavigation();
+          },
+          // 顶栏过盾快捷入口:直接开验证页,并让恢复协调器停掉后台静默重试、把弹窗交给用户接管
+          // (与首页空态「手动验证」同一路径),否则协调器可能正处于 DISMISSED 保持期而把弹窗吞掉。
+          onOpenChallenge: () => {
+            this.challengeRecovery?.forceEscalate();
+            this.openChallengeSheet();
           },
           // 图片预览上抛到根级渲染:双栏下才能盖满整窗、旋转正常。
           onOpenImages: (images: ViewerImage[], startIndex: number) => {
@@ -1388,6 +1395,8 @@ export struct RootTabPage {
     Log.i(`${DIAG_TAG} stage=rootChallengeResolved sheetVisible=${this.isSheetVisible}`);
     // 先进冷却再关窗:onDisappear 的 notifySheetDismissed 在冷却态下即为空操作。
     this.challengeRecovery?.notifySheetResolved();
+    // 盾已过:收起详情页右上角的过盾快捷入口(不等下一次 timings 上报成功才收,免得图标空挂着)。
+    ChallengeShortcutEventBus.notifyCleared();
     this.closeChallengePage();
     // 反馈:已过盾时验证页会秒关(源站 404 即通过),给个 toast 免得用户以为闪退/没反应。
     this.showToast('已通过 Cloudflare 验证');

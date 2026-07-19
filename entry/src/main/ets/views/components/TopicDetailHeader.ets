@@ -21,6 +21,10 @@ export struct TopicDetailHeader {
   // 点顶栏帖子标题回一楼。只在图层 B(帖子标题)显示时可点——摘要仍在视口内时一楼就在眼前,
   // 且那时显示的是「帖子详情」静态标题,点它没有意义(图层 B 的 hitTestBehavior 已天然做到这点)。
   onTitleClick: () => void = () => {};
+  // 过盾快捷入口:仅在「用户开了设置开关」且「本次阅读确实被盾拦下」时显示,由父页判定后传入。
+  // 不做常驻——多数时候没盾可过,常驻只会占地方。
+  @Prop showChallengeShortcut: boolean = false;
+  onChallengeShortcutClick: () => void = () => {};
 
   build() {
     Row({ space: 8 }) {
@@ -102,6 +106,23 @@ export struct TopicDetailHeader {
       }
       .layoutWeight(1)
       .alignContent(Alignment.Start)
+
+      // 过盾快捷入口。不随标题双层切换隐藏——「被盾拦着」是当前会话的状态,
+      // 与用户滑到了哪儿无关,跟着标题层走反而会让人以为问题自己好了。
+      if (this.showChallengeShortcut) {
+        Button({ type: ButtonType.Circle, stateEffect: true }) {
+          SymbolGlyph($r('sys.symbol.lock_shield'))
+            .fontSize(20)
+            .fontColor([$r('app.color.warning')])
+            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+        }
+        .width(40)
+        .height(40)
+        .backgroundColor($r('app.color.surface_muted'))
+        .onClick(() => {
+          this.onChallengeShortcutClick();
+        })
+      }
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)

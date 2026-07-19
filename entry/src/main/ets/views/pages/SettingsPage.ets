@@ -5,6 +5,7 @@ import { FileLogger } from '../../services/logging/FileLogger';
 import { ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import { DohManager, DohServer } from '../../services/network/DohManager';
 import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
+import { ChallengeShortcutPrefs } from '../../services/challenge/ChallengeShortcutPrefs';
 import { SitePrefs } from '../../services/site/SitePrefs';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 
@@ -46,6 +47,8 @@ export struct SettingsPage {
   // 日志工具:大小标签实时展示,详细日志开关持久化,导出时防重复点击。
   @State private logSizeLabel: string = '';
   @State private verboseLog: boolean = false;
+  // 帖子页过盾快捷入口开关(默认关),进页时从 preferences 载入。
+  @State private challengeShortcutEnabled: boolean = false;
   @State private isExportingLog: boolean = false;
   // 首页内容入口:启用且有序的可选入口 key(不含恒在的最新)。
   @State private enabledFeeds: string[] = [];
@@ -73,6 +76,7 @@ export struct SettingsPage {
   aboutToAppear(): void {
     this.readAppVersion();
     this.verboseLog = FileLogger.isVerbose();
+    this.loadChallengeShortcutEnabled();
     this.refreshLogSize();
     this.refreshDohSummary();
     this.enabledFeeds = FeedPrefs.getEnabledKeys(getContext(this));
@@ -147,6 +151,8 @@ export struct SettingsPage {
               this.SettingCell($r('sys.symbol.checkmark_shield'), '刷新 Cloudflare 通行证', '', () => {
                 this.onActiveChallenge();
               })
+              this.HairlineInset()
+              this.ChallengeShortcutCell()
             }
             .cardStyle()
 
@@ -298,6 +304,40 @@ export struct SettingsPage {
     .cardStyle()
     // GroupLabel 自带 18 上内边距,抹平 cardStyle 的 12 上外边距,免得组标题与卡片间空一截。
     .margin({ top: 0 })
+  }
+
+  // 帖子页过盾快捷入口开关。默认关:多数人从不撞盾,常驻入口只会碍眼。
+  // 打开也不等于常驻——还要真的探测到阅读上报被 CF 拦下才亮(见 ChallengeShortcutEventBus)。
+  @Builder
+  private ChallengeShortcutCell() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.lock_shield'))
+        .fontSize(20)
+        .fontColor([$r('app.color.text_secondary')])
+      Column() {
+        Text('帖子页显示过盾入口')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text('阅读被 Cloudflare 拦截时，帖子右上角出现快捷验证')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .margin({ left: 14 })
+      .alignItems(HorizontalAlign.Start)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.challengeShortcutEnabled })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          this.challengeShortcutEnabled = isOn;
+          ChallengeShortcutPrefs.setEnabled(getContext(this), isOn);
+        })
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
   }
 
   // 诊断日志工具组:导出(带大小)、详细日志开关、清空。用于用户脱机跑一天后导出日志分析。
@@ -618,6 +658,10 @@ export struct SettingsPage {
   private setVerboseLog(isOn: boolean): void {
     this.verboseLog = isOn;
     FileLogger.setVerbose(getContext(this), isOn);
+  }
+
+  private async loadChallengeShortcutEnabled(): Promise<void> {
+    this.challengeShortcutEnabled = await ChallengeShortcutPrefs.load(getContext(this));
   }
 
   private confirmClearLog(): void {
