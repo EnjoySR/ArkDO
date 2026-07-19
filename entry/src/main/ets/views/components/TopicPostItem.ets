@@ -16,8 +16,8 @@ import { UserAvatar } from './UserAvatar';
 import { AcceptedAnswerPanel } from './AcceptedAnswerPanel';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 import { LoginGate } from '../../services/session/LoginGate';
+import { LIKE_RED, SUCCESS_GREEN } from '../../common/theme/Palette';
 
-const LIKE_RED: string = '#EF4444';
 // 昵称后徽章图标(FontAwesome 单色)统一染金色,明暗底皆成立;与站点徽章展示一致。
 const BADGE_GOLD: string = '#E5A50A';
 // 走全息闪动的称号白名单:对应站点 CSS `span.user-title--{premium,种子用户,破界者}`(按称号文字命中,含徽章当称号)。
@@ -34,7 +34,6 @@ const COPY_CHECK_STROKE: number = 2;
 const COPY_CHECK_X: number = 22;   // 揭示容器在 38 按钮内的左上角坐标 → 落到右下角
 const COPY_CHECK_Y: number = 24;
 const COPY_CHECK_DRAW_MS: number = 1700;
-const COPY_CHECK_COLOR: string = '#22C55E';
 const COPY_FEEDBACK_TIMEOUT_MS: number = 3000;
 const COPY_FEEDBACK_TRANSITION_MS: number = 250;
 
@@ -841,7 +840,7 @@ export struct TopicPostItem {
             .height(COPY_CHECK_H)
             .commands(COPY_CHECK_PATH)
             .fill(Color.Transparent)
-            .stroke(COPY_CHECK_COLOR)
+            .stroke(SUCCESS_GREEN)
             .strokeWidth(COPY_CHECK_STROKE)
             .strokeLineCap(LineCapStyle.Round)
             .strokeLineJoin(LineJoinStyle.Round)

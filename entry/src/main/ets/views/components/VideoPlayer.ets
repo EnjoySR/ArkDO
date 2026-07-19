@@ -2,6 +2,7 @@ import { Log } from '../../services/logging/Log';
 import { fileUri } from '@kit.CoreFileKit';
 import { MediaPlaybackCoordinator } from '../../services/content/MediaPlaybackCoordinator';
 import { MediaSource } from '../../services/content/MediaSource';
+import { ON_DARK_FG } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][VideoPlayer]';
 
@@ -63,18 +64,18 @@ export struct VideoPlayer {
             LoadingProgress()
               .width(48)
               .height(48)
-              .color('#FFFFFF')
+              .color(ON_DARK_FG)
           } else if (this.status === 'error') {
             Image($rawfile('fa_icons/circle-exclamation.svg'))
               .width(40)
               .height(40)
               .objectFit(ImageFit.Contain)
               .renderMode(ImageRenderMode.Template)
-              .fillColor('#FFFFFF')
+              .fillColor(ON_DARK_FG)
               .draggable(false)
             Text('加载失败，点击重试')
               .fontSize(13)
-              .fontColor('#FFFFFF')
+              .fontColor(ON_DARK_FG)
               .margin({ top: 10 })
           } else {
             Image($rawfile('fa_icons/play.svg'))
@@ -82,7 +83,7 @@ export struct VideoPlayer {
               .height(30)
               .objectFit(ImageFit.Contain)
               .renderMode(ImageRenderMode.Template)
-              .fillColor('#FFFFFF')
+              .fillColor(ON_DARK_FG)
               .draggable(false)
           }
         }

@@ -2,6 +2,7 @@ import { Log } from '../logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { NotificationItem, RawNotification, RawNotificationData, RawNotificationsResponse } from '../../models/Notification';
 import { JsonNetworkClient, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
+import { AMBER, SUCCESS_GREEN } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][NotificationApi]';
 const MARK_READ_PATH: string = '/notifications/mark-read';
@@ -49,9 +50,9 @@ const C_PM: string = '#8B5CF6';
 const C_BADGE: string = '#E0A100';
 const C_BOOK: string = '#FB923C';
 const C_QUOTE: string = '#64748B';
-const C_WATCH: string = '#F5A623';
+const C_WATCH: string = AMBER;
 const C_GRAY: string = '#9CA3AF';
-const C_APPROVED: string = '#22C55E';
+const C_APPROVED: string = SUCCESS_GREEN;
 
 interface NotificationVisual {
   iconId: string;

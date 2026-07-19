@@ -3,9 +3,10 @@ import window from '@ohos.window';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { COMPOSER_GEOMETRY_ID } from '../pages/ComposerPage';
 import { showToast as promptToast } from '../../common/utils/Toast';
+import { BRAND_BLUE, ON_DARK_FG, SCRIM } from '../../common/theme/Palette';
 
 // Discourse 经典蓝，作回复按钮背景（rgb(0,136,204)）。页面的悬浮回复按钮也复用此色。
-export const REPLY_BLUE: string = '#0088CC';
+export const REPLY_BLUE: string = BRAND_BLUE;
 // 输入框最小/最高高度：低于最小高度不再缩，超过最高高度 TextArea 内部滚动。
 // 最小高度给足竖向空间，避免光标上下被截。
 const INPUT_MIN_HEIGHT: number = 44;
@@ -176,7 +177,7 @@ export struct CommentInputBar {
       Column()
         .width('100%')
         .height('100%')
-        .backgroundColor('#33000000')
+        .backgroundColor(SCRIM)
         .onClick(() => {
           this.onClose();
         })
@@ -238,11 +239,11 @@ export struct CommentInputBar {
             LoadingProgress()
               .width(22)
               .height(22)
-              .color('#FFFFFF')
+              .color(ON_DARK_FG)
           } else {
             FaIconView({
               icon: this.replyIcon(),
-              color: '#FFFFFF',
+              color: ON_DARK_FG,
               iconSize: 18
             })
           }

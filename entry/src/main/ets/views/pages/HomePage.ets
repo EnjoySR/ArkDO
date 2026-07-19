@@ -32,6 +32,7 @@ import { FrameCallback } from '@kit.ArkUI';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { submitNewTopic } from '../../services/topic/CreateTopicFlow';
 import { HOME_COMPOSER_BACK_TICK_KEY, HOME_COMPOSER_VISIBLE_KEY } from '../../common/constants/StorageKeys';
+import { SCRIM } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -532,7 +533,7 @@ export struct HomePage {
         Column()
           .width('100%')
           .height('100%')
-          .backgroundColor('#33000000')
+          .backgroundColor(SCRIM)
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
           .onClick(() => {
             this.closeDrawer();

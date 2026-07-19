@@ -25,6 +25,7 @@ import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 import { APP_IS_WIDE_STORAGE_KEY } from '../../common/utils/BreakpointManager';
 import { display } from '@kit.ArkUI';
 import { showToast as promptToast, TOAST_SHORT_MS } from '../../common/utils/Toast';
+import { ON_DARK_FG } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
@@ -1335,11 +1336,11 @@ export struct PostRichContent {
             .height(12)
             .objectFit(ImageFit.Contain)
             .renderMode(ImageRenderMode.Template)
-            .fillColor('#FFFFFF')
+            .fillColor(ON_DARK_FG)
             .draggable(false)
           Text('隐藏')
             .fontSize(11)
-            .fontColor('#FFFFFF')
+            .fontColor(ON_DARK_FG)
             .margin({ left: 4 })
         }
         .alignItems(VerticalAlign.Center)

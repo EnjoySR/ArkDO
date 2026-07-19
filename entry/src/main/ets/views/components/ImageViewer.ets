@@ -1,5 +1,6 @@
 import { ImagePreview, PreviewDirection } from '@rv/image-preview';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { ON_DARK_FG } from '../../common/theme/Palette';
 
 /**
  * 一张待浏览的图片：url 为首选（原图 href，高清），优化图作为兜底。
@@ -136,7 +137,7 @@ export struct ImageViewer {
           LoadingProgress()
             .width(44)
             .height(44)
-            .color('#FFFFFF')
+            .color(ON_DARK_FG)
         }
         .width('100%')
         .height('100%')
@@ -149,7 +150,7 @@ export struct ImageViewer {
         Column() {
           Text(`${this.currentIndex + 1} / ${this.images.length}`)
             .fontSize(14)
-            .fontColor('#FFFFFF')
+            .fontColor(ON_DARK_FG)
             .backgroundColor('#00000080')
             .borderRadius(14)
             .padding({ left: 14, right: 14, top: 5, bottom: 5 })
@@ -164,7 +165,7 @@ export struct ImageViewer {
       // 关闭按钮（下移 topInset 避让状态栏）
       Text('✕')
         .fontSize(20)
-        .fontColor('#FFFFFF')
+        .fontColor(ON_DARK_FG)
         .width(40)
         .height(40)
         .textAlign(TextAlign.Center)

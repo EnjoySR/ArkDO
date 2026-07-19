@@ -10,7 +10,7 @@ const BADGE_COLUMNS: number = 3;
 // 集中到这里,格式规则只有一处。
 
 // Discourse 信任等级中文名(0-4)。user.title 缺省时的兜底展示。
-export const TRUST_LEVEL_NAMES: string[] = ['新用户', '基本用户', '成员', '常客', '领导者'];
+export const TRUST_LEVEL_NAMES: string[] = ['新用户', '基本用户', '成员', '活跃用户', '领导者'];
 
 // 计数缩写:1000 以下原样,1000-9999 保留一位小数(1.2k),万以上取整(12k)。
 export function formatCount(value: number): string {
@@ -34,7 +34,7 @@ export function formatTimeRead(seconds: number): string {
   return `${Math.round(seconds / 3600)}h`;
 }
 
-// 信任等级标签,形如「TL3 常客」或「TL3 赞助商」。
+// 信任等级标签,形如「TL3 活跃用户」或「TL3 赞助商」。
 //
 // 优先取站点头衔(user.title),缺省才回落到 TL 默认名——这是两页注释里都写明的约定,
 // 但 UserProfilePage 的实现漏掉了 title 分支,导致同一个用户在「我的」页显示自定义头衔、

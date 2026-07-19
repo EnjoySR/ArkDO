@@ -65,6 +65,7 @@ import { WebViewPage } from './WebViewPage';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { MATH_HOST_ACTIVE_KEY } from '../../services/content/MathRenderService';
 import { PushCoordinator } from '../../services/push/PushCoordinator';
+import { SCRIM } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][Root]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -334,7 +335,7 @@ export struct RootTabPage {
       dragBar: this.activeSheet !== RootSheet.CHALLENGE,
       // CF 验证弹窗自带「关闭」按钮,隐藏原生右上角 X 避免出现两个关闭入口;其余 sheet 保留原生 X。
       showClose: this.activeSheet !== RootSheet.CHALLENGE,
-      maskColor: '#33000000',
+      maskColor: SCRIM,
       backgroundColor: $r('app.color.surface_card'),
       preferType: SheetType.BOTTOM,
       enableOutsideInteractive: false,

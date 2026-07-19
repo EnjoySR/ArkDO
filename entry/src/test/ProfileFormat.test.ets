@@ -52,7 +52,7 @@ export default function profileFormatTest() {
 
     it('exposesFiveTrustLevelNames', 0, () => {
       expect(TRUST_LEVEL_NAMES.length).assertEqual(5);
-      expect(TRUST_LEVEL_NAMES[3]).assertEqual('常客');
+      expect(TRUST_LEVEL_NAMES[3]).assertEqual('活跃用户');
     });
 
     // 这是修掉的那处分叉:「我的」页原本取 title,他人主页原本忽略 title,
@@ -63,8 +63,8 @@ export default function profileFormatTest() {
     });
 
     it('fallsBackToTrustLevelNameWhenTitleAbsentOrEmpty', 0, () => {
-      expect(trustLabelOf({ trustLevel: 3 })).assertEqual('TL3 常客');
-      expect(trustLabelOf({ trustLevel: 3, title: '' })).assertEqual('TL3 常客');
+      expect(trustLabelOf({ trustLevel: 3 })).assertEqual('TL3 活跃用户');
+      expect(trustLabelOf({ trustLevel: 3, title: '' })).assertEqual('TL3 活跃用户');
       expect(trustLabelOf({ trustLevel: 0 })).assertEqual('TL0 新用户');
     });
 

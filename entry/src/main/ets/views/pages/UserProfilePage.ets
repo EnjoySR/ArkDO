@@ -32,6 +32,8 @@ import { UserAvatar } from '../components/UserAvatar';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { badgeHeadLabel, badgeRowFillers, badgeRowsOf, formatCount, formatJoinDate, formatTimeRead, trustLabelOf } from '../../common/utils/ProfileFormat';
+import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
+import { LIKE_RED } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][UserProfile]';
 
@@ -40,13 +42,8 @@ const LOG_TAG: string = '[ArkDO][UserProfile]';
 // 带全息闪动特效的称号(与 TopicPostItem 的 HOLOGRAPHIC_TITLES 保持一致)。
 const HOLOGRAPHIC_TITLES: Set<string> = new Set<string>(['Premium', '种子用户', '破界者']);
 // 点赞心形红,与帖子详情楼层的实心 heart 一致(TopicPostItem 的 LIKE_RED)。
-const LIKE_HEART_RED: string = '#EF4444';
 
 // 与「我的」页(ProfilePage)完全同一套卡片度量:两页是孪生页面,视觉必须对称。
-const PAGE_MARGIN: number = 12;
-const CARD_RADIUS: number = 16;
-const CARD_PADDING: number = 16;
-const CARD_GAP: number = 12;
 // 统计区固定高度:加载占位与 4×2 数据网格同高,避免数据回来后卡片长高跳动。
 const STATS_AREA_HEIGHT: number = 126;
 // meta 行(加入天数/最近发帖/浏览量)固定高度,同理防跳动。
@@ -775,7 +772,7 @@ export struct UserProfilePage {
   @Builder
   private LikeBadge(count: number) {
     Row() {
-      FaIconView({ icon: this.faIcon('heart'), iconSize: 12, color: LIKE_HEART_RED })
+      FaIconView({ icon: this.faIcon('heart'), iconSize: 12, color: LIKE_RED })
         .margin({ right: 3 })
       Text(formatCount(count))
         .fontSize(12)

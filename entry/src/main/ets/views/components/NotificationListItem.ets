@@ -3,12 +3,13 @@ import { User } from '../../models/User';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { UserAvatar } from './UserAvatar';
+import { BRAND_BLUE, ON_DARK_FG } from '../../common/theme/Palette';
 
 const AVATAR_SIZE: number = 42;
 // 头像右下角角标配色:未读=品牌蓝底白图标;已读=白底深灰图标(对齐站点)。
-const BADGE_BG_UNREAD: string = '#08C';
+const BADGE_BG_UNREAD: string = BRAND_BLUE;
 const BADGE_BG_READ: string = '#FFFFFF';
-const BADGE_FG_UNREAD: string = '#FFFFFF';
+const BADGE_FG_UNREAD: string = ON_DARK_FG;
 const BADGE_FG_READ: string = '#222222';
 
 // 通知列表单行:有发起人 → 头像 + 右下角类型角标;系统类 → 纯色类型图标圈。

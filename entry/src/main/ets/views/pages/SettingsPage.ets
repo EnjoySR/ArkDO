@@ -15,6 +15,8 @@ import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { SETTINGS_DOH_TICK } from '../../common/constants/StorageKeys';
 import { PageHeader } from '../components/PageHeader';
+import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
+import { SCRIM } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
 
@@ -22,12 +24,8 @@ const LOG_TAG: string = '[ArkDO][Settings]';
 // DoH 摘要(单纯的 @Prop 不会随父 @State 流入已创建的 NavDestination 子树)。
 
 // 与个人中心同款鸿蒙设置页式卡片分组:灰底 + 无描边圆角卡片。
-const PAGE_MARGIN: number = 12;
 // 内容入口配置行高:拖动排序按此行高换算跟手位移与让位步长。
 const FEED_ROW_H: number = 52;
-const CARD_RADIUS: number = 16;
-const CARD_PADDING: number = 16;
-const CARD_GAP: number = 12;
 // 测试推送冷却秒数,与中继的 RELAY_TEST_COOLDOWN 默认值对齐。
 // 只影响本地按钮的倒计时展示;真正拦截在中继侧(按 subId,换设备重装都绕不过)。
 const TEST_PUSH_COOLDOWN_SEC: number = 60;
@@ -775,7 +773,7 @@ export struct SettingsPage {
     .translate({ y: this.rowTranslateY(index) })
     .scale(this.draggingIndex === index ? { x: 1.02, y: 1.02 } : { x: 1, y: 1 })
     .shadow(this.draggingIndex === index
-      ? { radius: 12, color: '#33000000', offsetY: 4 }
+      ? { radius: 12, color: SCRIM, offsetY: 4 }
       : { radius: 0, color: Color.Transparent })
     // 长按抬起后转拖动:先长按拿到拖动权,再用竖向 Pan 跟手,避免与外层滚动抢手势。
     .gesture(

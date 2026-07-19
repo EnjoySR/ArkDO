@@ -6,6 +6,8 @@ import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { SITES_TICK } from '../../common/constants/StorageKeys';
 import { PageHeader } from '../components/PageHeader';
+import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
+import { SCRIM } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][SitesPage]';
 
@@ -14,10 +16,6 @@ const LOG_TAG: string = '[ArkDO][SitesPage]';
 // 从 WEB 页 pop 回来必须靠它把新图标读进来。同 SETTINGS_DOH_TICK 的处境。
 
 // 与设置页同款鸿蒙卡片分组:灰底 + 无描边圆角卡片。
-const PAGE_MARGIN: number = 12;
-const CARD_RADIUS: number = 16;
-const CARD_PADDING: number = 16;
-const CARD_GAP: number = 12;
 // 站点行高(名称 + 域名两行);拖动排序按此行高换算跟手位移与让位步长。
 const SITE_ROW_H: number = 64;
 
@@ -421,7 +419,7 @@ export struct SitesPage {
     .translate({ y: this.rowTranslateY(index) })
     .scale(this.draggingIndex === index ? { x: 1.02, y: 1.02 } : { x: 1, y: 1 })
     .shadow(this.draggingIndex === index
-      ? { radius: 12, color: '#33000000', offsetY: 4 }
+      ? { radius: 12, color: SCRIM, offsetY: 4 }
       : { radius: 0, color: Color.Transparent })
     .onClick(() => {
       this.openEditDialog(site);

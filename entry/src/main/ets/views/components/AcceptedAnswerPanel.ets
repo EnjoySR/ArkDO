@@ -6,6 +6,7 @@ import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { PostRichContent } from './PostRichContent';
 import { ViewerImage } from './ImageViewer';
 import { UserAvatar } from './UserAvatar';
+import { ON_DARK_FG } from '../../common/theme/Palette';
 
 // 展开态正文最大高度:超出即裁剪并在底部渐隐,配合「阅读更多」引导跳楼看全文。
 const CONTENT_MAX_HEIGHT: number = 260;
@@ -31,12 +32,12 @@ export struct AcceptedAnswerPanel {
       Column() {
         // 绿色「已解决」标题条:整框只此一条;多解附「· N 个方案」。顶部圆角交给外层 clip。
         Row() {
-          FaIconView({ icon: this.faIcon('square-check'), color: '#FFFFFF', iconSize: 18 })
+          FaIconView({ icon: this.faIcon('square-check'), color: ON_DARK_FG, iconSize: 18 })
             .margin({ right: 8 })
           Text('已解决')
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
-            .fontColor('#FFFFFF')
+            .fontColor(ON_DARK_FG)
           if (this.answers.length > 1) {
             Text(`· ${this.answers.length} 个方案`)
               .fontSize(13)

@@ -25,6 +25,7 @@ import { UserAvatar } from '../components/UserAvatar';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { badgeHeadLabel, badgeRowFillers, badgeRowsOf, daysSince, formatCount, formatTimeRead, trustLabelOf } from '../../common/utils/ProfileFormat';
+import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
 
@@ -32,10 +33,6 @@ const LOG_TAG: string = '[ArkDO][Profile]';
 
 // 鸿蒙设置页式卡片分组:灰底 + 无描边圆角卡片。
 // 页面两侧留白 12,卡片圆角 16,卡片内部留白 16,卡片间距 12。
-const PAGE_MARGIN: number = 12;
-const CARD_RADIUS: number = 16;
-const CARD_PADDING: number = 16;
-const CARD_GAP: number = 12;
 // 统计区固定高度:加载占位与 4×2 数据网格同高,避免数据回来后卡片长高跳动。
 const STATS_AREA_HEIGHT: number = 126;
 // 用户卡 meta 行(加入天数/最近发帖/浏览量)固定高度,同理防跳动。

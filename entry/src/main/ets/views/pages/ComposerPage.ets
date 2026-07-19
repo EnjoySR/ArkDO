@@ -19,6 +19,7 @@ import { DraftTagRef } from '../../models/Draft';
 import { PostRichContent } from '../components/PostRichContent';
 import { applyAction, EditState, MdAction } from '../../utils/markdownInsert';
 import { showToast as promptToast, TOAST_SHORT_MS } from '../../common/utils/Toast';
+import { BRAND_BLUE, SCRIM, SCRIM_STRONG, SHADOW_CARD } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][Composer]';
 // 一次最多选图张数(对齐 Discourse composer 手感)。
@@ -631,12 +632,12 @@ export struct ComposerPage {
           .padding({ left: 20, right: 20, top: 14, bottom: 14 })
           .backgroundColor($r('app.color.surface_card'))
           .borderRadius(12)
-          .shadow({ radius: 16, color: '#26000000', offsetY: 4 })
+          .shadow({ radius: 16, color: SHADOW_CARD, offsetY: 4 })
         }
         .width('100%')
         .height('100%')
         .justifyContent(FlexAlign.Center)
-        .backgroundColor('#33000000')
+        .backgroundColor(SCRIM)
         .hitTestBehavior(HitTestMode.Block)
       }
 
@@ -650,7 +651,7 @@ export struct ComposerPage {
           Column()
             .width('100%')
             .height('100%')
-            .backgroundColor('#66000000')
+            .backgroundColor(SCRIM_STRONG)
             .onClick(() => { this.closeSheet(1); })
 
           Column() {
@@ -681,7 +682,7 @@ export struct ComposerPage {
           Column()
             .width('100%')
             .height('100%')
-            .backgroundColor('#66000000')
+            .backgroundColor(SCRIM_STRONG)
             .onClick(() => { this.closeSheet(2); })
 
           Column() {
@@ -821,7 +822,7 @@ export struct ComposerPage {
       }
       .width(40)
       .height(40)
-      .backgroundColor('#0088CC')
+      .backgroundColor(BRAND_BLUE)
       .opacity(this.canSubmit() ? 1 : 0.5)
       .onClick(() => {
         this.submit();
@@ -1328,7 +1329,7 @@ export struct ComposerPage {
           .padding({ left: 18, right: 18, top: 12, bottom: 12 })
           .backgroundColor($r('app.color.surface_card'))
           .borderRadius(12)
-          .shadow({ radius: 16, color: '#26000000', offsetY: 4 })
+          .shadow({ radius: 16, color: SHADOW_CARD, offsetY: 4 })
         }
         .width('100%')
         .height('100%')

@@ -12,13 +12,11 @@ import {
   ConnectVetoItem
 } from '../../models/ConnectLevel';
 import { PageHeader } from '../components/PageHeader';
+import { CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 
 const LOG_TAG: string = '[ArkDO][LevelProgress]';
 
 // 页面布局:两侧留白 12,卡片圆角/内距对齐 connect(--radius-lg 16 / --sp-4 16)。
-const PAGE_MARGIN: number = 12;
-const CARD_RADIUS: number = 16;
-const CARD_PADDING: number = 16;
 const SECTION_TOP: number = 20;
 const SECTION_BOTTOM: number = 16;
 

@@ -28,6 +28,7 @@ import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { TopicScrubber } from '../components/TopicScrubber';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
+import { SCRIM, SHADOW_SOFT } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
@@ -472,7 +473,7 @@ export struct TopicDetailPage {
       .width(52)
       .height(52)
       .backgroundColor(REPLY_BLUE)
-      .shadow({ radius: 8, color: '#33000000', offsetX: 0, offsetY: 2 })
+      .shadow({ radius: 8, color: SCRIM, offsetX: 0, offsetY: 2 })
       .margin({ right: 16, bottom: 16 })
       // 不对称过渡:出现(关闭浮层后)淡入;消失(打开浮层时)立即移除,被同时淡入的遮罩盖住,毫无痕迹。
       .transition(TransitionEffect.asymmetric(
@@ -499,7 +500,7 @@ export struct TopicDetailPage {
       .padding({ left: 12, right: 12, top: 6, bottom: 6 })
       .backgroundColor($r('app.color.surface_card'))
       .borderRadius(15)
-      .shadow({ radius: 6, color: '#22000000', offsetX: 0, offsetY: 1 })
+      .shadow({ radius: 6, color: SHADOW_SOFT, offsetX: 0, offsetY: 1 })
       .position({ x: '50%', y: 72 })
       .markAnchor({ x: '50%', y: 0 })
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))

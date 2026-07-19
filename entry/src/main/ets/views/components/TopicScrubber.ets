@@ -1,4 +1,5 @@
 // 右缘楼层 scrubber(Discourse timeline 风):竖向 Slider 直接拖动跳楼。
+import { ON_DARK_FG, SCRIM } from '../../common/theme/Palette';
 // 用原生 Slider 而非手写手势——拖动→值映射框架托管,已填充段天然表达阅读进度。
 // 顶=1 楼(最早),拖动时左侧气泡实时显示目标楼号,松手上抛跳楼。
 
@@ -104,19 +105,19 @@ export struct TopicScrubber {
               LoadingProgress()
                 .width(14)
                 .height(14)
-                .color('#FFFFFF')
+                .color(ON_DARK_FG)
                 .margin({ right: 6 })
             }
             Text(this.jumping ? `跳转到 ${this.jumpTarget} 楼` : `${this.sliderValue} 楼`)
               .fontSize(15)
               .fontWeight(FontWeight.Medium)
-              .fontColor('#FFFFFF')
+              .fontColor(ON_DARK_FG)
           }
           // 盒子已够宽,气泡按内容自然撑开、单行不换行(不再估算宽度)。
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
           .backgroundColor($r('app.color.brand'))
           .borderRadius(16)
-          .shadow({ radius: 8, color: '#33000000', offsetX: 0, offsetY: 2 })
+          .shadow({ radius: 8, color: SCRIM, offsetX: 0, offsetY: 2 })
           // 气泡右-中锚点落在 Slider 左侧一点、手柄中心高度处 → 气泡整体浮在手柄左边、与之等高。
           .markAnchor({ x: '100%', y: '50%' })
           .position({ x: this.bubbleAnchorX(), y: this.thumbCenterY() })

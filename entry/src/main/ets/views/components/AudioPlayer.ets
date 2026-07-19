@@ -5,6 +5,7 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { MediaPlaybackCoordinator } from '../../services/content/MediaPlaybackCoordinator';
 import { MediaSource } from '../../services/content/MediaSource';
 import { AppConstants } from '../../common/constants/AppConstants';
+import { BRAND_BLUE, ON_DARK_FG } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][AudioPlayer]';
 
@@ -62,14 +63,14 @@ export struct AudioPlayer {
           LoadingProgress()
             .width(22)
             .height(22)
-            .color('#FFFFFF')
+            .color(ON_DARK_FG)
         } else if (this.status === 'error') {
           Image($rawfile('fa_icons/circle-exclamation.svg'))
             .width(18)
             .height(18)
             .objectFit(ImageFit.Contain)
             .renderMode(ImageRenderMode.Template)
-            .fillColor('#FFFFFF')
+            .fillColor(ON_DARK_FG)
             .draggable(false)
         } else {
           Image(this.status === 'playing' ? $rawfile('fa_icons/pause.svg') : $rawfile('fa_icons/play.svg'))
@@ -77,14 +78,14 @@ export struct AudioPlayer {
             .height(16)
             .objectFit(ImageFit.Contain)
             .renderMode(ImageRenderMode.Template)
-            .fillColor('#FFFFFF')
+            .fillColor(ON_DARK_FG)
             .draggable(false)
         }
       }
       .width(40)
       .height(40)
       .borderRadius(20)
-      .backgroundColor(this.status === 'error' ? '#DC2626' : '#0088CC')
+      .backgroundColor(this.status === 'error' ? '#DC2626' : BRAND_BLUE)
       .onClick(() => {
         this.onPrimaryTap();
       })
@@ -98,8 +99,8 @@ export struct AudioPlayer {
         })
           .width('100%')
           .trackColor($r('app.color.border'))
-          .selectedColor('#0088CC')
-          .blockColor('#0088CC')
+          .selectedColor(BRAND_BLUE)
+          .blockColor(BRAND_BLUE)
           .trackThickness(3)
           .enabled(this.durationMs > 0)
           .onChange((value: number, mode: SliderChangeMode) => {

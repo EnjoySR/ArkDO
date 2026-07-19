@@ -5,14 +5,11 @@ import { DohSpeedTester, DohTestResult } from '../../services/network/DohSpeedTe
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { PageHeader } from '../components/PageHeader';
+import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 
 const LOG_TAG: string = '[ArkDO][DohPage]';
 
 // 与设置页同款鸿蒙卡片分组:灰底 + 无描边圆角卡片。
-const PAGE_MARGIN: number = 12;
-const CARD_RADIUS: number = 16;
-const CARD_PADDING: number = 16;
-const CARD_GAP: number = 12;
 
 // 测速状态机:每行独立驱动显示(用自身 @State 数组重建而非依赖深层字段变更)。
 enum RowTestState {

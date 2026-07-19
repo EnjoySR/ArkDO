@@ -1,8 +1,8 @@
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
+import { AMBER } from '../../common/theme/Palette';
 
 // 顶栏通知铃铛:有未读时显示实心铃铛 + 红色数字 Badge,并做"间歇式摇铃"动画;
 // 无未读时铃铛常驻(切描边静默态)、不挂红点、不晃动。点击回调交由外部接入通知页。
-const BELL_COLOR: string = '#F5A623';   // 铃铛统一用琥珀色实心;有无未读只以"红点+晃动"区分
 const BADGE_COLOR: string = '#F5222D';         // 红点/数字底色
 const SHAKE_PAUSE_MS: number = 3200;           // 每轮摇铃之间的停顿(间歇式,避免持续晃动的疲劳感)
 
@@ -43,7 +43,7 @@ export struct NotificationBell {
         Stack() {
           FaIconView({
             icon: this.bellIcon(),
-            color: BELL_COLOR,
+            color: AMBER,
             iconSize: 24
           })
         }
