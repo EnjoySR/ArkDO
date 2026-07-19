@@ -4,6 +4,10 @@ import { AuthService } from '../auth/AuthService';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { AppStateEventBus } from '../session/AppStateEventBus';
 import { NotificationEventBus } from './NotificationEventBus';
+import { MarkReadByTopicResult, NotificationApi } from './NotificationApi';
+
+// 私信/邀请进私信属高优先级未读(highPriority),标记已读时要连带把 highPriority 也减 1。
+const HIGH_PRIORITY_TYPES: number[] = [6, 7];
 
 const LOG_TAG: string = '[ArkDO][Notification]';
 // 前台轮询基准周期与抖动幅度:固定 45s 整节拍是 CF 行为分析的典型机器人特征,
@@ -17,6 +21,7 @@ const POLL_JITTER_RATIO: number = 0.2;
 // 否则头像会每 45s 闪一下 loading。后台自动停表,回前台再拉一次+续表。
 export class NotificationService {
   private authService: AuthService;
+  private api: NotificationApi;
   private started: boolean = false;
   private intervalId: number = -1;
   private unsubscribeAppState?: () => void = undefined;
@@ -25,6 +30,23 @@ export class NotificationService {
 
   constructor(bridge: JsonNetworkClient) {
     this.authService = new AuthService(bridge);
+    this.api = new NotificationApi(bridge);
+  }
+
+  // 点系统推送打开帖子时调用:把该帖对应楼层那条未读通知标记已读,并乐观地把铃铛未读数减 1。
+  // 即发即忘,失败静默——标不上(找不到匹配/网络失败)就维持现状,等下次轮询用服务端值覆盖,
+  // 绝不擅自改动铃铛(见 NotificationEventBus.decrementUnread 的 0/空窗保护)。
+  async markPushNotificationRead(topicId: number, postNumber?: number): Promise<void> {
+    try {
+      const result: MarkReadByTopicResult = await this.api.markReadByTopic(topicId, postNumber);
+      if (!result.marked) {
+        return;
+      }
+      const highPriority: boolean = HIGH_PRIORITY_TYPES.indexOf(result.notificationType) >= 0;
+      NotificationEventBus.decrementUnread(highPriority);
+    } catch (err) {
+      Log.i(`${LOG_TAG} markPushNotificationRead failed topicId=${topicId} error=${JSON.stringify(err)}`);
+    }
   }
 
   // 登录成功/会话确认后调用。重复调用安全:已启动则只补拉一次。

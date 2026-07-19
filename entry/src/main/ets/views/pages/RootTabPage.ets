@@ -1095,6 +1095,8 @@ export struct RootTabPage {
       // 再压栈,栈深恒为 2。否则连点多条推送会把详情页一层层摞上去,要按同样次数返回键才退得出来,
       // 且每层的 Web/MathJax 引擎都悬着不释放。窄屏时它内部自动回退到 openTopicDetailById。
       this.selectTopicFromMaster(target.topicId, undefined, route.title, target.postNumber, target.postNumber !== undefined);
+      // 点推送即视为已看这条通知:把它标为已读并把铃铛未读数减 1。即发即忘,不阻塞打开帖子。
+      this.markPushNotificationRead(target.topicId, target.postNumber);
       return;
     }
     if (target.kind === LinkTargetKind.USER && target.username !== undefined) {
@@ -1102,6 +1104,12 @@ export struct RootTabPage {
       return;
     }
     this.openWebPage(target.url, route.title);
+  }
+
+  // 点推送即视为看过这条通知:反查该帖对应通知并标记已读,同时把铃铛未读数乐观减 1。
+  // 委托给 notificationService(它持有 bridge 与未读数总线)。即发即忘,不阻塞打开帖子。
+  private markPushNotificationRead(topicId: number, postNumber?: number): void {
+    this.notificationService.markPushNotificationRead(topicId, postNumber);
   }
 
   // 附件下载:交给 host webview 的原生下载委托(带会话 Cookie、跟随重定向)。结果经 DownloadEventBus 回调。

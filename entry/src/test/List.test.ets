@@ -19,9 +19,7 @@ import categoryIndexTest from './CategoryIndex.test';
 import bookmarkServiceTest from './BookmarkService.test';
 import pushSubscriptionServiceTest from './PushSubscriptionService.test';
 import pushNotificationNavigationTest from './PushNotificationNavigation.test';
-<<<<<<< Updated upstream
-=======
->>>>>>> Stashed changes
+import notificationMarkReadTest from './NotificationMarkRead.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -44,7 +42,5 @@ export default function testsuite() {
   bookmarkServiceTest();
   pushSubscriptionServiceTest();
   pushNotificationNavigationTest();
-<<<<<<< Updated upstream
-=======
->>>>>>> Stashed changes
+  notificationMarkReadTest();
 }

@@ -60,6 +60,13 @@ interface NotificationVisual {
   hasActor: boolean; // false=系统类(无发起人),用系统图标圈代替头像
 }
 
+// markReadByTopic 结果:marked=是否确实标记了一条未读;notificationType=被标记通知的类型
+// (marked=false 时无意义),供上层判断高优先级(私信等)。
+export interface MarkReadByTopicResult {
+  marked: boolean;
+  notificationType: number;
+}
+
 export class NotificationApi {
   private bridge: JsonNetworkClient;
 
@@ -125,6 +132,58 @@ export class NotificationApi {
     });
     Log.i(`${LOG_TAG} markRead id=${id} success=${response.success}`);
     return response.success;
+  }
+
+  // 点系统推送打开帖子时,把该帖对应楼层那条"未读"通知标为已读。
+  // 走 /notifications.json 反查 id 再 mark-read,而不是走 /topics/timings——后者是唯一会被
+  // linux.do 针对性挡下(需手动过盾)的高频后台接口,拿它标已读不可靠;通知接口则正常。
+  // 推送 payload 只带 topic_id + post_number(无 notification_id),故只能反查。
+  //   postNumber 缺省(某些通知类型无楼层)时,退化为按 topicId 匹配首条未读。
+  // 返回:marked 仅当"确实找到一条未读并成功标记"为 true;notificationType 供上层判断
+  // 是否高优先级(私信等),据此决定铃铛的 highPriority 是否也减 1。
+  async markReadByTopic(topicId: number, postNumber?: number): Promise<MarkReadByTopicResult> {
+    if (topicId <= 0) {
+      return { marked: false, notificationType: 0 };
+    }
+    // 只需最近这一批即可覆盖刚到的推送;recent=false 避免顺带 bump seen 把整个红点清掉。
+    const listed: NetworkResult<NotificationItem[]> = await this.load(30, 0, false);
+    if (!listed.success || listed.data === undefined) {
+      Log.i(`${LOG_TAG} markReadByTopic load failed topicId=${topicId} status=${listed.statusCode}`);
+      return { marked: false, notificationType: 0 };
+    }
+
+    const target: NotificationItem | undefined = this.matchUnreadByTopic(listed.data, topicId, postNumber);
+    if (target === undefined) {
+      Log.i(`${LOG_TAG} markReadByTopic no unread match topicId=${topicId} post=${postNumber ?? -1}`);
+      return { marked: false, notificationType: 0 };
+    }
+
+    const ok: boolean = await this.markRead(target.id);
+    Log.i(`${LOG_TAG} markReadByTopic topicId=${topicId} post=${postNumber ?? -1} id=${target.id} type=${target.type} success=${ok}`);
+    return { marked: ok, notificationType: target.type };
+  }
+
+  private matchUnreadByTopic(items: NotificationItem[], topicId: number, postNumber?: number): NotificationItem | undefined {
+    let topicFallback: NotificationItem | undefined = undefined;
+    for (let index: number = 0; index < items.length; index++) {
+      const item: NotificationItem = items[index];
+      if (item.read || item.topicId !== topicId) {
+        continue;
+      }
+      // 优先精确命中楼层;命中即返回。
+      if (postNumber !== undefined && item.postNumber === postNumber) {
+        return item;
+      }
+      // 记住同帖首条未读作兜底(postNumber 缺省或楼层对不上时用)。
+      if (topicFallback === undefined) {
+        topicFallback = item;
+      }
+    }
+    // 指定了楼层却没精确命中:不硬套同帖别的通知,避免误标另一条未读。
+    if (postNumber !== undefined) {
+      return undefined;
+    }
+    return topicFallback;
   }
 
   // 全部标记已读(不带 id)。
