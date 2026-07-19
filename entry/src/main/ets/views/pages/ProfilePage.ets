@@ -24,11 +24,11 @@ import { BadgeTile } from '../components/BadgeTile';
 import { UserAvatar } from '../components/UserAvatar';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
+import { badgeHeadLabel, badgeRowFillers, badgeRowsOf, daysSince, formatCount, formatTimeRead, trustLabelOf } from '../../common/utils/ProfileFormat';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
 
 // Discourse 信任等级中文名(0-4),user.title 缺省时的兜底展示。
-const TRUST_LEVEL_NAMES: string[] = ['新用户', '基本用户', '成员', '活跃用户', '领导者'];
 
 // 鸿蒙设置页式卡片分组:灰底 + 无描边圆角卡片。
 // 页面两侧留白 12,卡片圆角 16,卡片内部留白 16,卡片间距 12。
@@ -204,13 +204,13 @@ export struct ProfilePage {
               Text(this.getUsernameLabel())
                 .fontSize(13)
                 .fontColor($r('app.color.text_secondary'))
-              if (this.getTrustLabel().length > 0) {
+              if (trustLabelOf(this.profileDetail).length > 0) {
                 Text(' · ')
                   .fontSize(13)
                   .fontColor($r('app.color.text_secondary'))
                 // 信任等级标做成可点药丸:tap 进等级进度页。
                 Row() {
-                  Text(this.getTrustLabel())
+                  Text(trustLabelOf(this.profileDetail))
                     .fontSize(13)
                     .fontWeight(FontWeight.Medium)
                     .fontColor($r('app.color.ld_accent'))
@@ -301,7 +301,7 @@ export struct ProfilePage {
 
       // 卡片 3:徽章
       Column() {
-        this.SectionHead(this.getBadgeHeadLabel(), '全部 ›', () => {
+        this.SectionHead(badgeHeadLabel(this.profileDetail?.badgeCount), '全部 ›', () => {
           if (this.getUsername().length > 0) {
             this.onOpenBadges(this.getUsername(), this.profileDetail?.badgeCount ?? 0);
           }
@@ -309,13 +309,13 @@ export struct ProfilePage {
         if (this.topBadges.length > 0) {
           // 摘要接口最多返回 6 枚,固定 3 列网格等分展示,不做横滑。
           Column() {
-            ForEach(this.getBadgeRows(), (row: UserBadgeItem[], rowIndex: number) => {
+            ForEach(badgeRowsOf(this.topBadges), (row: UserBadgeItem[], rowIndex: number) => {
               Row({ space: 8 }) {
                 ForEach(row, (badge: UserBadgeItem) => {
                   BadgeTile(badge, (tapped: UserBadgeItem) => {})
                 }, (badge: UserBadgeItem) => badge.id.toString())
                 // 不满 3 枚的行用透明占位补齐,保持等分列宽。
-                ForEach(this.getBadgeRowFillers(row), (filler: number) => {
+                ForEach(badgeRowFillers(row), (filler: number) => {
                   Column()
                     .layoutWeight(1)
                 }, (filler: number) => `filler_${filler}`)
@@ -396,19 +396,19 @@ export struct ProfilePage {
   private StatsGrid(stats: UserSummaryStats) {
     Column() {
       Row() {
-        this.StatCell(this.formatCount(stats.daysVisited), '访问天数')
-        this.StatCell(this.formatTimeRead(stats.timeReadSeconds), '阅读时长')
-        this.StatCell(this.formatCount(stats.likesReceived), '收到的赞')
-        this.StatCell(this.formatCount(stats.likesGiven), '送出的赞')
+        this.StatCell(formatCount(stats.daysVisited), '访问天数')
+        this.StatCell(formatTimeRead(stats.timeReadSeconds), '阅读时长')
+        this.StatCell(formatCount(stats.likesReceived), '收到的赞')
+        this.StatCell(formatCount(stats.likesGiven), '送出的赞')
       }
       .width('100%')
       .padding({ left: 8, right: 8, top: 14 })
 
       Row() {
-        this.StatCell(this.formatCount(stats.topicCount), '创建话题')
-        this.StatCell(this.formatCount(stats.postCount), '回复')
-        this.StatCell(this.formatCount(stats.topicsEntered), '浏览话题')
-        this.StatCell(stats.solvedCount !== undefined ? this.formatCount(stats.solvedCount) : '—', '解决方案')
+        this.StatCell(formatCount(stats.topicCount), '创建话题')
+        this.StatCell(formatCount(stats.postCount), '回复')
+        this.StatCell(formatCount(stats.topicsEntered), '浏览话题')
+        this.StatCell(stats.solvedCount !== undefined ? formatCount(stats.solvedCount) : '—', '解决方案')
       }
       .width('100%')
       .padding({ left: 8, right: 8, top: 16, bottom: CARD_PADDING })
@@ -855,18 +855,6 @@ export struct ProfilePage {
   }
 
   // 信任等级标签:优先站点头衔(user.title),否则用 TL 默认名;资料未加载完为空。
-  private getTrustLabel(): string {
-    const detail: UserProfileDetail | undefined = this.profileDetail;
-    if (!detail || detail.trustLevel === undefined) {
-      return '';
-    }
-    const levelName: string = detail.title && detail.title.length > 0
-      ? detail.title
-      : (detail.trustLevel >= 0 && detail.trustLevel < TRUST_LEVEL_NAMES.length
-        ? TRUST_LEVEL_NAMES[detail.trustLevel]
-        : '');
-    return levelName.length > 0 ? `TL${detail.trustLevel} ${levelName}` : `TL${detail.trustLevel}`;
-  }
 
   private getUserMetaLine(): string {
     const detail: UserProfileDetail | undefined = this.profileDetail;
@@ -874,7 +862,7 @@ export struct ProfilePage {
       return '';
     }
     const parts: string[] = [];
-    const joinedDays: number = this.daysSince(detail.createdAt);
+    const joinedDays: number = daysSince(detail.createdAt);
     if (joinedDays > 0) {
       parts.push(`加入 ${joinedDays} 天`);
     }
@@ -883,42 +871,24 @@ export struct ProfilePage {
       parts.push(`最近发帖 ${lastPosted}`);
     }
     if (detail.profileViewCount !== undefined && detail.profileViewCount > 0) {
-      parts.push(`浏览量 ${this.formatCount(detail.profileViewCount)}`);
+      parts.push(`浏览量 ${formatCount(detail.profileViewCount)}`);
     }
     return parts.join(' · ');
   }
 
   // 徽章按 3 枚一行分组。
-  private getBadgeRows(): UserBadgeItem[][] {
-    const rows: UserBadgeItem[][] = [];
-    for (let index: number = 0; index < this.topBadges.length; index += 3) {
-      rows.push(this.topBadges.slice(index, index + 3));
-    }
-    return rows;
-  }
 
   // 末行不足 3 枚时需要的占位数量([1]、[1,2] 之类,仅用于 ForEach 生成透明格)。
-  private getBadgeRowFillers(row: UserBadgeItem[]): number[] {
-    const fillers: number[] = [];
-    for (let index: number = row.length; index < 3; index++) {
-      fillers.push(index);
-    }
-    return fillers;
-  }
 
-  private getBadgeHeadLabel(): string {
-    const badgeCount: number | undefined = this.profileDetail?.badgeCount;
-    return badgeCount !== undefined && badgeCount > 0 ? `徽章 · ${badgeCount}` : '徽章';
-  }
 
   private getTopicsLinkLabel(): string {
     const count: number | undefined = this.summaryStats?.topicCount;
-    return count !== undefined ? `我的话题 ${this.formatCount(count)} ›` : '我的话题 ›';
+    return count !== undefined ? `我的话题 ${formatCount(count)} ›` : '我的话题 ›';
   }
 
   private getRepliesLinkLabel(): string {
     const count: number | undefined = this.summaryStats?.postCount;
-    return count !== undefined ? `我的回复 ${this.formatCount(count)} ›` : '我的回复 ›';
+    return count !== undefined ? `我的回复 ${formatCount(count)} ›` : '我的回复 ›';
   }
 
   private getDraftCount(): number {
@@ -946,38 +916,8 @@ export struct ProfilePage {
   }
 
   // 千位缩写:与 Discourse 列表一致(1.2k / 12k)。纯整数运算避免浮点尾差。
-  private formatCount(value: number): string {
-    if (value < 1000) {
-      return `${value}`;
-    }
-    if (value < 10000) {
-      const tenths: number = Math.floor(value / 100);
-      const whole: number = Math.floor(tenths / 10);
-      const frac: number = tenths % 10;
-      return frac === 0 ? `${whole}k` : `${whole}.${frac}k`;
-    }
-    return `${Math.floor(value / 1000)}k`;
-  }
 
-  private formatTimeRead(seconds: number): string {
-    if (seconds < 3600) {
-      return `${Math.max(1, Math.round(seconds / 60))}m`;
-    }
-    return `${Math.round(seconds / 3600)}h`;
-  }
 
-  private daysSince(iso?: string): number {
-    if (!iso || iso.length === 0) {
-      return 0;
-    }
-    const match: RegExpMatchArray | null = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (!match) {
-      return 0;
-    }
-    const thenMillis: number = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    const days: number = Math.floor((Date.now() - thenMillis) / 86400000);
-    return days > 0 ? days : 1;
-  }
 
   private openUserWebPage(subPath: string, title?: string): void {
     const username: string = this.getUsername();

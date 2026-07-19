@@ -21,6 +21,7 @@ import pushSubscriptionServiceTest from './PushSubscriptionService.test';
 import pushNotificationNavigationTest from './PushNotificationNavigation.test';
 import notificationMarkReadTest from './NotificationMarkRead.test';
 import htmlLexerTest from './HtmlLexer.test';
+import profileFormatTest from './ProfileFormat.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -45,4 +46,5 @@ export default function testsuite() {
   pushNotificationNavigationTest();
   notificationMarkReadTest();
   htmlLexerTest();
+  profileFormatTest();
 }

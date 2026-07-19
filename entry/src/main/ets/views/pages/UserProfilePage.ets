@@ -31,11 +31,11 @@ import { BadgeTile } from '../components/BadgeTile';
 import { UserAvatar } from '../components/UserAvatar';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
+import { badgeHeadLabel, badgeRowFillers, badgeRowsOf, formatCount, formatJoinDate, formatTimeRead, trustLabelOf } from '../../common/utils/ProfileFormat';
 
 const LOG_TAG: string = '[ArkDO][UserProfile]';
 
 // Discourse 信任等级中文名(0-4),user.title 缺省时的兜底展示。与「我的」页同源。
-const TRUST_LEVEL_NAMES: string[] = ['新用户', '基本用户', '成员', '活跃用户', '领导者'];
 
 // 带全息闪动特效的称号(与 TopicPostItem 的 HOLOGRAPHIC_TITLES 保持一致)。
 const HOLOGRAPHIC_TITLES: Set<string> = new Set<string>(['Premium', '种子用户', '破界者']);
@@ -508,8 +508,8 @@ export struct UserProfilePage {
           .alignItems(VerticalAlign.Center)
 
           // 信任等级单独一行(他人页只是标签,不可点)。
-          if (this.getTrustLabel().length > 0) {
-            Text(this.getTrustLabel())
+          if (trustLabelOf(this.profileDetail).length > 0) {
+            Text(trustLabelOf(this.profileDetail))
               .fontSize(12)
               .fontColor($r('app.color.text_secondary'))
               .backgroundColor($r('app.color.surface_muted'))
@@ -594,24 +594,24 @@ export struct UserProfilePage {
   private StatsGrid(stats: UserSummaryStats) {
     Column() {
       Row() {
-        this.StatCell(this.formatCount(stats.daysVisited), '访问天数')
-        this.StatCell(this.formatTimeRead(stats.timeReadSeconds), '阅读时长')
-        this.StatCell(this.formatCount(stats.likesReceived), '收到的赞')
-        this.StatCell(this.formatCount(stats.likesGiven), '送出的赞')
+        this.StatCell(formatCount(stats.daysVisited), '访问天数')
+        this.StatCell(formatTimeRead(stats.timeReadSeconds), '阅读时长')
+        this.StatCell(formatCount(stats.likesReceived), '收到的赞')
+        this.StatCell(formatCount(stats.likesGiven), '送出的赞')
       }
       .width('100%')
       .padding({ left: 8, right: 8, top: 14 })
 
       Row() {
-        this.StatCell(this.formatCount(stats.topicCount), '创建话题')
-        this.StatCell(this.formatCount(stats.postCount), '回复')
-        this.StatCell(this.formatCount(stats.topicsEntered), '浏览话题')
+        this.StatCell(formatCount(stats.topicCount), '创建话题')
+        this.StatCell(formatCount(stats.postCount), '回复')
+        this.StatCell(formatCount(stats.topicsEntered), '浏览话题')
         // 唯一可点的统计格:被采纳的答案是能力硬证据,也是四个插件页里唯一值得做的。
         // 其余七格只是数字,不做入口——否则每格都像按钮。
         if (this.getSolvedCount() > 0) {
-          this.SolvedCell(this.formatCount(this.getSolvedCount()))
+          this.SolvedCell(formatCount(this.getSolvedCount()))
         } else {
-          this.StatCell(stats.solvedCount !== undefined ? this.formatCount(stats.solvedCount) : '—', '解决方案')
+          this.StatCell(stats.solvedCount !== undefined ? formatCount(stats.solvedCount) : '—', '解决方案')
         }
       }
       .width('100%')
@@ -777,7 +777,7 @@ export struct UserProfilePage {
     Row() {
       FaIconView({ icon: this.faIcon('heart'), iconSize: 12, color: LIKE_HEART_RED })
         .margin({ right: 3 })
-      Text(this.formatCount(count))
+      Text(formatCount(count))
         .fontSize(12)
         .fontColor($r('app.color.text_faint'))
     }
@@ -1003,19 +1003,19 @@ export struct UserProfilePage {
   @Builder
   private BadgesCard() {
     Column() {
-      this.SectionHead(this.getBadgeHeadLabel(), '全部 ›', () => {
+      this.SectionHead(badgeHeadLabel(this.profileDetail?.badgeCount), '全部 ›', () => {
         this.onOpenBadges(this.username, this.profileDetail?.badgeCount ?? 0);
       })
       if (this.getTopBadges().length > 0) {
         // 摘要接口最多返回几枚,固定 3 列网格等分展示,不做横滑。与「我的」页一致。
         Column() {
-          ForEach(this.getBadgeRows(), (row: UserBadgeItem[], rowIndex: number) => {
+          ForEach(badgeRowsOf(this.getTopBadges()), (row: UserBadgeItem[], rowIndex: number) => {
             Row({ space: 8 }) {
               ForEach(row, (badge: UserBadgeItem) => {
                 BadgeTile(badge, (tapped: UserBadgeItem) => {})
               }, (badge: UserBadgeItem) => badge.id.toString())
               // 不满 3 枚的行用透明占位补齐,保持等分列宽。
-              ForEach(this.getBadgeRowFillers(row), (filler: number) => {
+              ForEach(badgeRowFillers(row), (filler: number) => {
                 Column()
                   .layoutWeight(1)
               }, (filler: number) => `filler_${filler}`)
@@ -1398,16 +1398,6 @@ export struct UserProfilePage {
   }
 
   // 信任等级标签:优先站点头衔(user.title),否则用 TL 默认名。与「我的」页同格式。
-  private getTrustLabel(): string {
-    const detail: UserProfileDetail | undefined = this.profileDetail;
-    if (!detail || detail.trustLevel === undefined) {
-      return '';
-    }
-    const levelName: string = detail.trustLevel >= 0 && detail.trustLevel < TRUST_LEVEL_NAMES.length
-      ? TRUST_LEVEL_NAMES[detail.trustLevel]
-      : '';
-    return levelName.length > 0 ? `TL${detail.trustLevel} ${levelName}` : `TL${detail.trustLevel}`;
-  }
 
   private getUserMetaLine(): string {
     const detail: UserProfileDetail | undefined = this.profileDetail;
@@ -1415,7 +1405,7 @@ export struct UserProfilePage {
       return '';
     }
     const parts: string[] = [];
-    const joinDate: string = this.formatJoinDate(detail.createdAt);
+    const joinDate: string = formatJoinDate(detail.createdAt);
     if (joinDate.length > 0) {
       parts.push(`加入于 ${joinDate}`);
     }
@@ -1424,7 +1414,7 @@ export struct UserProfilePage {
       parts.push(`最近发帖 ${lastPosted}`);
     }
     if (detail.profileViewCount !== undefined && detail.profileViewCount > 0) {
-      parts.push(`浏览量 ${this.formatCount(detail.profileViewCount)}`);
+      parts.push(`浏览量 ${formatCount(detail.profileViewCount)}`);
     }
     return parts.join(' · ');
   }
@@ -1463,28 +1453,9 @@ export struct UserProfilePage {
   }
 
   // 徽章按 3 枚一行分组。
-  private getBadgeRows(): UserBadgeItem[][] {
-    const badges: UserBadgeItem[] = this.getTopBadges();
-    const rows: UserBadgeItem[][] = [];
-    for (let index: number = 0; index < badges.length; index += 3) {
-      rows.push(badges.slice(index, index + 3));
-    }
-    return rows;
-  }
 
   // 末行不足 3 枚时需要的占位数量。
-  private getBadgeRowFillers(row: UserBadgeItem[]): number[] {
-    const fillers: number[] = [];
-    for (let index: number = row.length; index < 3; index++) {
-      fillers.push(index);
-    }
-    return fillers;
-  }
 
-  private getBadgeHeadLabel(): string {
-    const badgeCount: number | undefined = this.profileDetail?.badgeCount;
-    return badgeCount !== undefined && badgeCount > 0 ? `徽章 · ${badgeCount}` : '徽章';
-  }
 
   private getCategoryFor(categoryId?: number): TopicCategory | undefined {
     return CategoryIndex.find(this.categories, categoryId);
@@ -1499,38 +1470,7 @@ export struct UserProfilePage {
   }
 
   // 千位缩写:与 Discourse 列表一致(1.2k / 12k)。纯整数运算避免浮点尾差。
-  private formatCount(value: number): string {
-    if (value < 1000) {
-      return `${value}`;
-    }
-    if (value < 10000) {
-      const tenths: number = Math.floor(value / 100);
-      const whole: number = Math.floor(tenths / 10);
-      const frac: number = tenths % 10;
-      return frac === 0 ? `${whole}k` : `${whole}.${frac}k`;
-    }
-    return `${Math.floor(value / 1000)}k`;
-  }
 
-  private formatTimeRead(seconds: number): string {
-    if (seconds < 3600) {
-      return `${Math.max(1, Math.round(seconds / 60))}m`;
-    }
-    return `${Math.round(seconds / 3600)}h`;
-  }
 
   // 加入日期:createdAt 形如 2024-01-18T… → 「2024年1月18日」。前导零去掉。
-  private formatJoinDate(iso?: string): string {
-    if (!iso || iso.length === 0) {
-      return '';
-    }
-    const match: RegExpMatchArray | null = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (!match) {
-      return '';
-    }
-    const year: number = Number(match[1]);
-    const month: number = Number(match[2]);
-    const day: number = Number(match[3]);
-    return `${year}年${month}月${day}日`;
-  }
 }
