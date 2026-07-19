@@ -8,6 +8,7 @@ import { DownloadEventBus } from '../content/DownloadEventBus';
 import { detectChallenge } from './ChallengeDetector';
 import { FileLogger } from '../logging/FileLogger';
 import { ChallengeState, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from './NetworkTypes';
+import { buildCsrfScript } from './webscript/CsrfScriptTemplate';
 
 const REQUEST_ID_TOKEN: string = '__ARKDO_REQUEST_ID__';
 // 媒体下载兜底超时:委托始终不回调(如 URL 无效/挑战未过)时,自愈拒绝以免播放器永久转圈。
@@ -779,209 +780,68 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     })();`;
   }
 
-  // 表单请求脚本(POST/PUT/DELETE + application/x-www-form-urlencoded body)。method 由入参决定。
   private createFormScript(method: string, path: string, body: string, referrer: string): string {
-    const encodedPath: string = JSON.stringify(path);
-    const encodedBody: string = JSON.stringify(body);
-    const encodedReferrer: string = JSON.stringify(referrer);
-    const encodedMethod: string = JSON.stringify(method);
-
-    // 同源脚本:先取 CSRF token(优先 /session/csrf.json,兜底页面 meta),再带头发请求。
-    // cookie 靠 credentials:'include' 自动携带;结果照旧走 window.ArkDOBridge.onJsonResult。
-    return `(() => {
-      const requestId = '${REQUEST_ID_TOKEN}';
-      const requestUrl = new URL(${encodedPath}, window.location.origin);
-      let csrfSource = 'none';
-      let csrfLength = 0;
-      const fail = (error) => {
-        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-          statusCode: 0,
-          contentType: '',
-          body: '',
-          errorMessage: String(error),
-          csrfSource: csrfSource,
-          csrfLength: csrfLength
-        }));
-      };
-      const metaCsrf = () => {
-        const el = document.querySelector('meta[name="csrf-token"]');
-        return el ? (el.getAttribute('content') || '') : '';
-      };
-      const readCsrf = () => {
-        return fetch(new URL('/session/csrf.json', window.location.origin).toString(), {
-          credentials: 'include',
-          cache: 'no-store',
-          headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
-        }).then((r) => r.json()).then((j) => (j && j.csrf) ? j.csrf : '').catch(() => '');
-      };
-      Promise.resolve(readCsrf()).then((token) => {
-        let csrf = token;
-        csrfSource = token ? 'session' : 'none';
-        if (!csrf) {
-          csrf = metaCsrf();
-          csrfSource = csrf ? 'meta' : 'none';
-        }
-        csrfLength = csrf ? csrf.length : 0;
-        const fetchOptions = {
-          method: ${encodedMethod},
-          credentials: 'include',
-          cache: 'no-store',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'Accept': '*/*',
-            'X-CSRF-Token': csrf,
-            'X-Requested-With': 'XMLHttpRequest',
-            'X-SILENCE-LOGGER': 'true',
-            'Discourse-Background': 'true',
-            'Discourse-Present': 'true',
-            'Discourse-Logged-In': 'true'
-          },
-          body: ${encodedBody}
-        };
-        // 把 Referer 设成同源帖子页(对齐官方请求),让 CF 不再把这条后台请求当异常。
-        const _ref = ${encodedReferrer};
-        if (_ref) {
-          fetchOptions.referrer = _ref;
-          fetchOptions.referrerPolicy = 'strict-origin-when-cross-origin';
-        }
-        return fetch(requestUrl.toString(), fetchOptions);
-      }).then((response) => {
-        response.text().then((body) => {
-          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-            statusCode: response.status,
-            contentType: response.headers.get('content-type') || '',
-            body: body,
-            csrfSource: csrfSource,
-            csrfLength: csrfLength
-          }));
-        }).catch(fail);
-      }).catch(fail);
-      return requestId;
-    })();`;
+    // 表单写请求(timings / 点赞 / 投票等)。X-SILENCE-LOGGER + Discourse-Background 是
+    // 后台静默请求的标记,照抓包对齐,勿删勿重排。
+    return buildCsrfScript({
+      requestIdToken: REQUEST_ID_TOKEN,
+      urlExpr: JSON.stringify(path),
+      methodExpr: JSON.stringify(method),
+      headerLines: [
+        "'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'",
+        "'Accept': '*/*'",
+        "'X-CSRF-Token': csrf",
+        "'X-Requested-With': 'XMLHttpRequest'",
+        "'X-SILENCE-LOGGER': 'true'",
+        "'Discourse-Background': 'true'",
+        "'Discourse-Present': 'true'",
+        "'Discourse-Logged-In': 'true'"
+      ],
+      prelude: '',
+      bodyExpr: JSON.stringify(body),
+      referrerExpr: JSON.stringify(referrer)
+    });
   }
 
-  // 发表评论/回复:POST /posts,Content-Type application/json,body 为 JSON 字符串。
-  // 头部对齐抓包的关键字段:x-csrf-token、x-requested-with、discourse-present、discourse-logged-in、accept:*/*。
-  // cookie 靠 credentials:'include' 自动携带;CSRF 同源优先 /session/csrf.json,兜底页面 meta。
   private createPostJsonScript(path: string, body: string, referrer: string): string {
-    const encodedPath: string = JSON.stringify(path);
-    const encodedBody: string = JSON.stringify(body);
-    const encodedReferrer: string = JSON.stringify(referrer);
-
-    return `(() => {
-      const requestId = '${REQUEST_ID_TOKEN}';
-      const requestUrl = new URL(${encodedPath}, window.location.origin);
-      let csrfSource = 'none';
-      let csrfLength = 0;
-      const fail = (error) => {
-        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-          statusCode: 0,
-          contentType: '',
-          body: '',
-          errorMessage: String(error),
-          csrfSource: csrfSource,
-          csrfLength: csrfLength
-        }));
-      };
-      const metaCsrf = () => {
-        const el = document.querySelector('meta[name="csrf-token"]');
-        return el ? (el.getAttribute('content') || '') : '';
-      };
-      const readCsrf = () => {
-        return fetch(new URL('/session/csrf.json', window.location.origin).toString(), {
-          credentials: 'include',
-          cache: 'no-store',
-          headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
-        }).then((r) => r.json()).then((j) => (j && j.csrf) ? j.csrf : '').catch(() => '');
-      };
-      Promise.resolve(readCsrf()).then((token) => {
-        let csrf = token;
-        csrfSource = token ? 'session' : 'none';
-        if (!csrf) {
-          csrf = metaCsrf();
-          csrfSource = csrf ? 'meta' : 'none';
-        }
-        csrfLength = csrf ? csrf.length : 0;
-        const fetchOptions = {
-          method: 'POST',
-          credentials: 'include',
-          cache: 'no-store',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': '*/*',
-            'X-CSRF-Token': csrf,
-            'X-Requested-With': 'XMLHttpRequest',
-            'Discourse-Present': 'true',
-            'Discourse-Logged-In': 'true'
-          },
-          body: ${encodedBody}
-        };
-        const _ref = ${encodedReferrer};
-        if (_ref) {
-          fetchOptions.referrer = _ref;
-          fetchOptions.referrerPolicy = 'strict-origin-when-cross-origin';
-        }
-        return fetch(requestUrl.toString(), fetchOptions);
-      }).then((response) => {
-        response.text().then((body) => {
-          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-            statusCode: response.status,
-            contentType: response.headers.get('content-type') || '',
-            body: body,
-            csrfSource: csrfSource,
-            csrfLength: csrfLength
-          }));
-        }).catch(fail);
-      }).catch(fail);
-      return requestId;
-    })();`;
+    // 发表评论/回复:POST /posts,application/json。
+    // 这是用户主动发起的前台请求,故不带 X-SILENCE-LOGGER / Discourse-Background。
+    return buildCsrfScript({
+      requestIdToken: REQUEST_ID_TOKEN,
+      urlExpr: JSON.stringify(path),
+      methodExpr: "'POST'",
+      headerLines: [
+        "'Content-Type': 'application/json'",
+        "'Accept': '*/*'",
+        "'X-CSRF-Token': csrf",
+        "'X-Requested-With': 'XMLHttpRequest'",
+        "'Discourse-Present': 'true'",
+        "'Discourse-Logged-In': 'true'"
+      ],
+      prelude: '',
+      bodyExpr: JSON.stringify(body),
+      referrerExpr: JSON.stringify(referrer)
+    });
   }
 
-  // 图片上传脚本:base64 → Uint8Array → Blob → FormData,POST /uploads.json。
-  // 复用同源 CSRF(优先 /session/csrf.json,兜底 meta)+ credentials:'include' 带 cookie。
-  // 关键:FormData 不能手动设 Content-Type,否则丢失 multipart boundary 导致后端解析失败。
-  // 字段对齐 Discourse composer 上传:upload_type=composer、name、type、file。
   private createUploadScript(base64: string, fileName: string, mimeType: string, referrer: string): string {
     const encodedBase64: string = JSON.stringify(base64);
     const encodedFileName: string = JSON.stringify(fileName);
     const encodedMimeType: string = JSON.stringify(mimeType);
-    const encodedReferrer: string = JSON.stringify(referrer);
-
-    return `(() => {
-      const requestId = '${REQUEST_ID_TOKEN}';
-      const requestUrl = new URL('/uploads.json', window.location.origin);
-      let csrfSource = 'none';
-      let csrfLength = 0;
-      const fail = (error) => {
-        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-          statusCode: 0,
-          contentType: '',
-          body: '',
-          errorMessage: String(error),
-          csrfSource: csrfSource,
-          csrfLength: csrfLength
-        }));
-      };
-      const metaCsrf = () => {
-        const el = document.querySelector('meta[name="csrf-token"]');
-        return el ? (el.getAttribute('content') || '') : '';
-      };
-      const readCsrf = () => {
-        return fetch(new URL('/session/csrf.json', window.location.origin).toString(), {
-          credentials: 'include',
-          cache: 'no-store',
-          headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
-        }).then((r) => r.json()).then((j) => (j && j.csrf) ? j.csrf : '').catch(() => '');
-      };
-      Promise.resolve(readCsrf()).then((token) => {
-        let csrf = token;
-        csrfSource = token ? 'session' : 'none';
-        if (!csrf) {
-          csrf = metaCsrf();
-          csrfSource = csrf ? 'meta' : 'none';
-        }
-        csrfLength = csrf ? csrf.length : 0;
-        const binary = atob(${encodedBase64});
+    // 图片上传:base64 → Uint8Array → Blob → FormData。
+    // 刻意不设 Content-Type——FormData 要由浏览器自己写 multipart boundary,手设会破坏分隔符。
+    return buildCsrfScript({
+      requestIdToken: REQUEST_ID_TOKEN,
+      urlExpr: "'/uploads.json'",
+      methodExpr: "'POST'",
+      headerLines: [
+        "'Accept': '*/*'",
+        "'X-CSRF-Token': csrf",
+        "'X-Requested-With': 'XMLHttpRequest'",
+        "'Discourse-Present': 'true'",
+        "'Discourse-Logged-In': 'true'"
+      ],
+      prelude: `        const binary = atob(${encodedBase64});
         const len = binary.length;
         const bytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) { bytes[i] = binary.charCodeAt(i); }
@@ -992,113 +852,31 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
         fd.append('name', ${encodedFileName});
         fd.append('type', ${encodedMimeType});
         fd.append('file', blob, ${encodedFileName});
-        const fetchOptions = {
-          method: 'POST',
-          credentials: 'include',
-          cache: 'no-store',
-          headers: {
-            'Accept': '*/*',
-            'X-CSRF-Token': csrf,
-            'X-Requested-With': 'XMLHttpRequest',
-            'Discourse-Present': 'true',
-            'Discourse-Logged-In': 'true'
-          },
-          body: fd
-        };
-        const _ref = ${encodedReferrer};
-        if (_ref) {
-          fetchOptions.referrer = _ref;
-          fetchOptions.referrerPolicy = 'strict-origin-when-cross-origin';
-        }
-        return fetch(requestUrl.toString(), fetchOptions);
-      }).then((response) => {
-        response.text().then((body) => {
-          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-            statusCode: response.status,
-            contentType: response.headers.get('content-type') || '',
-            body: body,
-            csrfSource: csrfSource,
-            csrfLength: csrfLength
-          }));
-        }).catch(fail);
-      }).catch(fail);
-      return requestId;
-    })();`;
+`,
+      bodyExpr: 'fd',
+      referrerExpr: JSON.stringify(referrer)
+    });
   }
 
-  // discourse-reactions 的 toggle 是 PUT + 空 body。复用 POST 那套同源取 CSRF + 带 cookie 的逻辑,
-  // 仅改 method 为 PUT、不带 body、不设 Content-Type(对齐官方请求的空 body)。
   private createPutScript(path: string, referrer: string): string {
-    const encodedPath: string = JSON.stringify(path);
-    const encodedReferrer: string = JSON.stringify(referrer);
-
-    return `(() => {
-      const requestId = '${REQUEST_ID_TOKEN}';
-      const requestUrl = new URL(${encodedPath}, window.location.origin);
-      let csrfSource = 'none';
-      let csrfLength = 0;
-      const fail = (error) => {
-        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-          statusCode: 0,
-          contentType: '',
-          body: '',
-          errorMessage: String(error),
-          csrfSource: csrfSource,
-          csrfLength: csrfLength
-        }));
-      };
-      const metaCsrf = () => {
-        const el = document.querySelector('meta[name="csrf-token"]');
-        return el ? (el.getAttribute('content') || '') : '';
-      };
-      const readCsrf = () => {
-        return fetch(new URL('/session/csrf.json', window.location.origin).toString(), {
-          credentials: 'include',
-          cache: 'no-store',
-          headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
-        }).then((r) => r.json()).then((j) => (j && j.csrf) ? j.csrf : '').catch(() => '');
-      };
-      Promise.resolve(readCsrf()).then((token) => {
-        let csrf = token;
-        csrfSource = token ? 'session' : 'none';
-        if (!csrf) {
-          csrf = metaCsrf();
-          csrfSource = csrf ? 'meta' : 'none';
-        }
-        csrfLength = csrf ? csrf.length : 0;
-        const fetchOptions = {
-          method: 'PUT',
-          credentials: 'include',
-          cache: 'no-store',
-          headers: {
-            'Accept': '*/*',
-            'X-CSRF-Token': csrf,
-            'X-Requested-With': 'XMLHttpRequest',
-            'X-SILENCE-LOGGER': 'true',
-            'Discourse-Background': 'true',
-            'Discourse-Present': 'true',
-            'Discourse-Logged-In': 'true'
-          }
-        };
-        const _ref = ${encodedReferrer};
-        if (_ref) {
-          fetchOptions.referrer = _ref;
-          fetchOptions.referrerPolicy = 'strict-origin-when-cross-origin';
-        }
-        return fetch(requestUrl.toString(), fetchOptions);
-      }).then((response) => {
-        response.text().then((body) => {
-          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-            statusCode: response.status,
-            contentType: response.headers.get('content-type') || '',
-            body: body,
-            csrfSource: csrfSource,
-            csrfLength: csrfLength
-          }));
-        }).catch(fail);
-      }).catch(fail);
-      return requestId;
-    })();`;
+    // 空 body 的 PUT(书签等)。不带 body,故 headers 收尾无逗号。
+    return buildCsrfScript({
+      requestIdToken: REQUEST_ID_TOKEN,
+      urlExpr: JSON.stringify(path),
+      methodExpr: "'PUT'",
+      headerLines: [
+        "'Accept': '*/*'",
+        "'X-CSRF-Token': csrf",
+        "'X-Requested-With': 'XMLHttpRequest'",
+        "'X-SILENCE-LOGGER': 'true'",
+        "'Discourse-Background': 'true'",
+        "'Discourse-Present': 'true'",
+        "'Discourse-Logged-In': 'true'"
+      ],
+      prelude: '',
+      bodyExpr: '',
+      referrerExpr: JSON.stringify(referrer)
+    });
   }
 
   private ensureWebviewExecutor(controller: webview.WebviewController): WebviewJsonExecutor {
