@@ -15,6 +15,11 @@ import { LINUXDO_TAG_ICONS_RAWFILE, loadTagIconsFromRawContent } from '../views/
 import { LINUXDO_EMOJIS_RAWFILE, loadEmojiUrlsFromRawContent } from '../views/components/EmojiUrlRegistry';
 import { ArkWebNetworkBridge } from '../services/network/ArkWebNetworkBridge';
 import { LoginGate } from '../services/session/LoginGate';
+import { parsePushNotificationRouteFromParameters, PushNotificationRoute, describePushNotificationRoute } from '../services/push/PushNotificationNavigation';
+import { PushNotificationNavigationEventBus } from '../services/push/PushNotificationNavigationEventBus';
+import { PushTokenUpdateEventBus } from '../services/push/PushTokenUpdateEventBus';
+import { loadPushRelayConfigFromRawContent, PUSH_RELAY_CONFIG_RAWFILE } from '../services/push/PushRelayConfig';
+import { pushService } from '@kit.PushKit';
 
 const DOMAIN = 0x0000;
 
@@ -24,6 +29,7 @@ export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     // 日志系统须最先初始化,后续经 Log 门面写入的日志才能落盘。
     FileLogger.init(this.context);
+    this.handlePushNotificationWant(want, 'onCreate');
     // 计时锚点①:应用启动。与首页帖子列表开始加载的日志配对,测量冷启动到首屏拉取的耗时。
     Log.i(`[ArkDO][Startup] stage=appOnCreate ts=${Date.now()}`);
     this.registerCrashHandler();
@@ -45,7 +51,14 @@ export default class EntryAbility extends UIAbility {
     this.loadIconAssets();
     // 冷启动清空音视频缓存目录,避免下载文件无限堆积占存储。
     ArkWebNetworkBridge.clearMediaCacheDir(this.context);
+    this.loadPushRelayConfig();
+    this.registerPushTokenUpdate();
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+  }
+
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onNewWant');
+    this.handlePushNotificationWant(want, 'onNewWant');
   }
 
   onDestroy(): void {
@@ -148,6 +161,47 @@ export default class EntryAbility extends UIAbility {
     } catch (err) {
       hilog.error(DOMAIN, 'testTag', 'Failed to load Linux.do emoji urls. Cause: %{public}s',
         JSON.stringify(err));
+    }
+  }
+
+  // 载入随包的中继配置(relay-config.json,不进版本控制)。文件缺失属正常情况——
+  // 自行编译且未配置中继时推送不可用,其余功能照常,故只记日志不报错。
+  private loadPushRelayConfig(): void {
+    try {
+      const rawContent: Uint8Array = this.context.resourceManager.getRawFileContentSync(PUSH_RELAY_CONFIG_RAWFILE);
+      const configured: boolean = loadPushRelayConfigFromRawContent(rawContent);
+      Log.i(`[ArkDO][EntryAbility] push relay config loaded configured=${configured}`);
+    } catch (err) {
+      Log.i(`[ArkDO][EntryAbility] push relay config absent, push disabled unless set in settings`);
+    }
+  }
+
+  // 设备 Push Token 轮换(重装/恢复出厂/系统侧刷新)后,中继里存的旧 token 就投不到本机了,
+  // 推送会静默失效。这里只负责接住事件并广播,真正的重新登记由 RootTabPage 做(它才有登录态)。
+  // 监听须挂在 UIAbility 上:pushService.on('tokenUpdate', ...) 要求传 Ability 实例。
+  private registerPushTokenUpdate(): void {
+    try {
+      pushService.on('tokenUpdate', this, (token: string) => {
+        Log.i(`[ArkDO][EntryAbility] push tokenUpdate tokenLength=${token.length}`);
+        PushTokenUpdateEventBus.publish();
+      });
+    } catch (err) {
+      const error: BusinessError = err as BusinessError;
+      Log.i(`[ArkDO][EntryAbility] push tokenUpdate subscribe failed code=${error.code} message=${error.message ?? ''}`);
+    }
+  }
+
+  private handlePushNotificationWant(want: Want, source: string): void {
+    try {
+      const route: PushNotificationRoute | undefined = parsePushNotificationRouteFromParameters(want.parameters);
+      if (!route) {
+        Log.i(`[ArkDO][EntryAbility] push ${source} no route`);
+        return;
+      }
+      Log.i(`[ArkDO][EntryAbility] push ${source} route path=${describePushNotificationRoute(route)}`);
+      PushNotificationNavigationEventBus.publish(route);
+    } catch (err) {
+      Log.i(`[ArkDO][EntryAbility] push ${source} parse failed error=${JSON.stringify(err)}`);
     }
   }
 }

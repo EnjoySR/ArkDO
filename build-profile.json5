@@ -7,11 +7,11 @@
         "material": {
           "certpath": "/Users/yinqiaoyin/.ohos/config/default_ArkDO_7SwBTh9njXhEEbHR_meG0ZBrHPUoaEkQVnKhXnKzG48=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001BD5D0FF4021A308327FBEF1622DCC7D5BE08E036D814814F82E2A8C53739CE0CE6DB935213B9F28",
+          "keyPassword": "0000001B4122779D5DFB7367952AE21B900A9BF86D0DAEFE3BA23EC9AA524C96A6C08690CAA5CC1EC4D034",
           "profile": "/Users/yinqiaoyin/.ohos/config/default_ArkDO_7SwBTh9njXhEEbHR_meG0ZBrHPUoaEkQVnKhXnKzG48=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "/Users/yinqiaoyin/.ohos/config/default_ArkDO_7SwBTh9njXhEEbHR_meG0ZBrHPUoaEkQVnKhXnKzG48=.p12",
-          "storePassword": "0000001B34D0EBCA05057F8F478E05C60DF5FE177737699D2E1F43A4055DDFE70E995E024C39CA0C1027AA"
+          "storePassword": "0000001BF8629AE24B5E4E7B1053C76480170D87605841E35BF6D145C289270AD3B36E88AD021DE34220E1"
         }
       }
     ],
@@ -32,10 +32,21 @@
     ],
     "buildModeSet": [
       {
-        "name": "debug",
+        "name": "debug"
       },
       {
         "name": "release"
+      }
+    ],
+    "capabilities": [
+      {
+        "bundleName": "com.joeyyin.arkdo",
+        "config": [
+          {
+            "name": "Push Kit",
+            "capability": "com.huawei.service.push.base_service"
+          }
+        ]
       }
     ]
   },

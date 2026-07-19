@@ -17,6 +17,11 @@ import userProfileServiceTest from './UserProfileService.test';
 import userRelationServiceTest from './UserRelationService.test';
 import categoryIndexTest from './CategoryIndex.test';
 import bookmarkServiceTest from './BookmarkService.test';
+import pushSubscriptionServiceTest from './PushSubscriptionService.test';
+import pushNotificationNavigationTest from './PushNotificationNavigation.test';
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
 
 export default function testsuite() {
   localUnitTest();
@@ -37,4 +42,9 @@ export default function testsuite() {
   userRelationServiceTest();
   categoryIndexTest();
   bookmarkServiceTest();
+  pushSubscriptionServiceTest();
+  pushNotificationNavigationTest();
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
 }

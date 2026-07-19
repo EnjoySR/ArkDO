@@ -62,6 +62,9 @@ export struct ProfilePage {
   onOpenBookmarks: (username: string) => void = () => {};
   // 草稿已原生化:进原生草稿页而非 Web。
   onOpenDrafts: (username: string) => void = () => {};
+  // 登出前的系统推送清理(退订 linux.do + 解绑中继)。由 RootTabPage 注入,必须在 logout
+  // 请求之前 await 完:登出后没了登录 cookie 就退不掉订阅,本机会继续收到该账号的推送。
+  onLogoutCleanup: () => Promise<void> = async () => {};
   // 用户动态列表(我的话题/回复/点赞/最近活动全部)已原生化:filter 见 UserActionType。
   onOpenActivity: (username: string, filter: string, title: string) => void = () => {};
   // 全部徽章页已原生化:数据取自 /user-badges/{username}.json。
@@ -821,6 +824,13 @@ export struct ProfilePage {
       return;
     }
     this.isLoggingOut = true;
+    // 先退推送订阅再登出:顺序不能颠倒——linux.do 退订要带登录 cookie。清理内部已吞掉
+    // 所有异常,失败也不该拦住用户登出。
+    try {
+      await this.onLogoutCleanup();
+    } catch (err) {
+      Log.i(`${LOG_TAG} logout push cleanup failed error=${JSON.stringify(err)}`);
+    }
     const result: NetworkResult<boolean> = await new AuthService(this.bridge).logout(username);
     this.isLoggingOut = false;
     if (!result.success) {

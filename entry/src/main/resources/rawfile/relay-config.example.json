@@ -1,0 +1,5 @@
+{
+  "_comment": "推送中继配置模板。复制为 relay-config.json 并填入自己的部署信息;该文件不进版本控制。缺失时推送功能不可用,其余功能不受影响。",
+  "baseUrl": "https://push.example.com",
+  "apiKey": ""
+}

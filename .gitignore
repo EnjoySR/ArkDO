@@ -16,3 +16,11 @@ docs/superpowers/
 .superpowers/
 # 设计稿本地化:HTML 原型 / 架构设计文档只在本地,不进版本控制。
 design/
+**/agconnect-services.json
+# 推送中继部署配置(地址 + 共享密钥):本仓库开源,部署信息不入库。
+# 模板见同目录 relay-config.example.json。
+**/rawfile/relay-config.json
+# 本地会话配置(含调试命令记录,可能带部署地址):仅靠全局 gitignore 不够稳妥,项目级再挡一道。
+.claude/settings.local.json
+# SSH 部署工具产生的本地记录,与项目无关。
+deployments.log
