@@ -1,7 +1,7 @@
 import { Log } from '../../services/logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { APP_IS_WIDE_STORAGE_KEY, BreakpointManager } from '../../common/utils/BreakpointManager';
-import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDraftsRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildTopicDetailDraftRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isDraftsRouteParam, DraftsRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -46,6 +46,7 @@ import { DohSettingsPage } from './DohSettingsPage';
 import { SitesPage, SITES_TICK } from './SitesPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { BookmarksPage } from './BookmarksPage';
+import { DraftsPage, DRAFTS_COMPOSER_BACK_TICK_KEY, DRAFTS_COMPOSER_VISIBLE_KEY, DRAFTS_REFRESH_TICK_KEY } from './DraftsPage';
 import { ActivityListPage } from './ActivityListPage';
 import { ReadTopicsPage } from './ReadTopicsPage';
 import { BadgesPage } from './BadgesPage';
@@ -510,6 +511,9 @@ export struct RootTabPage {
           onOpenBookmarks: (username: string) => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.BOOKMARKS, buildBookmarksRouteParam(username)));
           },
+          onOpenDrafts: (username: string) => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DRAFTS, buildDraftsRouteParam(username)));
+          },
           onOpenActivity: (username: string, filter: string, title: string) => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.ACTIVITY, buildActivityRouteParam(username, filter, title)));
           },
@@ -676,6 +680,37 @@ export struct RootTabPage {
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
       .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.DRAFTS && isDraftsRouteParam(param)) {
+      NavDestination() {
+        DraftsPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as DraftsRouteParam).username,
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenTopic: (topicId: number, title: string) => {
+            this.openTopicDetailById(topicId, undefined, title, undefined, false);
+          },
+          onOpenTopicWithDraft: (topicId: number, title: string, draftReply: string, draftKey: string, sequence: number) => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.TOPIC_DETAIL,
+              buildTopicDetailDraftRouteParam(topicId, title, draftReply, draftKey, sequence)));
+          },
+          onOpenWeb: (url: string, title: string) => {
+            this.openWebPage(url, title);
+          }
+        })
+      }
+      .hideTitleBar(true)
+      .backgroundColor($r('app.color.page_bg'))
+      // 从帖子详情 pop 回来时本页重新可见:自增计数让草稿页重拉列表。
+      // 续写发表后草稿已在服务端删除,不重拉的话返回时那条还挂在列表里(要手动下拉才消失)。
+      .onShown(() => {
+        const prev: number = (AppStorage.get(DRAFTS_REFRESH_TICK_KEY) as number | undefined) ?? 0;
+        AppStorage.setOrCreate(DRAFTS_REFRESH_TICK_KEY, prev + 1);
+      })
+      // 续写浮层开着时返回键先关浮层,不 pop 掉草稿页。
+      .onBackPressed(() => this.consumeDraftsBack())
     } else if (name === AppRouteName.BADGES && isBadgesRouteParam(param)) {
       NavDestination() {
         BadgesPage({
@@ -1079,6 +1114,17 @@ export struct RootTabPage {
 
   // 详情页返回键统一入口:先看全屏编辑器浮层(可见则 bump tick 交详情页一镜回落),再看图片预览。
   // 都没开返回 false 放行默认 pop(弹掉详情页)。挂在详情页 NavDestination 的 onBackPressed 上。
+  // 草稿页的续写浮层打开时消费返回键(bump tick 让 DraftsPage 关浮层);未开则放行默认 pop。
+  private consumeDraftsBack(): boolean {
+    const visible: boolean = (AppStorage.get(DRAFTS_COMPOSER_VISIBLE_KEY) as boolean | undefined) ?? false;
+    if (visible) {
+      const prev: number = (AppStorage.get(DRAFTS_COMPOSER_BACK_TICK_KEY) as number | undefined) ?? 0;
+      AppStorage.setOrCreate(DRAFTS_COMPOSER_BACK_TICK_KEY, prev + 1);
+      return true;
+    }
+    return false;
+  }
+
   private consumeTopicDetailBack(): boolean {
     const composerVisible: boolean = (AppStorage.get(COMPOSER_OVERLAY_VISIBLE_KEY) as boolean | undefined) ?? false;
     if (composerVisible) {

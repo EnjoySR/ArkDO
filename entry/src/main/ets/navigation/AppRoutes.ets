@@ -7,6 +7,7 @@ export enum AppRouteName {
   WEB = 'web',
   NOTIFICATIONS = 'notifications',
   BOOKMARKS = 'bookmarks',
+  DRAFTS = 'drafts',
   ACTIVITY = 'activity',
   BADGES = 'badges',
   READ_TOPICS = 'readTopics',
@@ -27,6 +28,11 @@ export interface TopicDetailRouteParam {
   targetPostNumber?: number;
   // 落地后是否短暂高亮目标楼:通知跳转 true(对齐官网 anchor 高亮);未读徽标跳转 false(只有红线)。
   highlightTarget?: boolean;
+  // 从草稿页续写回帖时带入:草稿正文(详情页加载完自动弹回复框并回填)+ 草稿 key/序号
+  // (发表成功后据此删掉该草稿,免得已发出的回帖还挂在草稿列表)。
+  draftReply?: string;
+  draftKey?: string;
+  draftSequence?: number;
 }
 
 export interface ProfileRouteParam {
@@ -105,6 +111,26 @@ export function isBookmarksRouteParam(param: Object | undefined): boolean {
   }
   const candidate: BookmarksRouteParam = param as BookmarksRouteParam;
   return typeof candidate.username === 'string' && candidate.username.length > 0;
+}
+
+// 草稿页:草稿走 /drafts.json(当前用户,不需 username);username 仅用于私信/新主题草稿
+// 兜底跳 webview(/u/{username}/activity/drafts)。
+export interface DraftsRouteParam {
+  username: string;
+}
+
+export function buildDraftsRouteParam(username: string): DraftsRouteParam {
+  return {
+    username: username
+  };
+}
+
+export function isDraftsRouteParam(param: Object | undefined): boolean {
+  if (!param) {
+    return false;
+  }
+  const candidate: DraftsRouteParam = param as DraftsRouteParam;
+  return typeof candidate.username === 'string';
 }
 
 // 全部徽章页参数:目标用户名 + 徽章总数(用于标题「徽章 · N」,0 表示未知)。
@@ -226,6 +252,18 @@ export function buildTopicDetailRouteParam(topicId: number, slug: string | undef
     title: title,
     targetPostNumber: targetPostNumber,
     highlightTarget: highlightTarget
+  };
+}
+
+// 从草稿页续写回帖:除定位主题外还带草稿正文与 key/序号。单开一个构造器,免得主构造器参数堆到八个。
+export function buildTopicDetailDraftRouteParam(topicId: number, title: string,
+  draftReply: string, draftKey: string, draftSequence: number): TopicDetailRouteParam {
+  return {
+    topicId: topicId,
+    title: title,
+    draftReply: draftReply,
+    draftKey: draftKey,
+    draftSequence: draftSequence
   };
 }
 

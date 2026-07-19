@@ -14,6 +14,8 @@ import { getCategoryColor, getCategoryIcon, getCategoryLogo, getTagColor, getTag
 import { FaIconDefinition, FaIconView } from '../components/FaIcon';
 import { TagSuggestion, TopicService } from '../../services/topic/TopicService';
 import { NetworkResult } from '../../services/network/NetworkTypes';
+import { DraftService, SaveTopicDraftInput } from '../../services/draft/DraftService';
+import { DraftTagRef } from '../../models/Draft';
 import { PostRichContent } from '../components/PostRichContent';
 import { applyAction, EditState, MdAction } from '../../utils/markdownInsert';
 
@@ -22,6 +24,8 @@ const LOG_TAG: string = '[ArkDO][Composer]';
 const MAX_PICK: number = 9;
 // 发帖最多可选标签数(对齐站点 max_tags_per_topic)。
 const MAX_TAGS: number = 8;
+// 自动存草稿防抖:停止输入这么久才真发一次(对齐官方 composer 的「边写边存」节奏)。
+const DRAFT_SAVE_DEBOUNCE_MS: number = 2000;
 // 编辑区焦点 id:内联挂载时 defaultFocus 不可靠(展开前内联输入条卸载会收键盘),挂载后
 // 主动 requestFocus 把键盘弹回来,焦点无缝落到全屏编辑区。
 const EDIT_FOCUS_ID: string = 'arkdoComposerInput';
@@ -73,6 +77,9 @@ export struct ComposerPage {
   // 「有键盘」布局(工具栏直接在键盘上方),避免从 0 起跳的二次布局跳变(观感「回缩一下」)。
   initialKeyboardHeight: number = 0;
   onBack: () => void = () => {};
+  // 正文变化时上抛(回帖模式用):详情页据此暂存未发出的内容并存服务端草稿——
+  // 本页一关就卸载,不上抛内容就没了。发帖模式自己存草稿,不需要它。
+  onTextChange: (text: string) => void = () => {};
   // 返回 true 表示提交成功(随即返回);false 保留内容供重试。typing/composer 时长对齐官方遥测。
   onSubmit: (raw: string, typingMs: number, composerMs: number) => Promise<boolean> =
     (raw: string, typingMs: number, composerMs: number) => Promise.resolve(false);
@@ -86,6 +93,14 @@ export struct ComposerPage {
   categories: TopicCategory[] = [];
   onSubmitTopic: (title: string, categoryId: number, raw: string, tags: string[], typingMs: number, composerMs: number) => Promise<boolean> =
     (title: string, categoryId: number, raw: string, tags: string[], typingMs: number, composerMs: number) => Promise.resolve(false);
+
+  // ===== 草稿续写(从草稿页点进来时带入) =====
+  // 非空=续写该草稿(自动存沿用同一 key/序号);空=新开一篇,首次保存时现生成 new_topic_<ts>。
+  initialDraftKey: string = '';
+  initialDraftSequence: number = 0;
+  initialTitle: string = '';
+  initialCategoryId: number = -1;
+  initialTags: TagSuggestion[] = [];
 
   @State private title: string = '';
   // 已选分类 id;-1=未选(发送置灰)。
@@ -117,6 +132,19 @@ export struct ComposerPage {
   private tagDebounceTimer: number = -1;
   // 本轮联想请求的序号:异步返回乱序时只认最后一发,防旧结果盖新结果。
   private tagQuerySeq: number = 0;
+
+  // ===== 自动存草稿运行态 =====
+  private draftService?: DraftService = undefined;
+  // 当前草稿 key/序号。key 首次保存时惰性生成(new_topic_<ts>),续写时用带入的。
+  private draftKey: string = '';
+  private draftSequence: number = 0;
+  private draftDebounceTimer: number = -1;
+  // 有未落盘的改动。关闭时据此决定要不要补存一次。
+  private draftDirty: boolean = false;
+  // 一次只允许一个保存在途,避免并发把 sequence 写乱。
+  private draftSaving: boolean = false;
+  // 发表成功后置真:阻止收尾的补存把已删的草稿又写回来。
+  private draftPublished: boolean = false;
 
   @State private text: string = '';
   @State private mode: ComposerMode = ComposerMode.Edit;
@@ -164,6 +192,18 @@ export struct ComposerPage {
     this.keyboardHeight = this.initialKeyboardHeight;
     if (this.bridge) {
       this.uploadService = new UploadService(this.bridge);
+      this.draftService = new DraftService(this.bridge);
+    }
+    // 草稿续写:把带入的标题/分类/标签灌进 @State,并沿用原草稿的 key/序号继续自动存。
+    if (this.composeTopic) {
+      this.title = this.initialTitle;
+      this.categoryId = this.initialCategoryId;
+      this.selectedTags = this.initialTags.slice();
+      this.draftKey = this.initialDraftKey;
+      this.draftSequence = this.initialDraftSequence;
+      if (this.categoryId >= 0) {
+        this.refreshSelectedCategoryVisual();
+      }
     }
     // 关掉系统整页避让,自己按键盘高度上移底部工具栏(内容区随之收缩),背后不整页跳动。
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
@@ -184,6 +224,15 @@ export struct ComposerPage {
     if (this.tagDebounceTimer !== -1) {
       clearTimeout(this.tagDebounceTimer);
       this.tagDebounceTimer = -1;
+    }
+    // 关闭时补存一次:防抖还没到点就被关掉的话,这一下把内容兜住(「点左上角内容没了」的根治点)。
+    // 已发表则不补(草稿刚被删,补存会把它又写回来)。请求不 await——页面这就销毁了,发出去即可。
+    if (this.draftDebounceTimer !== -1) {
+      clearTimeout(this.draftDebounceTimer);
+      this.draftDebounceTimer = -1;
+    }
+    if (this.composeTopic && this.draftDirty && !this.draftPublished) {
+      this.saveDraftNow();
     }
     // 关闭前主动收键盘:否则键盘残留 + 还原 OFFSET 会把背后详情页整页顶起(实测"整个页面往上跑")。
     try {
@@ -261,6 +310,88 @@ export struct ComposerPage {
     return this.selectedTags.some((t: TagSuggestion) => t.id === id);
   }
 
+  // ==================== 自动存草稿 ====================
+  // 对齐官方 composer:边写边存,关闭不提示也不丢;下次从「我的草稿」点回来继续写。
+
+  // 内容有实质东西才值得存,免得开一下就关也留一条空草稿。
+  private draftHasContent(): boolean {
+    return this.title.trim().length > 0 || this.text.trim().length > 0;
+  }
+
+  // 任一可存字段变化时调用:标脏 + 防抖排一次保存(停止输入 DRAFT_SAVE_DEBOUNCE_MS 后才真发)。
+  private scheduleDraftSave(): void {
+    if (!this.composeTopic || this.draftPublished) {
+      return;
+    }
+    this.draftDirty = true;
+    if (this.draftDebounceTimer !== -1) {
+      clearTimeout(this.draftDebounceTimer);
+    }
+    this.draftDebounceTimer = setTimeout(() => {
+      this.draftDebounceTimer = -1;
+      this.saveDraftNow();
+    }, DRAFT_SAVE_DEBOUNCE_MS);
+  }
+
+  private async saveDraftNow(): Promise<void> {
+    if (!this.draftService || !this.composeTopic || this.draftPublished) {
+      return;
+    }
+    if (!this.draftHasContent()) {
+      return;
+    }
+    // 已有保存在途:标记仍脏,等它回来后由收尾逻辑或下次输入再补。
+    if (this.draftSaving) {
+      return;
+    }
+    // 首次保存现生成 key(对齐官方 new_topic_<毫秒时间戳>)。
+    if (this.draftKey.length === 0) {
+      this.draftKey = `new_topic_${Date.now()}`;
+    }
+    this.draftSaving = true;
+    this.draftDirty = false;
+
+    const tags: DraftTagRef[] = this.selectedTags.map((t: TagSuggestion): DraftTagRef => {
+      const ref: DraftTagRef = { id: t.id, name: t.name };
+      return ref;
+    });
+    const input: SaveTopicDraftInput = {
+      draftKey: this.draftKey,
+      sequence: this.draftSequence,
+      title: this.title.trim(),
+      categoryId: this.categoryId,
+      tags: tags,
+      reply: this.text,
+      composerTimeMs: this.appearTimeMs > 0 ? Date.now() - this.appearTimeMs : 0,
+      typingTimeMs: this.firstTypeTimeMs > 0 ? Date.now() - this.firstTypeTimeMs : 0
+    };
+    const result: NetworkResult<number> = await this.draftService.saveTopicDraft(input);
+    this.draftSaving = false;
+    if (result.success && result.data !== undefined) {
+      // 服务端回的序号是下次该带的,存回去,否则下次保存会因序号过期被拒。
+      this.draftSequence = result.data;
+      Log.i(`${LOG_TAG} draft saved key=${this.draftKey} seq=${this.draftSequence}`);
+    } else {
+      // 存失败不打扰用户(草稿是兜底能力),标回脏,下次输入或关闭时再试。
+      this.draftDirty = true;
+      Log.i(`${LOG_TAG} draft save failed status=${result.statusCode}`);
+    }
+  }
+
+  // 发表成功后删掉对应草稿,否则已发出的帖子还会在草稿列表里挂着。
+  private async deleteDraftAfterPublish(): Promise<void> {
+    this.draftPublished = true;
+    if (this.draftDebounceTimer !== -1) {
+      clearTimeout(this.draftDebounceTimer);
+      this.draftDebounceTimer = -1;
+    }
+    if (!this.draftService || this.draftKey.length === 0) {
+      return;
+    }
+    await this.draftService.deleteDraft(this.draftKey, this.draftSequence);
+    Log.i(`${LOG_TAG} draft deleted after publish key=${this.draftKey}`);
+  }
+
   // 打开标签选择器:清空搜索词,立刻拉一遍热门标签(q 为空)。
   private openTagPicker(): void {
     this.tagQuery = '';
@@ -310,6 +441,7 @@ export struct ComposerPage {
       }
       this.selectedTags = this.selectedTags.concat(tag);
     }
+    this.scheduleDraftSave();
     this.fetchTags(this.tagQuery.trim());
   }
 
@@ -375,6 +507,11 @@ export struct ComposerPage {
     this.isPreviewLoading = true;
     let html: string = '';
     try {
+      // 先补齐「本会话没上传过」的 upload:// 短码映射(草稿续写/编辑旧帖里的老图片),
+      // 否则它们在预览里换不出真实直链、图片显示不出来。
+      if (this.uploadService) {
+        await this.uploadService.prefetchShortUrls(this.text);
+      }
       const raw: string = await this.mdService.render(this.text);
       html = this.uploadService ? this.uploadService.resolvePreviewHtml(raw) : raw;
     } catch (error) {
@@ -424,6 +561,10 @@ export struct ComposerPage {
     }
     this.isSubmitting = false;
     if (ok) {
+      // 已发出:删掉对应草稿,免得草稿列表里留一条已发布的。失败不拦关闭(草稿残留可手动删)。
+      if (this.composeTopic) {
+        await this.deleteDraftAfterPublish();
+      }
       this.onBack();
     }
   }
@@ -713,6 +854,7 @@ export struct ComposerPage {
           if (this.firstTypeTimeMs === 0 && value.length > 0) {
             this.firstTypeTimeMs = Date.now();
           }
+          this.scheduleDraftSave();
         })
         // 挂载即抢焦点:发帖从标题写起,键盘直接弹给标题。
         .onAppear(() => {
@@ -766,6 +908,7 @@ export struct ComposerPage {
     .margin({ right: 8, bottom: 8 })
     .onClick(() => {
       this.selectedTags = this.selectedTags.filter((t: TagSuggestion) => t.id !== tag.id);
+      this.scheduleDraftSave();
     })
   }
 
@@ -1080,6 +1223,7 @@ export struct ComposerPage {
       this.categoryId = p.category.id;
       this.refreshSelectedCategoryVisual();
       this.categoryPickerVisible = false;
+      this.scheduleDraftSave();
     })
   }
 
@@ -1119,6 +1263,8 @@ export struct ComposerPage {
             if (this.firstTypeTimeMs === 0 && value.length > 0) {
               this.firstTypeTimeMs = Date.now();
             }
+            this.onTextChange(value);
+            this.scheduleDraftSave();
           })
           .onTextSelectionChange((start: number, end: number) => {
             this.selStart = start;

@@ -40,6 +40,10 @@ export struct CommentInputBar {
   // （ComposerPage）无缝接续。带键盘高度是为了让全屏页首帧就按「有键盘」布局，避免从 0 起跳
   // 导致工具栏先落底再上移的「回缩一下」。
   onExpand: (currentText: string, keyboardHeight: number) => void = () => {};
+  // 初始正文:页面把上次未发出的内容带回来(关掉输入条再点开,内容还在)。
+  initialText: string = '';
+  // 文本变化时上抛给页面暂存。内联条一关就卸载、@State 随之销毁,不上抛就彻底丢了。
+  onTextChange: (text: string) => void = () => {};
   @State private text: string = '';
   @State private isSubmitting: boolean = false;
   // 当前键盘高度（vp）；0 表示键盘收起。
@@ -69,6 +73,8 @@ export struct CommentInputBar {
 
   aboutToAppear(): void {
     this.appearTimeMs = Date.now();
+    // 带回上次未发出的内容(页面暂存的)。
+    this.text = this.initialText;
     // 关闭系统默认整页键盘避让，改为自己按键盘高度上移输入条（背后页面不动）。
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
 
@@ -202,6 +208,8 @@ export struct CommentInputBar {
               if (this.firstTypeTimeMs === 0 && value.length > 0) {
                 this.firstTypeTimeMs = Date.now();
               }
+              // 实时上抛给页面暂存:关掉输入条时组件卸载,不上抛内容就没了。
+              this.onTextChange(value);
               this.warnIfOverMaxChars();
             })
         }

@@ -7,6 +7,13 @@ import { Log } from '../logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 
+// POST /uploads/lookup-urls 的响应项:把 upload:// 短码换成真实 CDN 直链。
+interface DiscourseLookupUrlItem {
+  short_url?: string;
+  url?: string;
+  short_path?: string;
+}
+
 // 一次成功上传的结果:short_url 是写进帖子 raw 的短码(upload://…),url 是真实 CDN 直链(预览用)。
 export interface UploadedImage {
   shortUrl: string;
@@ -132,6 +139,51 @@ export class UploadService {
       result = result.split(shortUrl).join(realUrl);
     });
     return result;
+  }
+
+  // 预解析正文里「本会话没上传过」的 upload:// 短码:草稿续写/编辑旧帖时,图片是以前传的,
+  // 本地映射表里没有,预览会留着 upload:// 加载不出来。走官方 POST /uploads/lookup-urls 批量换真实直链
+  // (返回的 url 与服务端 cook 帖子里的图片同一形式,渲染路径已验证可用;不要自行拼 /uploads/short-url/,
+  // 那条会 302 到跨源 CDN 且被 CF 挡,见 MediaSource 的记录)。
+  // 结果并进同一张映射表,后续 resolvePreviewHtml 原样受益;已解析过的不再请求。
+  async prefetchShortUrls(raw: string): Promise<void> {
+    const pending: string[] = [];
+    const pattern: RegExp = new RegExp('upload://[A-Za-z0-9]+\\.[A-Za-z0-9]+', 'g');
+    let match: RegExpExecArray | null = pattern.exec(raw);
+    while (match !== null) {
+      const shortUrl: string = match[0];
+      if (!this.shortUrlToRealUrl.has(shortUrl) && pending.indexOf(shortUrl) < 0) {
+        pending.push(shortUrl);
+      }
+      match = pattern.exec(raw);
+    }
+    if (pending.length === 0) {
+      return;
+    }
+
+    let body: string = '';
+    for (let index: number = 0; index < pending.length; index++) {
+      body += `${index > 0 ? '&' : ''}short_urls%5B%5D=${encodeURIComponent(pending[index])}`;
+    }
+    const response: NetworkResult<string> = await this.bridge.postForm('/uploads/lookup-urls', body, {
+      notifyChallenge: false,
+      referrer: `${AppConstants.BASE_URL}/`
+    });
+    if (!response.success || response.data === undefined) {
+      // 解析失败不阻断预览:该图仍显示不出来,但正文与其余内容照常(发帖时服务端会自行解析短码)。
+      return;
+    }
+    try {
+      const items: DiscourseLookupUrlItem[] = JSON.parse(response.data) as DiscourseLookupUrlItem[];
+      for (let index: number = 0; index < items.length; index++) {
+        const item: DiscourseLookupUrlItem = items[index];
+        if (typeof item.short_url === 'string' && typeof item.url === 'string' && item.url.length > 0) {
+          this.shortUrlToRealUrl.set(item.short_url, item.url);
+        }
+      }
+    } catch (error) {
+      // 响应非 JSON:同上,静默降级。
+    }
   }
 
   // 生成插入正文的图片 markdown:![文件名|宽x高](upload://…)。宽高缺失则省略尺寸段。

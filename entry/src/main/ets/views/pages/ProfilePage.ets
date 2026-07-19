@@ -60,6 +60,8 @@ export struct ProfilePage {
   onOpenReadTopics: () => void = () => {};
   // 书签已原生化:进原生书签页而非 Web。
   onOpenBookmarks: (username: string) => void = () => {};
+  // 草稿已原生化:进原生草稿页而非 Web。
+  onOpenDrafts: (username: string) => void = () => {};
   // 用户动态列表(我的话题/回复/点赞/最近活动全部)已原生化:filter 见 UserActionType。
   onOpenActivity: (username: string, filter: string, title: string) => void = () => {};
   // 全部徽章页已原生化:数据取自 /user-badges/{username}.json。
@@ -284,8 +286,11 @@ export struct ProfilePage {
             this.onOpenActivity(this.getUsername(), '1', '我的点赞');
           }
         })
-        this.QuickEntry($r('sys.symbol.square_and_pencil'), '我的草稿', this.getDraftCount(), false, false,
-          `/u/${this.getUsername()}/activity/drafts`)
+        this.QuickEntryNativeBadged($r('sys.symbol.square_and_pencil'), '我的草稿', this.getDraftCount(), () => {
+          if (this.getUsername().length > 0) {
+            this.onOpenDrafts(this.getUsername());
+          }
+        })
       }
       .padding({ top: CARD_PADDING, bottom: 14 })
       .cardStyle()
@@ -462,6 +467,37 @@ export struct ProfilePage {
       SymbolGlyph(symbol)
         .fontSize(24)
         .fontColor([love ? $r('app.color.ld_love') : $r('app.color.text_primary')])
+      Text(label)
+        .fontSize(12)
+        .fontColor($r('app.color.text_primary'))
+        .margin({ top: 7 })
+    }
+    .layoutWeight(1)
+    .onClick(() => {
+      onEntryClick();
+    })
+  }
+
+  // 带角标 + 走原生回调的快捷入口(草稿:已原生化,但要保留草稿数角标)。
+  @Builder
+  private QuickEntryNativeBadged(symbol: Resource, label: string, badgeCount: number, onEntryClick: () => void) {
+    Column() {
+      Badge({
+        count: badgeCount,
+        maxCount: 99,
+        position: BadgePosition.RightTop,
+        style: {
+          badgeSize: 16,
+          fontSize: 10,
+          badgeColor: $r('app.color.ld_accent'),
+          borderColor: $r('app.color.ld_accent'),
+          borderWidth: 0
+        }
+      }) {
+        SymbolGlyph(symbol)
+          .fontSize(24)
+          .fontColor([$r('app.color.text_primary')])
+      }
       Text(label)
         .fontSize(12)
         .fontColor($r('app.color.text_primary'))

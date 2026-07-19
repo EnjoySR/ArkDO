@@ -9,6 +9,7 @@ import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { LoginGate } from '../../services/session/LoginGate';
 import { TopicReadController } from '../../services/reading/TopicReadController';
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
+import { DraftService } from '../../services/draft/DraftService';
 import { BookmarkToggleResult, PostActions } from '../../services/topic/PostActions';
 import { PostDataSource } from '../../services/topic/PostDataSource';
 import { PostStreamPager } from '../../services/topic/PostStreamPager';
@@ -39,6 +40,8 @@ const SHOW_LOADING_CAPSULE: boolean = false;
 const SUCCESS_TOAST_DELAY_MS: number = 350;
 // boost 正文上限:服务端 16 字,超一个字就是不带原因的 422({"failed":"FAILED"}),故在客户端先拦。
 const BOOST_MAX_CHARS: number = 16;
+// 回帖草稿自动存防抖:停止输入这么久才真发一次(与发新主题同节奏)。
+const REPLY_DRAFT_SAVE_DEBOUNCE_MS: number = 2000;
 
 @Component
 export struct TopicDetailPage {
@@ -104,6 +107,18 @@ export struct TopicDetailPage {
   @State private showComposer: boolean = false;
   // 定向回复目标楼号:0 = 回复整个话题(顶层);>0 = 回复该楼(带 reply_to_post_number)。
   @State private replyTargetPostNumber: number = 0;
+  // 草稿续写:本次进入是否已自动弹过回复框(防重载再弹)。
+  private draftComposerOpened: boolean = false;
+  // 本主题未发出的回复内容(页面级暂存)。内联条/全屏编辑器都往这写,关掉再打开据此回填——
+  // 这是「关了输入框内容就没了」的直接兜底,纯内存、不依赖网络。
+  @State private pendingReplyText: string = '';
+  // 未发出的 boost 内容,**按楼(post id)分开存**——给 A 楼打的 boost 不能串到 B 楼去。
+  // boost 不是 Discourse 草稿(服务端无此概念),所以只做内存暂存,不落服务端。
+  private pendingBoostByPostId: Map<number, string> = new Map();
+  // 回帖草稿(服务端)运行态。draft_key 固定 topic_<id>,故同一主题只有一条。
+  private replyDraftSequence: number = 0;
+  private replyDraftTimer: number = -1;
+  private replyDraftSaving: boolean = false;
   // 输入框占位文字:回复话题「回复当前话题」/回复某楼「回复<昵称>」/发 boost「发一个 boost…」。
   @State private composerPlaceholder: string = '回复当前话题';
   // boost 输入目标楼 id:0 = 当前浮层是普通回复;>0 = 当前浮层是给该楼发 boost。
@@ -463,6 +478,20 @@ export struct TopicDetailPage {
         minChars: this.boostTargetPostId > 0 ? 1 : 16,
         // boost 服务端上限 16 字,超了只回 {"failed":"FAILED"} 的 422;回复不限(NO_MAX_CHARS)。
         maxChars: this.boostTargetPostId > 0 ? BOOST_MAX_CHARS : NO_MAX_CHARS,
+        // 带回上次未发出的内容。boost 与回复各自独立;boost 还要再按楼区分。
+        initialText: this.boostTargetPostId > 0
+          ? (this.pendingBoostByPostId.get(this.boostTargetPostId) ?? '')
+          : this.pendingReplyText,
+        onTextChange: (text: string) => {
+          // 内联条一关就卸载,内容只存在于它的 @State,必须实时同步到页面级暂存。
+          if (this.boostTargetPostId > 0) {
+            // boost:按楼存,不落服务端草稿。
+            this.pendingBoostByPostId.set(this.boostTargetPostId, text);
+          } else {
+            this.pendingReplyText = text;
+            this.scheduleReplyDraftSave();
+          }
+        },
         onClose: () => {
           this.showComposer = false;
           this.replyTargetPostNumber = 0;
@@ -497,6 +526,11 @@ export struct TopicDetailPage {
         initialText: this.composerInitialText,
         initialKeyboardHeight: this.composerInitialKb,
         minChars: 16,
+        // 全屏编辑器的正文同样同步到页面暂存 + 服务端草稿(关掉不丢)。
+        onTextChange: (text: string) => {
+          this.pendingReplyText = text;
+          this.scheduleReplyDraftSave();
+        },
         onBack: () => {
           // 提交成功(ComposerPage 内部 ok 后自调 onBack)与主动取消/返回,统一走淡出关闭。
           this.closeFullComposer();
@@ -565,6 +599,81 @@ export struct TopicDetailPage {
   // 点内联输入条「展开」:一镜到底把内联输入条几何生长为全屏编辑器。放进同一 animateTo,
   // 内联输入条(showComposer)与全屏面板(showFullComposer)同 geometryTransition id 才能配对插值。
   // 保留 replyTargetPostNumber(全屏提交仍走 submitReply 读它);boost 不展开(showExpand=false)。
+  // 回帖草稿自动存:停止输入 2 秒后发一次(与发新主题同节奏)。draft_key = topic_<主题id>,
+  // 同一主题只有一条草稿,不会越存越多。
+  private scheduleReplyDraftSave(): void {
+    if (this.replyDraftTimer !== -1) {
+      clearTimeout(this.replyDraftTimer);
+    }
+    this.replyDraftTimer = setTimeout(() => {
+      this.replyDraftTimer = -1;
+      this.saveReplyDraftNow();
+    }, REPLY_DRAFT_SAVE_DEBOUNCE_MS);
+  }
+
+  private async saveReplyDraftNow(): Promise<void> {
+    if (!this.detail || this.replyDraftSaving) {
+      return;
+    }
+    if (this.pendingReplyText.trim().length === 0) {
+      return;
+    }
+    this.replyDraftSaving = true;
+    const result: NetworkResult<number> = await new DraftService(this.bridge).saveReplyDraft({
+      draftKey: `topic_${this.detail.id}`,
+      sequence: this.replyDraftSequence,
+      categoryId: this.detail.categoryId !== undefined ? this.detail.categoryId : -1,
+      reply: this.pendingReplyText,
+      composerTimeMs: 0,
+      typingTimeMs: 0,
+      replyToPostNumber: this.replyTargetPostNumber > 0 ? this.replyTargetPostNumber : undefined
+    });
+    this.replyDraftSaving = false;
+    if (result.success && result.data !== undefined) {
+      // 服务端回的是下次该带的序号,不存回去下次会因序号过期被拒。
+      this.replyDraftSequence = result.data;
+    }
+  }
+
+  // 删掉本主题的回帖草稿(topic_<id>)。发表成功后调用。
+  private async deleteReplyDraft(): Promise<void> {
+    if (!this.detail) {
+      return;
+    }
+    await new DraftService(this.bridge).deleteDraft(`topic_${this.detail.id}`, this.replyDraftSequence);
+    this.replyDraftSequence = 0;
+  }
+
+  // 续写来的草稿在发表成功后删除。只删一次(删完清空 key,防重复发表路径重复删)。
+  // 注意:回帖草稿的 key 本就是 topic_<主题id>,与 deleteReplyDraft 删的是同一条——那条已用
+  // 最新序号删过,这里必须跳过,否则会拿路由里的旧序号重复删一次(失败无害但会留假错误日志)。
+  private async deleteResumedDraftIfAny(): Promise<void> {
+    const key: string | undefined = this.param.draftKey;
+    if (key === undefined || key.length === 0) {
+      return;
+    }
+    this.param.draftKey = '';
+    if (this.detail && key === `topic_${this.detail.id}`) {
+      return;
+    }
+    const sequence: number = this.param.draftSequence ?? 0;
+    await new DraftService(this.bridge).deleteDraft(key, sequence);
+  }
+
+  // 草稿续写:详情加载完后自动弹回复框(仅当路由带了草稿正文,且本次进入还没弹过)。
+  private maybeOpenDraftComposer(): void {
+    const draftReply: string | undefined = this.param.draftReply;
+    if (this.draftComposerOpened || draftReply === undefined || draftReply.length === 0) {
+      return;
+    }
+    this.draftComposerOpened = true;
+    // 灌进页面暂存:全屏关掉后再点内联条也能带回这段内容。
+    this.pendingReplyText = draftReply;
+    // 沿用草稿原序号继续自动存,不然首次保存会因序号过期被拒。
+    this.replyDraftSequence = this.param.draftSequence ?? 0;
+    this.openFullComposer(draftReply, 0);
+  }
+
   private openFullComposer(currentText: string, keyboardHeight: number): void {
     this.composerInitialText = currentText;
     this.composerInitialKb = keyboardHeight;
@@ -621,6 +730,16 @@ export struct TopicDetailPage {
         this.postCount = this.dataSource.totalCount();
         this.showToastAfterComposerClose('评论已发表', 1500);
       }
+      // 发表成功:清掉未发出内容的暂存 + 停掉待发的草稿保存,再删服务端草稿——
+      // 否则已发出的回帖还会以草稿身份留在草稿列表里。
+      this.pendingReplyText = '';
+      if (this.replyDraftTimer !== -1) {
+        clearTimeout(this.replyDraftTimer);
+        this.replyDraftTimer = -1;
+      }
+      await this.deleteReplyDraft();
+      // 若本次是从草稿页续写进来的,顺带删掉那条(key 可能与本主题草稿不同,如带楼号的旧草稿)。
+      await this.deleteResumedDraftIfAny();
       return true;
     }
 
@@ -650,6 +769,8 @@ export struct TopicDetailPage {
         // (与服务端重新返回 can_boost=false 一致,无需退出重进)。
         target.canBoost = false;
       }
+      // 已发出:清掉这一楼的 boost 暂存(否则下次点这楼的火箭还会带出已发送的内容)。
+      this.pendingBoostByPostId.delete(postId);
       this.boostTargetPostId = 0;
       this.showToastAfterComposerClose('Boost 已发送', 1500);
       return true;
@@ -907,6 +1028,10 @@ export struct TopicDetailPage {
       }
       // "上次访问"红线只属于"未读徽标跳转"入口:带目标楼号且不高亮(通知=带楼号+高亮、
       // 普通打开=无楼号,都不画线;官网是所有入口都画,这里按产品偏好收窄)。
+      // 从草稿页续写回帖:详情就位后自动弹全屏回复框并回填草稿正文。
+      // 放这里(而非 aboutToAppear)是因为 submitReply 依赖 detail,提前弹会得到一个提交必失败的框。
+      // 一次进入只弹一次:重载/刷新不该再弹。
+      this.maybeOpenDraftComposer();
       const isUnreadBadgeEntry: boolean =
         this.param.targetPostNumber !== undefined && this.param.highlightTarget !== true;
       // 水位只在首次加载快照;已读完(水位>=最高楼)或匿名(无水位)不设线。
