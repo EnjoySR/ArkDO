@@ -64,11 +64,9 @@ import { bumpTick, COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY,
 import { WebViewPage } from './WebViewPage';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { MATH_HOST_ACTIVE_KEY } from '../../services/content/MathRenderService';
+import { PushCoordinator } from '../../services/push/PushCoordinator';
 
 const LOG_TAG: string = '[ArkDO][Root]';
-// 推送自愈的单账号连续失败上限:超过就停手,等下次冷启动或 token 轮换再试,
-// 免得离线时每轮会话轮询都白打一次网络。
-const PUSH_RECONCILE_MAX_ATTEMPTS: number = 3;
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
 // ===== 首页左滑跟手拉出个人中心 =====
 // 松手判定阈值:滑过屏宽这个比例即补完,否则回弹。
@@ -126,7 +124,12 @@ export struct RootTabPage {
   @State private hasCheckedSession: boolean = false;
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   private notificationService: NotificationService = new NotificationService(this.bridge);
-  private pushPermissionService: PushNotificationPermissionService = new PushNotificationPermissionService();
+  // 推送协调器。三个依赖走闭包:this.bridge 是父注入 prop,字段初始化器里是空壳;
+  // context 要 UI 就绪后才取得到。
+  private pushCoordinator: PushCoordinator = new PushCoordinator(
+    () => this.getUIContext().getHostContext() as common.UIAbilityContext | undefined,
+    () => this.currentUser,
+    () => this.bridge);
   private navPathStack: NavPathStack = new NavPathStack();
   // 手势激活闸:仅此为 true 时 customNavContentTransition 才接管 PROFILE 的 push;
   // 点头像那条路照走系统默认转场,互不干扰。
@@ -152,10 +155,6 @@ export struct RootTabPage {
   private unsubscribeManualChallenge?: () => void = undefined;
   private unsubscribePushNavigation?: () => void = undefined;
   private unsubscribePushTokenUpdate?: () => void = undefined;
-  // 推送自愈:已成功自愈过的账号身份(避免每轮会话轮询重复跑)、并发闸、失败重试计数。
-  private pushReconcileAccountKey: string = '';
-  private pushReconcileInFlight: boolean = false;
-  private pushReconcileAttempts: number = 0;
   // 挑战恢复协调器:优先后台静默过盾,失败才弹窗。惰性创建(需闭包引用本组件方法)。
   private challengeRecovery?: ChallengeRecoveryCoordinator = undefined;
 
@@ -225,11 +224,11 @@ export struct RootTabPage {
     if (!this.unsubscribePushTokenUpdate) {
       this.unsubscribePushTokenUpdate = PushTokenUpdateEventBus.subscribe(() => {
         PushTokenUpdateEventBus.clearPending();
-        this.reconcilePushSubscription(true);
+        this.pushCoordinator.reconcile(true);
       });
     }
     if (PushTokenUpdateEventBus.takePending()) {
-      this.reconcilePushSubscription(true);
+      this.pushCoordinator.reconcile(true);
     }
   }
 
@@ -567,7 +566,7 @@ export struct RootTabPage {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DRAFTS, buildDraftsRouteParam(username)));
           },
           onLogoutCleanup: () => {
-            return this.disableSystemPushForLogout();
+            return this.pushCoordinator.disableForLogout();
           },
           onOpenActivity: (username: string, filter: string, title: string) => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.ACTIVITY, buildActivityRouteParam(username, filter, title)));
@@ -633,16 +632,16 @@ export struct RootTabPage {
             this.openTopicDetailById(AppConstants.FEEDBACK_TOPIC_ID);
           },
           onEnablePush: () => {
-            return this.enableSystemPush();
+            return this.pushCoordinator.enable();
           },
           onDisablePush: () => {
-            return this.disableSystemPush();
+            return this.pushCoordinator.disable();
           },
           onRefreshPush: () => {
-            return this.refreshSystemPushStatus();
+            return this.pushCoordinator.refreshStatus();
           },
           onSendTestPush: () => {
-            return this.sendTestSystemPush();
+            return this.pushCoordinator.sendTest();
           }
         })
       }
@@ -1130,243 +1129,13 @@ export struct RootTabPage {
     }
   }
 
-  private async enableSystemPush(): Promise<PushRegistrationResult> {
-    return this.ensureSystemPush(true);
-  }
 
-  private async refreshSystemPushStatus(): Promise<PushStatusResult> {
-    const context: common.UIAbilityContext | undefined =
-      this.getUIContext().getHostContext() as common.UIAbilityContext | undefined;
-    const user: User | undefined = this.currentUser;
-    if (!context || user === undefined || user.id <= 0 || user.username.length === 0) {
-      return { enabled: false, message: '请先登录 linux.do' };
-    }
 
-    const stored: StoredPushSubscription = PushSubscriptionStore.get(context, user.id);
-    if (!stored.desiredEnabled || PushSubscriptionStore.toRegistration(stored) === undefined) {
-      return { enabled: false, message: '未开启' };
-    }
 
-    // 只报状态,不重注册。以前这里跑的是完整 ensure(取 token→中继→linux.do 写请求),
-    // 于是离线或中继暂时不可达时进一次设置页,就把开关误翻成"关闭"——而服务端订阅其实还在。
-    // 订阅的保活/自愈交给 reconcilePushSubscription 在后台静默做,不参与本页开关的显示。
-    const permission: PushNotificationPermissionResult = await this.pushPermissionService.checkEnabled();
-    if (!permission.enabled) {
-      // 订阅还在,只是系统通知权限被关了:开关保持"开",但把原因说清楚。
-      return { enabled: true, message: permission.message };
-    }
 
-    return {
-      enabled: true,
-      message: '已开启'
-    };
-  }
 
-  private async ensureSystemPush(requestPermission: boolean): Promise<PushRegistrationResult> {
-    const context: common.UIAbilityContext | undefined =
-      this.getUIContext().getHostContext() as common.UIAbilityContext | undefined;
-    if (!context) {
-      return {
-        success: false,
-        message: '通知权限申请失败: 缺少 AbilityContext'
-      };
-    }
-    const user: User | undefined = this.currentUser;
-    if (user === undefined || user.id <= 0 || user.username.length === 0) {
-      return {
-        success: false,
-        message: '请先登录 linux.do 账号'
-      };
-    }
-    // 中继地址来自随包配置(不进版本控制)或用户自填。自行编译且没配的话推送不可用,
-    // 这里明确说清楚,免得用户以为是网络或账号问题。
-    if (!isPushRelayConfigured(context)) {
-      return {
-        success: false,
-        message: '未配置推送中继,请在设置中填写中继地址'
-      };
-    }
 
-    const permission: PushNotificationPermissionResult = requestPermission
-      ? await this.pushPermissionService.ensureEnabled(context)
-      : await this.pushPermissionService.checkEnabled();
-    if (!permission.enabled) {
-      return {
-        success: false,
-        message: permission.message
-      };
-    }
 
-    const stored: StoredPushSubscription = PushSubscriptionStore.get(context, user.id);
-    const relayUser: PushRelayUser = {
-      userId: user.id,
-      username: user.username
-    };
-    const result: PushRegistrationResult = await this.pushSubscriptionServiceRef(context).enable(relayUser, stored.subId);
-    if (result.success && result.endpoint !== undefined && result.p256dh !== undefined && result.auth !== undefined) {
-      PushSubscriptionStore.saveEnabled(context, user.id, {
-        subId: result.subId,
-        endpoint: result.endpoint,
-        p256dh: result.p256dh,
-        auth: result.auth
-      });
-    }
-    return result;
-  }
-
-  private async disableSystemPush(): Promise<PushRegistrationResult> {
-    const context: common.UIAbilityContext | undefined =
-      this.getUIContext().getHostContext() as common.UIAbilityContext | undefined;
-    const user: User | undefined = this.currentUser;
-    if (!context || user === undefined || user.id <= 0 || user.username.length === 0) {
-      return { success: false, message: '请先登录 linux.do 账号' };
-    }
-
-    const stored: StoredPushSubscription = PushSubscriptionStore.get(context, user.id);
-    const registration: PushRelayRegistration | undefined = PushSubscriptionStore.toRegistration(stored);
-    if (registration === undefined) {
-      PushSubscriptionStore.saveDisabled(context, user.id);
-      return { success: true, message: '推送订阅已关闭' };
-    }
-    const relayUser: PushRelayUser = {
-      userId: user.id,
-      username: user.username
-    };
-    const result: PushRegistrationResult = await this.pushSubscriptionServiceRef(context).disable(registration, relayUser);
-    if (result.success) {
-      PushSubscriptionStore.saveDisabled(context, user.id);
-    }
-    return result;
-  }
-
-  // 推送保活/自愈:订阅不是"开一次永久有效"——中继连续投递失败超 1 天会被 Discourse 删掉
-  // (MAX_ERRORS),设备 token 也会因重装/恢复出厂/系统刷新而轮换,两种情况都会让推送静默失效。
-  // 故在登录态落定与 token 轮换时,对"用户开过推送"的账号静默重跑一遍订阅登记。
-  // 这套动作本就幂等:中继按 (deviceToken, user) 复用同一 subId,linux.do 同 endpoint 重复
-  // subscribe 也不会重复建,所以代价很小。
-  // 全程静默:这是后台自愈而非用户发起的操作,失败不弹 toast、不翻设置页开关。
-  private async reconcilePushSubscription(force: boolean): Promise<void> {
-    const context: common.UIAbilityContext | undefined =
-      this.getUIContext().getHostContext() as common.UIAbilityContext | undefined;
-    const user: User | undefined = this.currentUser;
-    if (!context || user === undefined || user.id <= 0 || user.username.length === 0) {
-      return;
-    }
-    if (this.pushReconcileInFlight) {
-      return;
-    }
-
-    const accountKey: string = `${user.id}`;
-    if (accountKey !== this.pushReconcileAccountKey) {
-      // 换号(或本次启动首次落定):重置重试预算。
-      this.pushReconcileAttempts = 0;
-    } else if (!force && this.pushReconcileAttempts >= PUSH_RECONCILE_MAX_ATTEMPTS) {
-      // 同一账号已连续失败到上限:停手,等下次启动或 token 轮换再说,免得每轮会话轮询都打网络。
-      return;
-    }
-
-    // 只兑现用户自己开过的推送,绝不擅自替用户开启。
-    const stored: StoredPushSubscription = PushSubscriptionStore.get(context, user.id);
-    if (!stored.desiredEnabled) {
-      this.pushReconcileAccountKey = accountKey;
-      return;
-    }
-    if (!force && accountKey === this.pushReconcileAccountKey && this.pushReconcileAttempts === 0) {
-      // 本账号本次启动已自愈成功过,无须重复。
-      return;
-    }
-
-    this.pushReconcileInFlight = true;
-    this.pushReconcileAccountKey = accountKey;
-    // 调用方是即发即忘(不 await),异常不能逃逸成未处理拒绝;失败一律按"本次自愈没成"记账。
-    try {
-      const result: PushRegistrationResult = await this.ensureSystemPush(false);
-      if (result.success) {
-        this.pushReconcileAttempts = 0;
-        Log.i(`${LOG_TAG} push reconcile ok userId=${user.id} force=${force}`);
-        return;
-      }
-      this.pushReconcileAttempts++;
-      Log.i(`${LOG_TAG} push reconcile failed userId=${user.id} attempts=${this.pushReconcileAttempts} message=${result.message}`);
-    } catch (err) {
-      this.pushReconcileAttempts++;
-      Log.i(`${LOG_TAG} push reconcile exception userId=${user.id} attempts=${this.pushReconcileAttempts} error=${JSON.stringify(err)}`);
-    } finally {
-      this.pushReconcileInFlight = false;
-    }
-  }
-
-  // 服务依赖惰性构造:this.bridge 是父注入的 prop,字段初始化器里取到的是空壳,须调用时再读。
-  // 中继地址/密钥每次都重新解析:用户可能刚在设置页改过自建地址,缓存住会用错服务器。
-  private pushSubscriptionServiceRef(context: common.Context): PushSubscriptionService {
-    const config: PushRelayConfig = resolvePushRelayConfig(context);
-    return new PushSubscriptionService(
-      this.bridge,
-      new HarmonyPushTokenProvider(),
-      new HttpPushRelayClient(config.baseUrl, config.apiKey)
-    );
-  }
-
-  // 登出前清理系统推送。必须在 AuthService.logout 之前跑完:linux.do 退订要带登录 cookie,
-  // 登出后就退不掉了,那条订阅会连同中继里的 deviceToken 一起留存——本机继续收到该账号的
-  // 私信/回复推送(换号后亦然,属跨账号泄露),而设置页此时因未登录连开关都点不动。
-  // 失败不阻断登出:中继解绑成功即可,之后中继返回 410,Discourse 自行删除订阅。
-  private async disableSystemPushForLogout(): Promise<void> {
-    const context: common.UIAbilityContext | undefined =
-      this.getUIContext().getHostContext() as common.UIAbilityContext | undefined;
-    const user: User | undefined = this.currentUser;
-    if (!context || user === undefined || user.id <= 0) {
-      return;
-    }
-
-    const stored: StoredPushSubscription = PushSubscriptionStore.get(context, user.id);
-    const registration: PushRelayRegistration | undefined = PushSubscriptionStore.toRegistration(stored);
-    if (registration === undefined) {
-      // 没有有效订阅:仅把本地开关落回关闭,避免重新登录后误显示"已开启"。
-      if (stored.desiredEnabled) {
-        PushSubscriptionStore.saveDisabled(context, user.id);
-      }
-      return;
-    }
-
-    Log.i(`${LOG_TAG} logout push cleanup start userId=${user.id} subId=${stored.subId}`);
-    await this.pushSubscriptionServiceRef(context).disableForLogout(registration, {
-      userId: user.id,
-      username: user.username
-    });
-    // 无论两侧结果如何都清本地:登出后已无登录态可重试,留着只会让 UI 显示错误的"已开启"。
-    PushSubscriptionStore.saveDisabled(context, user.id);
-    Log.i(`${LOG_TAG} logout push cleanup done userId=${user.id}`);
-  }
-
-  private async sendTestSystemPush(): Promise<PushStatusResult> {
-    const context: common.UIAbilityContext | undefined =
-      this.getUIContext().getHostContext() as common.UIAbilityContext | undefined;
-    const user: User | undefined = this.currentUser;
-    if (!context || user === undefined || user.id <= 0 || user.username.length === 0) {
-      return { enabled: false, message: '请先登录 linux.do 账号' };
-    }
-
-    const ensureResult: PushRegistrationResult = await this.ensureSystemPush(false);
-    if (!ensureResult.success) {
-      return {
-        enabled: false,
-        message: ensureResult.message
-      };
-    }
-
-    const stored: StoredPushSubscription = PushSubscriptionStore.get(context, user.id);
-    const registration: PushRelayRegistration | undefined = PushSubscriptionStore.toRegistration(stored);
-    if (registration === undefined || (registration.subId ?? '').length === 0) {
-      return { enabled: false, message: '推送订阅参数无效' };
-    }
-
-    const relayUser: PushRelayUser = {
-      userId: user.id,
-      username: user.username
-    };
-    return this.pushSubscriptionServiceRef(context).sendTest(registration, relayUser);
-  }
 
   private showToast(message: string): void {
     promptToast(this.getUIContext(), message);
@@ -1640,12 +1409,11 @@ export struct RootTabPage {
         this.notificationService.start();
         // 登录态已落定:此刻才拿得到 userId,兑现该账号此前开过的推送订阅(保活/自愈)。
         // 内部按账号去重,不会每轮轮询都跑。
-        this.reconcilePushSubscription(false);
+        this.pushCoordinator.reconcile(false);
       } else {
         this.notificationService.stop();
         // 登出/换号:清掉自愈基准,让下一个账号登录时重新兑现自己的订阅。
-        this.pushReconcileAccountKey = '';
-        this.pushReconcileAttempts = 0;
+        this.pushCoordinator.resetReconcileState();
       }
       return;
     }
