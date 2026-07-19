@@ -1636,7 +1636,12 @@ export class CookedHtmlParser {
   }
 
   private static imageBlockFromTag(tag: string, href: string): RichBlock | undefined {
-    const src: string = CookedHtmlParser.resolveUrl(CookedHtmlParser.extractAttr(tag, 'src'));
+    // 优先取 srcset 里倍率最高的那档(通常 2x),而不是 src。
+    // Discourse 的 src 是按 CSS 像素切的最小档(如 253×375),手机普遍 3x DPI,直接渲染必糊;
+    // srcset 一般给到 2x(506×750),清晰度够且远小于原图(href,如 940×1388/132KB)——
+    // 正文图最宽也就铺满屏宽,上原图纯属浪费流量与解码内存。
+    const src: string = CookedHtmlParser.resolveUrl(
+      CookedHtmlParser.bestSrcFromTag(tag));
     if (src.length === 0) {
       return undefined;
     }
@@ -1811,6 +1816,45 @@ export class CookedHtmlParser {
       return `${AppConstants.BASE_URL}${url}`;
     }
     return url;
+  }
+
+  // 从 <img> 选出最清晰的可用地址:srcset 里倍率最大的一档,没有 srcset 则回退 src。
+  // srcset 形如 "url1, url2 1.5x, url3 2x"(首项无描述符即 1x)。逗号也可能出现在 URL 里,
+  // 故按「逗号 + 空白」切分而非裸逗号。宽度描述符(w)本项目未见,一并兼容:按数值取最大。
+  private static bestSrcFromTag(tag: string): string {
+    const src: string = CookedHtmlParser.extractAttr(tag, 'src');
+    const srcset: string = CookedHtmlParser.extractAttr(tag, 'srcset');
+    if (srcset.length === 0) {
+      return src;
+    }
+
+    const candidates: string[] = srcset.split(/,\s+/);
+    let bestUrl: string = '';
+    let bestScale: number = 0;
+    for (let index: number = 0; index < candidates.length; index++) {
+      const entry: string = candidates[index].trim();
+      if (entry.length === 0) {
+        continue;
+      }
+      const parts: string[] = entry.split(/\s+/);
+      const url: string = parts[0];
+      if (url.length === 0) {
+        continue;
+      }
+      // 无描述符 = 1x;有则去掉尾部 x/w 取数值。解析不出就按 1 算,不至于丢掉这一档。
+      let scale: number = 1;
+      if (parts.length > 1) {
+        const parsed: number = Number.parseFloat(parts[1].replace(/[xw]$/i, ''));
+        if (!Number.isNaN(parsed) && parsed > 0) {
+          scale = parsed;
+        }
+      }
+      if (scale > bestScale) {
+        bestScale = scale;
+        bestUrl = url;
+      }
+    }
+    return bestUrl.length > 0 ? bestUrl : src;
   }
 
   private static extractAttr(tag: string, attrName: string): string {
