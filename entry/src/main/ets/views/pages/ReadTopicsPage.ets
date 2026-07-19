@@ -7,6 +7,7 @@ import { TopicListItem } from '../components/TopicListItem';
 import { LoadStateView } from '../components/LoadStateView';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { PageHeader } from '../components/PageHeader';
+import { ListFooter } from '../components/ListFooter';
 
 const LOG_TAG: string = '[ArkDO][ReadTopicsPage]';
 
@@ -96,21 +97,7 @@ export struct ReadTopicsPage {
           }, (topic: Topic) => `${topic.id}_${topic.bookmarked === true ? 1 : 0}`)
 
           ListItem() {
-            Row() {
-              if (this.isLoadingMore) {
-                LoadingProgress()
-                  .width(18)
-                  .height(18)
-                  .color($r('app.color.ld_accent'))
-                  .margin({ right: 8 })
-              }
-              Text(this.hasMore ? '上拉加载更多' : '没有更多了')
-                .fontSize(13)
-                .fontColor($r('app.color.text_faint'))
-            }
-            .width('100%')
-            .height(54)
-            .justifyContent(FlexAlign.Center)
+            ListFooter({ isLoading: this.isLoadingMore, hasMore: this.hasMore })
           }
         }
         .width('100%')

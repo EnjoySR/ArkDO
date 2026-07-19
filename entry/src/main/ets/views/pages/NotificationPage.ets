@@ -8,6 +8,7 @@ import { NotificationListItem } from '../components/NotificationListItem';
 import { LoadStateView } from '../components/LoadStateView';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { PageHeader } from '../components/PageHeader';
+import { ListFooter } from '../components/ListFooter';
 
 const LOG_TAG: string = '[ArkDO][NotificationPage]';
 const PAGE_SIZE: number = 30;
@@ -110,21 +111,13 @@ export struct NotificationPage {
           }, (item: NotificationItem) => `${item.id}_${item.read}`)
 
           ListItem() {
-            Row() {
-              if (this.isLoadingMore) {
-                LoadingProgress()
-                  .width(18)
-                  .height(18)
-                  .color($r('app.color.brand'))
-                  .margin({ right: 8 })
-              }
-              Text(this.hasMore ? '上拉加载更多' : '已到底')
-                .fontSize(13)
-                .fontColor($r('app.color.text_secondary'))
-            }
-            .width('100%')
-            .height(54)
-            .justifyContent(FlexAlign.Center)
+            ListFooter({
+              isLoading: this.isLoadingMore,
+              hasMore: this.hasMore,
+              endText: '已到底',
+              accentColor: $r('app.color.brand'),
+              textColor: $r('app.color.text_secondary')
+            })
           }
         }
         .width('100%')

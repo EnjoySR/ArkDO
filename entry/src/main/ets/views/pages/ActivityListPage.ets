@@ -10,6 +10,7 @@ import { LoadStateView } from '../components/LoadStateView';
 import { UserAvatar } from '../components/UserAvatar';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { PageHeader } from '../components/PageHeader';
+import { ListFooter } from '../components/ListFooter';
 
 const LOG_TAG: string = '[ArkDO][ActivityListPage]';
 const PAGE_PADDING: number = 16;
@@ -91,21 +92,7 @@ export struct ActivityListPage {
           }, (item: UserActivityItem, index: number) => `${item.topicId}_${item.postNumber ?? 0}_${index}`)
 
           ListItem() {
-            Row() {
-              if (this.isLoadingMore) {
-                LoadingProgress()
-                  .width(18)
-                  .height(18)
-                  .color($r('app.color.ld_accent'))
-                  .margin({ right: 8 })
-              }
-              Text(this.hasMore ? '上拉加载更多' : '没有更多了')
-                .fontSize(13)
-                .fontColor($r('app.color.text_faint'))
-            }
-            .width('100%')
-            .height(54)
-            .justifyContent(FlexAlign.Center)
+            ListFooter({ isLoading: this.isLoadingMore, hasMore: this.hasMore })
           }
         }
         .width('100%')

@@ -14,6 +14,7 @@ import { submitNewTopic } from '../../services/topic/CreateTopicFlow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { DRAFTS_COMPOSER_BACK_TICK_KEY, DRAFTS_COMPOSER_VISIBLE_KEY, DRAFTS_REFRESH_TICK_KEY } from '../../common/constants/StorageKeys';
 import { PageHeader } from '../components/PageHeader';
+import { ListFooter } from '../components/ListFooter';
 
 const LOG_TAG: string = '[ArkDO][DraftsPage]';
 const PAGE_PADDING: number = 16;
@@ -180,21 +181,7 @@ export struct DraftsPage {
           }, (item: Draft) => `${item.draftKey}_${item.sequence}`)
 
           ListItem() {
-            Row() {
-              if (this.isLoadingMore) {
-                LoadingProgress()
-                  .width(18)
-                  .height(18)
-                  .color($r('app.color.ld_accent'))
-                  .margin({ right: 8 })
-              }
-              Text(this.hasMore ? '上拉加载更多' : '没有更多了')
-                .fontSize(13)
-                .fontColor($r('app.color.text_faint'))
-            }
-            .width('100%')
-            .height(54)
-            .justifyContent(FlexAlign.Center)
+            ListFooter({ isLoading: this.isLoadingMore, hasMore: this.hasMore })
           }
         }
         .width('100%')
