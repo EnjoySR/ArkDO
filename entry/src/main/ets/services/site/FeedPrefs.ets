@@ -11,7 +11,11 @@ const PREF_KEY_ENABLED_ORDER: string = 'feed_enabled_order';
 /** 内容入口标识:与 Discourse feed 接口一一对应。 */
 export enum FeedKey {
   LATEST = 'latest',
+  // top 与 hot 是 Discourse 的两个不同榜单,别混:
+  // - top(/top.json):历史高分榜,可按时间范围筛,偏长期积累 → 本项目叫「排行榜」
+  // - hot(/hot.json):当前热度,按「点赞 ÷ (发帖小时数+2)^gravity」时间衰减排,偏近期有互动的新帖 → 「热门」
   TOP = 'top',
+  HOT = 'hot',
   UNREAD = 'unread',
   NEW = 'new'
 }
@@ -28,7 +32,9 @@ const LATEST_FEED: FeedDef = { key: FeedKey.LATEST, label: '最新', requiresLog
 
 // 可在设置页勾选启用/排序的内置入口(顺序即设置页未启用区的默认排列)。
 const OPTIONAL_FEEDS: FeedDef[] = [
-  { key: FeedKey.TOP, label: '热门', requiresLogin: false },
+  // 「热门」原先挂在 top 上是名实不符(top 是历史高分榜),现已归位:hot=热门、top=排行榜。
+  { key: FeedKey.HOT, label: '热门', requiresLogin: false },
+  { key: FeedKey.TOP, label: '排行榜', requiresLogin: false },
   { key: FeedKey.UNREAD, label: '未读', requiresLogin: true },
   { key: FeedKey.NEW, label: '新主题', requiresLogin: true }
 ];

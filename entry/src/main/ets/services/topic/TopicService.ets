@@ -989,6 +989,8 @@ export class TopicService {
     switch (feedKey) {
       case FeedKey.TOP:
         return `/top.json${suffix}`;
+      case FeedKey.HOT:
+        return `/hot.json${suffix}`;
       case FeedKey.UNREAD:
         return `/unread.json${suffix}`;
       case FeedKey.NEW:
