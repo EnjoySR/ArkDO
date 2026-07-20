@@ -4,6 +4,7 @@ import {
   formatJoinDate,
   formatTimeRead,
   trustLabelOf,
+  trustLabelWithTitleOf,
   TRUST_LEVEL_NAMES
 } from '../main/ets/common/utils/ProfileFormat';
 import { UserProfileDetail } from '../main/ets/models/UserProfile';
@@ -55,23 +56,30 @@ export default function profileFormatTest() {
       expect(TRUST_LEVEL_NAMES[3]).assertEqual('活跃用户');
     });
 
-    // 这是修掉的那处分叉:「我的」页原本取 title,他人主页原本忽略 title,
-    // 同一份数据在两页显示不同。统一后 title 优先。
-    it('prefersSiteTitleOverDefaultTrustLevelName', 0, () => {
-      const detail: UserProfileDetail = { trustLevel: 3, title: '赞助商' };
-      expect(trustLabelOf(detail)).assertEqual('TL3 赞助商');
+    // 两个变体的差别是刻意的,由页面布局决定,不是漂移——曾经有人(见 git 历史)把它们
+    // "统一"成头衔优先,结果他人主页把同一个头衔显示了两遍。这两条用例就是为了钉住这件事。
+    //
+    // trustLabelOf:只给等级名。用于页面别处已单独展示头衔的场合(他人主页)。
+    it('ignoresSiteTitleAndAlwaysShowsTrustLevelName', 0, () => {
+      expect(trustLabelOf({ trustLevel: 3, title: '指导顾问' })).assertEqual('TL3 活跃用户');
+      expect(trustLabelOf({ trustLevel: 3 })).assertEqual('TL3 活跃用户');
+      expect(trustLabelOf({ trustLevel: 0 })).assertEqual('TL0 新用户');
     });
 
-    it('fallsBackToTrustLevelNameWhenTitleAbsentOrEmpty', 0, () => {
-      expect(trustLabelOf({ trustLevel: 3 })).assertEqual('TL3 活跃用户');
-      expect(trustLabelOf({ trustLevel: 3, title: '' })).assertEqual('TL3 活跃用户');
-      expect(trustLabelOf({ trustLevel: 0 })).assertEqual('TL0 新用户');
+    // trustLabelWithTitleOf:头衔优先。用于这里是头衔唯一露出的场合(「我的」页)。
+    it('prefersSiteTitleWhenLabelIsTheOnlyPlaceTitleAppears', 0, () => {
+      expect(trustLabelWithTitleOf({ trustLevel: 3, title: '指导顾问' })).assertEqual('TL3 指导顾问');
+      expect(trustLabelWithTitleOf({ trustLevel: 3, title: '' })).assertEqual('TL3 活跃用户');
+      expect(trustLabelWithTitleOf({ trustLevel: 3 })).assertEqual('TL3 活跃用户');
     });
 
     // 站点新增等级导致 trustLevel 超出内置名表时,只显示 TL 号,不能崩也不能显示 undefined。
     it('showsBareTrustLevelWhenLevelOutOfNameTableRange', 0, () => {
       expect(trustLabelOf({ trustLevel: 9 })).assertEqual('TL9');
       expect(trustLabelOf({ trustLevel: -1 })).assertEqual('TL-1');
+      // 带头衔的变体在超范围时仍应给出头衔,而不是退化成裸 TL 号。
+      expect(trustLabelWithTitleOf({ trustLevel: 9, title: '指导顾问' })).assertEqual('TL9 指导顾问');
+      expect(trustLabelWithTitleOf({ trustLevel: 9 })).assertEqual('TL9');
     });
 
     it('returnsEmptyLabelWhenDetailOrTrustLevelMissing', 0, () => {

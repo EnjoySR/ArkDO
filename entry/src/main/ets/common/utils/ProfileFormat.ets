@@ -34,21 +34,39 @@ export function formatTimeRead(seconds: number): string {
   return `${Math.round(seconds / 3600)}h`;
 }
 
-// 信任等级标签,形如「TL3 活跃用户」或「TL3 赞助商」。
+// 信任等级标签。两页的取法不同,这不是漂移,是布局决定的——改之前务必先看清楚:
 //
-// 优先取站点头衔(user.title),缺省才回落到 TL 默认名——这是两页注释里都写明的约定,
-// 但 UserProfilePage 的实现漏掉了 title 分支,导致同一个用户在「我的」页显示自定义头衔、
-// 在他人主页显示 TL 默认名。此处按注释声明的契约统一。
+//   「我的」页(ProfilePage)   头衔没有独立位置,`@username · TL3 ___` 是它唯一的露出。
+//                            故用 trustLabelWithTitleOf,头衔优先,否则自己的头衔永远看不见。
+//   他人页(UserProfilePage)  头衔已在 `@username 指导顾问` 单独占一行(特殊头衔还有全息效果)。
+//                            故用 trustLabelOf 显示等级名;若也走头衔优先,同一个头衔会显示两遍,
+//                            且「TL3 指导顾问」读起来像在说 TL3 的等级名就叫指导顾问。
+//
+// 换言之:哪一侧承担"展示头衔"的职责,另一侧就该让位。谁调哪个由页面布局定,不可想当然统一。
+
+// 只用信任等级名,形如「TL3 活跃用户」。用于页面别处已经展示过头衔的场合。
 export function trustLabelOf(detail?: UserProfileDetail): string {
   if (!detail || detail.trustLevel === undefined) {
     return '';
   }
-  const levelName: string = detail.title && detail.title.length > 0
-    ? detail.title
-    : (detail.trustLevel >= 0 && detail.trustLevel < TRUST_LEVEL_NAMES.length
-      ? TRUST_LEVEL_NAMES[detail.trustLevel]
-      : '');
+  const levelName: string = trustLevelNameOf(detail.trustLevel);
   return levelName.length > 0 ? `TL${detail.trustLevel} ${levelName}` : `TL${detail.trustLevel}`;
+}
+
+// 头衔优先,缺省回落到等级名,形如「TL3 赞助商」或「TL3 活跃用户」。
+// 用于页面别处没有头衔展示位、这里是头衔唯一露出的场合。
+export function trustLabelWithTitleOf(detail?: UserProfileDetail): string {
+  if (!detail || detail.trustLevel === undefined) {
+    return '';
+  }
+  const title: string = detail.title && detail.title.length > 0 ? detail.title : '';
+  const levelName: string = title.length > 0 ? title : trustLevelNameOf(detail.trustLevel);
+  return levelName.length > 0 ? `TL${detail.trustLevel} ${levelName}` : `TL${detail.trustLevel}`;
+}
+
+// 等级号 → 内置中文名。站点新增等级导致超出名表时返回空串,由调用方只显示 TL 号。
+function trustLevelNameOf(trustLevel: number): string {
+  return trustLevel >= 0 && trustLevel < TRUST_LEVEL_NAMES.length ? TRUST_LEVEL_NAMES[trustLevel] : '';
 }
 
 // 注册至今天数。ISO 时间戳只取日期段做 UTC 归一,不引入时区偏移。

@@ -24,7 +24,7 @@ import { BadgeTile } from '../components/BadgeTile';
 import { UserAvatar } from '../components/UserAvatar';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
-import { badgeHeadLabel, badgeRowFillers, badgeRowsOf, daysSince, formatCount, formatTimeRead, trustLabelOf } from '../../common/utils/ProfileFormat';
+import { badgeHeadLabel, badgeRowFillers, badgeRowsOf, daysSince, formatCount, formatTimeRead, trustLabelWithTitleOf } from '../../common/utils/ProfileFormat';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
@@ -201,13 +201,13 @@ export struct ProfilePage {
               Text(this.getUsernameLabel())
                 .fontSize(13)
                 .fontColor($r('app.color.text_secondary'))
-              if (trustLabelOf(this.profileDetail).length > 0) {
+              if (trustLabelWithTitleOf(this.profileDetail).length > 0) {
                 Text(' · ')
                   .fontSize(13)
                   .fontColor($r('app.color.text_secondary'))
                 // 信任等级标做成可点药丸:tap 进等级进度页。
                 Row() {
-                  Text(trustLabelOf(this.profileDetail))
+                  Text(trustLabelWithTitleOf(this.profileDetail))
                     .fontSize(13)
                     .fontWeight(FontWeight.Medium)
                     .fontColor($r('app.color.ld_accent'))
