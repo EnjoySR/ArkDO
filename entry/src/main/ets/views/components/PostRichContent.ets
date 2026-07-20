@@ -1513,6 +1513,10 @@ export struct PostRichContent {
     this.parsedCacheKey = this.cookedHtml;
     this.parsedCacheValue = blocks;
     this.parsedCacheValid = true;
+    // 换帖(LazyForEach 复用本实例渲染另一楼)时一并清引用预览缓存。
+    // 它按被引用正文原文分键,不清也不会取错,但会跨复用一直累积——
+    // 长帖里反复滚动,这个 Map 只涨不落。
+    this.quotePreviewCache.clear();
     return blocks;
   }
 

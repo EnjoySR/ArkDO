@@ -39,7 +39,7 @@ const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
 // 侧边抽屉宽度(关闭时向左平移此距离移出屏幕)。
 const DRAWER_WIDTH: number = 288;
 // 版本公告弹窗:true=每次启动都弹(调试用);false=同一版本只弹一次(上线值)。
-const ANNOUNCE_ALWAYS_SHOW: boolean = false;
+const ANNOUNCE_ALWAYS_SHOW: boolean = true;
 // 诊断关键字:hilog / DevEco Log 里搜 ANNOUNCE_DIAG 看公告全链路日志。
 const ANNOUNCE_DIAG: string = '[ArkDO][ANNOUNCE_DIAG]';
 // 记「已弹过的 versionCode」的偏好 key(全项目共用 'app_settings' 库)。
