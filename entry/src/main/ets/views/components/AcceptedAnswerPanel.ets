@@ -6,7 +6,7 @@ import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { PostRichContent } from './PostRichContent';
 import { ViewerImage } from './ImageViewer';
 import { UserAvatar } from './UserAvatar';
-import { ON_DARK_FG } from '../../common/theme/Palette';
+import { ON_DARK_FG, ON_DARK_FG_DIM } from '../../common/theme/Palette';
 
 // 展开态正文最大高度:超出即裁剪并在底部渐隐,配合「阅读更多」引导跳楼看全文。
 const CONTENT_MAX_HEIGHT: number = 260;
@@ -41,7 +41,7 @@ export struct AcceptedAnswerPanel {
           if (this.answers.length > 1) {
             Text(`· ${this.answers.length} 个方案`)
               .fontSize(13)
-              .fontColor('#D9FFFFFF')
+              .fontColor(ON_DARK_FG_DIM)
               .margin({ left: 8 })
           }
         }

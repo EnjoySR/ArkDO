@@ -20,6 +20,8 @@
 // 深色/彩色表面上的前景色。视频与音频控件、图片预览、采纳徽章文字等。
 // 底色不随主题变,故此色恒为白,不可换成会翻转的资源色。
 export const ON_DARK_FG: string = '#FFFFFF';
+// 同上,次要一档(85% 白)。同一条彩色条上的附注文字,比主文字弱一档但仍需可读。
+export const ON_DARK_FG_DIM: string = '#D9FFFFFF';
 
 // 遮罩:浮层背后压暗底层内容。20% 黑。
 export const SCRIM: string = '#33000000';
