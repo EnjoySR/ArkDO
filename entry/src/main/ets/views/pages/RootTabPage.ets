@@ -476,6 +476,8 @@ export struct RootTabPage {
           param: param as TopicDetailRouteParam,
           bridge: this.bridge,
           isArkWebReady: this.isArkWebReady,
+          // 待审帖卡片的作者信息:待审帖只有本人可见,服务端不下发作者字段,故用当前登录用户画头像昵称。
+          currentUser: this.currentUser ?? this.getAnonymousUser(),
           onBack: () => {
             this.popNavigation();
           },

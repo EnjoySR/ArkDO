@@ -1,6 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
-import { Poll, PollVoteResult, PostBoost, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { PendingPost, Poll, PollVoteResult, PostBoost, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { TopicCategory, TopicTag } from '../../models/Topic';
 import { User } from '../../models/User';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
@@ -19,6 +19,7 @@ import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { LoadStateView } from '../components/LoadStateView';
 import { TopicDetailHeader } from '../components/TopicDetailHeader';
 import { TopicSummaryCard } from '../components/TopicSummaryCard';
+import { PendingPostCard } from '../components/PendingPostCard';
 import { TopicPostItem } from '../components/TopicPostItem';
 import { ViewerImage } from '../components/ImageViewer';
 import { CommentInputBar, NO_MAX_CHARS, REPLY_BLUE } from '../components/CommentInputBar';
@@ -68,6 +69,10 @@ export struct TopicDetailPage {
   @State private message: string = '正在准备 ArkWeb 请求环境';
   @State private requiresChallenge: boolean = false;
   @State private categories: TopicCategory[] = [];
+  // 当前用户在本主题下的待审核回复。detail 是 interface 的 @State,改其字段不触发重渲染,
+  // 故这里持一份独立数组作真源:详情加载时从 detail.pendingPosts 灌入,发帖被扣审时乐观追加,
+  // 撤回成功后就地移除。仅本人可见,不占楼号,不进 dataSource。
+  @State private pendingPosts: PendingPost[] = [];
   @State private isLoadingMore: boolean = false;
   @State private hasMorePosts: boolean = false;
   @State private loadMoreMessage: string = '上拉加载更多';
@@ -153,6 +158,8 @@ export struct TopicDetailPage {
     (): string | undefined => this.detail?.slug
   );
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
+  // 待审帖卡片的作者信息来源(服务端不下发待审帖作者——只有本人看得到自己的待审帖)。
+  @Prop currentUser: User = { id: 0, username: '' };
   onBack: () => void = () => {};
   // 打开 CF 过盾页(顶栏快捷入口触发)。导航栈与弹层都在宿主 RootTabPage 手里,故上抛。
   onOpenChallenge: () => void = () => {};
@@ -332,6 +339,28 @@ export struct TopicDetailPage {
           }
         })
       }, (post: TopicPost) => post.id.toString())
+
+      // 待审核区:对齐官方 templates/topic.gjs——铺在整个楼层流最底部,且只有楼层全部加载完
+      // (官方的 loadedAllPosts,我们即 !hasMorePosts)才渲染。停在第 3 楼时不该看见它。
+      // 用 ForEach 而非 LazyForEach:待审帖是当前用户在本主题下的未过审回复,现实中就一两条。
+      if (!this.hasMorePosts && this.pendingPosts.length > 0) {
+        ListItem() {
+          Column() {
+            ForEach(this.pendingPosts, (pending: PendingPost) => {
+              PendingPostCard({
+                pending: pending,
+                currentUser: this.currentUser,
+                onDelete: (target: PendingPost) => {
+                  this.confirmDeletePending(target);
+                }
+              })
+            }, (pending: PendingPost) => pending.id.toString())
+          }
+          .width('100%')
+          // 不加 top border:每个楼层自己底边就带 1px 发丝线(TopicPostItem 的 border.bottom),
+          // 这里再加一条顶线会和末楼底线贴在一起变成 2px,肉眼就是"待审区的线比楼间线粗一倍"。
+        }
+      }
 
       if (this.postCount > 0) {
         ListItem() {
@@ -759,7 +788,11 @@ export struct TopicDetailPage {
     if (result.success && result.data) {
       this.replyTargetPostNumber = 0;
       if (result.data.pending) {
-        // 进入审核队列:提交成功但不会立刻出现在列表里。
+        // 进入审核队列:不会成为楼层,但服务端把待审帖快照(id/raw/created_at)随响应回带了,
+        // 直接乐观追加到底部待审区,不等下次刷新 topic.json。老站点/异常响应没这个快照时只提示。
+        if (result.data.pendingPost) {
+          this.pendingPosts = this.pendingPosts.concat([result.data.pendingPost]);
+        }
         this.showToastAfterComposerClose('评论已提交，等待审核', 2000);
       } else if (result.data.post) {
         // 直接发布:追加到楼层末尾(数据源精准通知,列表只新建这一条)。
@@ -998,6 +1031,41 @@ export struct TopicDetailPage {
     }, SUCCESS_TOAST_DELAY_MS);
   }
 
+  // 撤回待审帖:不可逆(审核队列里删掉就没了,原文只在这张卡片上),故先二次确认。
+  private confirmDeletePending(pending: PendingPost): void {
+    this.getUIContext().showAlertDialog({
+      title: '删除待审核内容',
+      message: '删除后这条内容不会再进入审核，也无法恢复。确定删除吗？',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: { value: '取消', action: () => {} },
+      secondaryButton: {
+        value: '删除',
+        fontColor: $r('app.color.ld_danger'),
+        action: () => {
+          this.deletePending(pending);
+        }
+      }
+    });
+  }
+
+  // DELETE /review/{id}。待审帖本质是 ReviewableQueuedPost,走审核端点而非 /posts/{id}。
+  // 这里不做乐观移除:删失败还得把卡片塞回原位,不值当——等服务端确认再移除,失败则原样留着。
+  private async deletePending(pending: PendingPost): Promise<void> {
+    if (!this.detail || !LoginGate.ensureLoggedIn()) {
+      return;
+    }
+    const result: NetworkResult<boolean> =
+      await new TopicService(this.bridge).deletePendingPost(pending.id, this.detail.id);
+    if (!result.success) {
+      Log.i(`${LOG_TAG} deletePending failed id=${pending.id} status=${result.statusCode}`);
+      this.showComposerToast('删除失败，请稍后重试', 2000);
+      return;
+    }
+    this.pendingPosts = this.pendingPosts.filter((item: PendingPost) => item.id !== pending.id);
+    this.showComposerToast('已删除', 1500);
+  }
+
   private replyFabIcon(): FaIconDefinition {
     const def: FaIconDefinition | undefined = getFaIcon('reply');
     return def ? def : { id: 'reply', rawfilePath: 'fa_icons/reply.svg' };
@@ -1072,6 +1140,8 @@ export struct TopicDetailPage {
       this.invalidateEarlierPrefetch();
       this.dataSource.reset(result.data.posts);
       this.postCount = this.dataSource.totalCount();
+      // 待审区以服务端为准整体替换:重新加载详情即对齐真值,过审的条目自然消失(它已变成正式楼层)。
+      this.pendingPosts = result.data.pendingPosts ?? [];
       this.message = this.postCount > 0 ? '' : '暂无帖子内容';
       this.hasEarlier = PostStreamPager.countEarlier(stream, this.dataSource.getAll()) > 0;
       this.hasMorePosts = PostStreamPager.countLater(stream, this.dataSource.getAll()) > 0;

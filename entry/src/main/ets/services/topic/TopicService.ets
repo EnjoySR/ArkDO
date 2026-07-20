@@ -1,5 +1,5 @@
 import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
-import { AcceptedAnswer, Poll, PollOption, PollVoteResult, PostBoost, PostReaction, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { AcceptedAnswer, PendingPost, Poll, PollOption, PollVoteResult, PostBoost, PostReaction, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
@@ -83,6 +83,15 @@ interface DiscourseTopicDetail {
   can_create_shared_issue?: boolean;
   user_created_shared_issue?: boolean;
   shared_issue_count?: number;
+  // 当前用户在本主题下被扣进审核队列、尚未过审的回复(TopicPendingPostSerializer 只给这三个字段)。
+  pending_posts?: DiscoursePendingPost[];
+}
+
+// 待审帖:序列化器不带作者信息——按定义只有本人看得到自己的待审帖,作者即当前用户。
+interface DiscoursePendingPost {
+  id?: number;
+  raw?: string;
+  created_at?: string;
 }
 
 // topic.json 顶层 details:此处只取 created_by(楼主),其余字段暂不消费。
@@ -244,13 +253,18 @@ interface CreatePostResponse {
   success?: boolean;
   post?: DiscoursePost;
   // 进入审核队列时返回 pending_post(而非 post),action 为 'enqueued'。
-  pending_post?: DiscoursePost;
+  // 注意它不是楼层:NewPostResultSerializer 对该字段用的是 TopicPendingPostSerializer,
+  // 与 topic.json 顶层 pending_posts 同构,只有 id/raw/created_at 三个字段。
+  pending_post?: DiscoursePendingPost;
 }
 
 // 发表评论/回复的结果:要么直接发布得到新楼层 post,要么进了审核队列(pending)。
 export interface CreateReplyOutcome {
   post?: TopicPost;
   pending: boolean;
+  // pending 为真时服务端回带的待审帖快照,可直接乐观插进详情页底部的待审区,
+  // 无需等下次刷新 topic.json。老站点/异常响应可能缺失,此时只提示不插卡。
+  pendingPost?: PendingPost;
 }
 
 // 发表评论/回复 POST /posts 的请求体(对齐官方 composer 提交字段)。
@@ -766,7 +780,7 @@ export class TopicService {
           success: true,
           statusCode: response.statusCode,
           challengeState: response.challengeState,
-          data: { pending: true }
+          data: { pending: true, pendingPost: this.mapSinglePendingPost(wrapper.pending_post) }
         };
       }
       return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, 'Linux.do 发表评论响应缺少楼层数据。');
@@ -1228,7 +1242,52 @@ export class TopicService {
       sharedIssueVisible: sourceTopic.shared_issue_visible === true,
       canCreateSharedIssue: sourceTopic.can_create_shared_issue === true,
       userCreatedSharedIssue: sourceTopic.user_created_shared_issue === true,
-      sharedIssueCount: typeof sourceTopic.shared_issue_count === 'number' ? sourceTopic.shared_issue_count : 0
+      sharedIssueCount: typeof sourceTopic.shared_issue_count === 'number' ? sourceTopic.shared_issue_count : 0,
+      pendingPosts: this.mapPendingPosts(sourceTopic.pending_posts)
+    };
+  }
+
+  // 待审帖 → PendingPost 列表;缺 id 的条目丢弃(没 id 就撤不掉,渲染出来也是死卡片)。
+  private mapPendingPosts(source?: DiscoursePendingPost[]): PendingPost[] | undefined {
+    if (!Array.isArray(source) || source.length === 0) {
+      return undefined;
+    }
+    const result: PendingPost[] = [];
+    source.forEach((item: DiscoursePendingPost) => {
+      if (typeof item.id !== 'number') {
+        return;
+      }
+      const pending: PendingPost = new PendingPost();
+      pending.id = item.id;
+      pending.raw = typeof item.raw === 'string' ? item.raw : '';
+      pending.createdAt = typeof item.created_at === 'string' ? item.created_at : '';
+      result.push(pending);
+    });
+    return result.length > 0 ? result : undefined;
+  }
+
+  // 发帖响应里的单个 pending_post → PendingPost;缺失或无 id 时返回 undefined(调用方只提示不插卡)。
+  private mapSinglePendingPost(source?: DiscoursePendingPost): PendingPost | undefined {
+    const mapped: PendingPost[] | undefined = source ? this.mapPendingPosts([source]) : undefined;
+    return mapped !== undefined ? mapped[0] : undefined;
+  }
+
+  // 撤回待审帖:DELETE /review/{id}。对齐官方 topic 控制器的 deletePending——待审帖本质是
+  // ReviewableQueuedPost,走审核端点而非 /posts/{id}。响应体不消费,只看 HTTP 是否成功。
+  async deletePendingPost(pendingId: number, topicId: number): Promise<NetworkResult<boolean>> {
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    const response: NetworkResult<string> = await this.bridge.deleteForm(`/review/${pendingId}`, '', {
+      notifyChallenge: true,
+      referrer: referrer
+    });
+    if (!response.success) {
+      return this.forwardFailure<boolean>(response);
+    }
+    return {
+      success: true,
+      statusCode: response.statusCode,
+      challengeState: response.challengeState,
+      data: true
     };
   }
 

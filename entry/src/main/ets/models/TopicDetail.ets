@@ -149,4 +149,15 @@ export interface TopicDetail {
   userCreatedSharedIssue?: boolean;
   // shared_issue_count:已有多少人"俺也一样",已点时展示在文字后的英文括号里。
   sharedIssueCount?: number;
+  // 当前用户在本主题下待审核的回复(topic.json 顶层 pending_posts)。对齐官方:只在楼层全部加载完
+  // 之后、列表最底部铺卡片,不占楼号也不进 post_stream。仅本人可见,故作者信息取当前登录用户。
+  pendingPosts?: PendingPost[];
+}
+
+// 待审帖快照。raw 是 Markdown 原文(服务端不下发 cooked),按纯文本直出——待审内容基本都是刚发的短回复。
+@Observed
+export class PendingPost {
+  id: number = 0;
+  raw: string = '';
+  createdAt: string = '';
 }
