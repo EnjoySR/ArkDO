@@ -1,4 +1,3 @@
-import { LengthMetrics } from '@kit.ArkUI';
 import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { TopicMetadataBadges } from './TopicBadges';
@@ -32,7 +31,9 @@ export struct TopicListItem {
         Column() {
           // 未读徽标 / 小蓝点都作为内联 Span 追加在标题文本流末尾,始终贴在最后一行文字后面。
           // 二者互斥:有未读回复 → 蓝色数字药丸(左右加空格撑开背景);否则(全新主题)→ 小蓝点。
-          // 用 baselineOffset 把标记从基线上抬,对齐 CJK 文字视觉重心。
+          // 未读标记不做 baselineOffset:ArkUI 会把偏移后的内联 Span 纳入行盒计算,
+          // 多行标题会因此比没有标记的标题显得行距更松。父 Text 用 textVerticalAlign
+          // 让不同字号的 Span 在单行内视觉居中。
           // 药丸内部用不换行空格( )撑背景:普通空格是可断行点,标题换行时会从药丸左边的空格处
           // 断开,导致半截蓝色背景留在上一行;换成   后药丸不可拆,断行只发生在它前面的引导空格,
           // 整个药丸连背景一起下移到新行。
@@ -73,17 +74,16 @@ export struct TopicListItem {
                 .fontColor(Color.White)
                 // 未读标记蓝:语义强调色,明暗底都成立,保留字面量(勿映射 ld_accent,白天会变深蓝)。
                 .textBackgroundStyle({ color: '#66CCFF', radius: 9 })
-                .baselineOffset(LengthMetrics.vp(2))
             } else if (this.topic.unseen === true) {
               Span(' ●')
                 .fontSize(8)
                 .fontColor('#66CCFF')
-                .baselineOffset(LengthMetrics.vp(2))
             }
           }
           .fontSize(18)
           .fontWeight(FontWeight.Regular)
           .fontColor($r('app.color.text_primary'))
+          .textVerticalAlign(TextVerticalAlign.CENTER)
           .width('100%')
 
           // 搜索命中摘要:标题下一行灰字,命中词染品牌色。仅搜索结果(topic.searchBlurb 有值)显示。
