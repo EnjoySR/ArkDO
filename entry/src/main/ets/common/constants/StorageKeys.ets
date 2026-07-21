@@ -7,14 +7,15 @@
 // 常量在底层,UI 在上层,谁都可以引而不产生反向边。
 //
 // 命名约定:
-//   *_VISIBLE_KEY   —— 浮层可见态镜像(boolean)。浮层不进 Navigation 栈,系统返回键要靠它判断该谁消费。
+//   *_VISIBLE_KEY   —— 根级浮层可见态镜像(boolean),或跨组件动画状态镜像。
+//                      根级浮层不进 Navigation 栈,系统返回键要靠它判断该谁消费。
 //   *_BACK_TICK_KEY —— 返回键信号(number,单调自增)。Index/宿主 bump,浮层 @Watch 接住后自行关闭。
 //   *_TICK          —— 通用变更信号(number,单调自增),用于跨页通知「数据变了,重新读」。
 //
 // 值本身只在内存中存活(AppStorage 非持久化),故字符串内容可自由调整;
 // 但 SITES_TICK / SETTINGS_DOH_TICK 沿用了历史上的 snake_case 值,未做改动以免与既有日志对不上。
 
-// 搜索浮层(根级,盖满全屏)。
+// 搜索 Flow(根级覆盖层):可见态用于一镜到底源图标隐藏与返回键分发。
 export const SEARCH_OVERLAY_VISIBLE_KEY: string = 'searchOverlayVisible';
 export const SEARCH_OVERLAY_BACK_TICK_KEY: string = 'searchOverlayBackTick';
 

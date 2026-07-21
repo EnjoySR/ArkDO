@@ -22,16 +22,15 @@ const MIN_TERM_LEN: number = 2;
 // Discourse 整页搜索分页硬上限。
 const MAX_SEARCH_PAGE: number = 10;
 
-// AppStorage 键:浮层可见态镜像 + 系统返回键关闭信号(Index @Entry 与 RootTabPage 共用)。
-// 浮层不进 Navigation 栈,系统返回键需由 @Entry 拦截:可见时 bump BACK_TICK,RootTabPage 监听后关闭。
-// 一镜到底共享元素 id:顶栏放大镜(源)与浮层前导放大镜(目标)标同一 id,由 openSearch 的 animateTo 插值。
+// 一镜到底共享元素 id:顶栏放大镜(源)与搜索页前导放大镜(目标)标同一 id,
+// 由 RootTabPage.openSearch/closeSearch 的 animateTo 插值。
 export const SEARCH_ICON_GEOMETRY_ID: string = 'arkdo-search-icon';
 
-// 帖子搜索浮层:从当前页融合展开(不走 Navigation push)。顶部搜索条 + 下方历史/结果。
+// 帖子搜索页:顶部搜索条 + 下方历史/结果。
 // 键盘避让走系统 RESIZE(输入框在顶、结果区自动收缩),无需像评论浮层那样手动监听 avoidAreaChange。
 @Component
 export struct SearchOverlay {
-  // 窗口常驻全屏布局:浮层根列铺满整屏,搜索栏自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
+  // 窗口常驻全屏布局:页面根列铺满整屏,搜索栏自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   isArkWebReady: boolean = false;
@@ -77,6 +76,7 @@ export struct SearchOverlay {
 
   aboutToDisappear(): void {
     this.clearDebounce();
+    this.hideKeyboard();
     // 还原默认避让,避免影响后续其它页面。
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
   }
@@ -113,7 +113,7 @@ export struct SearchOverlay {
     Row({ space: 8 }) {
       // 输入容器:放大镜 + 输入框 + 清除。
       Row({ space: 8 }) {
-        // 一镜到底目标:与顶栏源图标同 geometryTransition id,浮层出现时由源飞入至此。
+        // 一镜到底目标:与顶栏源图标同 geometryTransition id,搜索页出现时由源飞入至此。
         FaIconView({ icon: this.searchIcon(), color: $r('app.color.text_tertiary'), iconSize: 16 })
           .geometryTransition(SEARCH_ICON_GEOMETRY_ID, { follow: true })
           .transition(TransitionEffect.OPACITY)
@@ -363,6 +363,7 @@ export struct SearchOverlay {
   private handleResultClick(topic: Topic): void {
     // 点到结果算一次有效搜索,记入历史。
     this.saveHistory(this.trimmedQuery());
+    this.hideKeyboard();
     this.onOpenTopic(topic);
   }
 

@@ -135,7 +135,7 @@ export struct HomePage {
   onSessionRecheck: () => void = () => {};
   onOpenNotifications: () => void = () => {};
   onOpenSearch: () => void = () => {};
-  // 搜索浮层可见态镜像:一镜到底期间隐藏顶栏源图标,把几何交给浮层里的目标图标(geometryTransition)。
+  // 搜索 Flow 可见态镜像:一镜到底期间隐藏顶栏源图标,把几何交给搜索页里的目标图标(geometryTransition)。
   @StorageProp(SEARCH_OVERLAY_VISIBLE_KEY) private searchOverlayVisible: boolean = false;
   // 窗口常驻全屏布局:主体内容自行避让状态栏(padding 加在带背景的主体列,背景填满状态栏条);
   // 遮罩与抽屉不加,天然盖满整屏。
@@ -704,8 +704,8 @@ export struct HomePage {
     })
   }
 
-  // 顶栏搜索入口:放大镜图标,点击一镜到底展开搜索浮层(由 RootTabPage 承载)。
-  // 浮层可见时把源图标 if 掉(几何交给浮层前导图标),二者同 geometryTransition id、由同一 animateTo 驱动插值。
+  // 顶栏搜索入口:放大镜图标,点击一镜到底打开 SearchFlow 根覆盖层。
+  // SearchFlow 可见时把源图标 if 掉(几何交给搜索页前导图标),二者同 geometryTransition id、由同一 animateTo 驱动插值。
   @Builder
   private SearchButton() {
     Button() {

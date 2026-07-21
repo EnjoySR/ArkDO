@@ -38,7 +38,7 @@ import { LoginGate } from '../../services/session/LoginGate';
 import { ArkWebHost } from '../components/ArkWebHost';
 import { MathRenderHost } from '../components/MathRenderHost';
 import { ImageViewer, ViewerImage } from '../components/ImageViewer';
-import { SearchOverlay } from '../components/SearchOverlay';
+import { SearchFlow } from '../components/SearchFlow';
 import { ensureFaIconsLoaded } from '../components/FaIcon';
 import { ensureTagIconsLoaded } from '../components/TagIconRegistry';
 import { CfChallengePage } from './CfChallengePage';
@@ -111,10 +111,11 @@ export struct RootTabPage {
   // (padding 加在带页面背景色的容器上,背景自然填满状态栏条且颜色逐页正确);
   // 页面内遮罩/浮层留在未加 padding 的层级,天然盖满物理屏。此处 Navigation 不加任何避让。
   private viewerWindow?: window.Window = undefined;
-  // 帖子搜索浮层:根 Stack 顶层内联渲染(不进 Navigation 栈),由首页搜索图标触发。
-  @State private showSearchOverlay: boolean = false;
-  // 系统返回键信号:浮层不进导航栈,返回键由 Index @Entry 拦截并 bump 此计数,这里监听后关闭浮层。
-  @StorageProp(SEARCH_OVERLAY_BACK_TICK_KEY) @Watch('onSearchBackTick') private searchBackTick: number = 0;
+  // 搜索 Flow:根 Stack 覆盖层负责一镜到底;内部自带 Navigation 负责搜索结果 -> 详情 -> 返回结果。
+  @State private searchFlowMounted: boolean = false;
+  @State private showSearchFlow: boolean = false;
+  // 系统返回键信号:SearchFlow 不进主 Navigation 栈,由 Index @Entry 拦截后 bump,SearchFlow 自己处理。
+  @StorageProp(SEARCH_OVERLAY_BACK_TICK_KEY) private searchBackTick: number = 0;
   @State private isArkWebReady: boolean = false;
   // 宿主真就绪信号:仅在 onReady(onPageEnd,executor 已挂)时自增。isArkWebReady 会被看门狗/失败路径
   // 提前置真且烧掉 false→true 跳变,导致真就绪时首页的 @Watch(isArkWebReady) 不再触发、列表卡在失败态;
@@ -283,6 +284,37 @@ export struct RootTabPage {
       }
       this.RootNavigation()
 
+      // 搜索 Flow:根级覆盖层负责首页 -> 搜索的一镜到底;内部 Navigation 负责搜索结果 -> 详情。
+      if (this.searchFlowMounted) {
+        SearchFlow({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          currentUser: this.currentUser ?? this.getAnonymousUser(),
+          backTick: this.searchBackTick,
+          onClose: () => {
+            this.closeSearch();
+          },
+          onOpenChallenge: () => {
+            this.challengeRecovery?.forceEscalate();
+            this.openChallengeSheet();
+          },
+          onOpenImages: (images: ViewerImage[], startIndex: number) => {
+            this.openImageViewer(images, startIndex);
+          },
+          onOpenLink: (url: string) => {
+            this.handleOpenLink(url);
+          },
+          onOpenUser: (user: User) => {
+            this.openUserProfileFor(user);
+          }
+        })
+          .opacity(this.showSearchFlow ? 1 : 0)
+          .hitTestBehavior(this.showSearchFlow ? HitTestMode.Default : HitTestMode.None)
+          .transition(
+            TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.EaseOut })
+          )
+      }
+
       // 图片浏览器:根 Stack 顶层,越过 Navigation 分栏盖满整窗(双栏下也全屏,旋转随根重排)。
       if (this.showImageViewer) {
         ImageViewer({
@@ -299,25 +331,6 @@ export struct RootTabPage {
           )
       }
 
-      // 帖子搜索浮层:根 Stack 顶层,从当前页融合展开(淡入,由 open/close 的 animateTo 驱动)。
-      if (this.showSearchOverlay) {
-        SearchOverlay({
-          bridge: this.bridge,
-          isArkWebReady: this.isArkWebReady,
-          onClose: () => {
-            this.closeSearch();
-          },
-          onOpenTopic: (topic: Topic) => {
-            // 先关浮层再进详情:详情页正常 push 滑入,返回即回到首页(浮层已关)。
-            // 浮层只从左栏入口打开,选中结果等同于「换一帖」而非「深入一层」,故与左栏同路。
-            this.closeSearch();
-            this.selectTopicFromMaster(topic.id, topic.slug, topic.title);
-          }
-        })
-          .transition(
-            TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.EaseOut })
-          )
-      }
     }
     .width('100%')
     .height('100%')
@@ -364,7 +377,7 @@ export struct RootTabPage {
     .navBarWidth(420)
     .navDestination(this.NavDestinationBuilder)
     // 只接管「手势闸打开 + PUSH + 目标是 PROFILE」这一种;其余一律返回 undefined 走系统默认,
-    // 不影响其他页面的转场。
+    // 不影响其他页面的转场。搜索 Flow 不进主 Navigation,不在这里处理。
     .customNavContentTransition((from: NavContentInfo, to: NavContentInfo, operation: NavigationOperation) => {
       return this.buildProfileSwipeTransition(to, operation);
     })
@@ -1228,7 +1241,10 @@ export struct RootTabPage {
       bumpTick(COMPOSER_OVERLAY_BACK_TICK_KEY);
       return true;
     }
-    return this.consumeViewerBack();
+    if (this.consumeViewerBack()) {
+      return true;
+    }
+    return false;
   }
 
   // 图片预览打开时消费返回键:bump 信号计数,交 ImageViewer 决定翻回上一张还是关闭;
@@ -1258,29 +1274,35 @@ export struct RootTabPage {
     });
   }
 
-  // 搜索浮层开关:animateTo 驱动 .transition 淡入/淡出;同时镜像可见态到 AppStorage,
-  // 供 Index @Entry 的 onBackPress 判断是否拦截系统返回键。
+  // 搜索 Flow 开关:根 Stack 覆盖层负责首页搜索图标 -> 搜索页图标的一镜到底;
+  // 搜索结果 -> 详情由 SearchFlow 内部 Navigation 承载,不进入主 Navigation 栈。
   private openSearch(): void {
-    // 可见态切换放进 animateTo 闭包:顶栏源图标(HomePage @StorageProp 驱动移除)与浮层目标图标
-    // 的出现进同一动画事务,geometryTransition 才能配对并插值(一镜到底)。
+    if (this.showSearchFlow) {
+      return;
+    }
     this.getUIContext().animateTo({ duration: 280, curve: Curve.Friction }, () => {
       AppStorage.setOrCreate(SEARCH_OVERLAY_VISIBLE_KEY, true);
-      this.showSearchOverlay = true;
+      this.searchFlowMounted = true;
+      this.showSearchFlow = true;
     });
   }
 
   private closeSearch(): void {
-    this.getUIContext().animateTo({ duration: 260, curve: Curve.Friction }, () => {
-      AppStorage.setOrCreate(SEARCH_OVERLAY_VISIBLE_KEY, false);
-      this.showSearchOverlay = false;
-    });
-  }
-
-  // 系统返回键(Index 拦截后 bump tick):浮层开着就关掉它。
-  private onSearchBackTick(): void {
-    if (this.showSearchOverlay) {
-      this.closeSearch();
+    if (!this.searchFlowMounted) {
+      return;
     }
+    this.getUIContext().animateTo({
+      duration: 260,
+      curve: Curve.Friction,
+      onFinish: () => {
+        if (!this.showSearchFlow) {
+          this.searchFlowMounted = false;
+        }
+      }
+    }, () => {
+      AppStorage.setOrCreate(SEARCH_OVERLAY_VISIBLE_KEY, false);
+      this.showSearchFlow = false;
+    });
   }
 
   private handleArkWebReady(): void {
