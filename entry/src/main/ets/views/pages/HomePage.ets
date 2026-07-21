@@ -5,7 +5,6 @@ import { Topic, TopicCategory } from '../../models/Topic';
 import { TopicListItem } from '../components/TopicListItem';
 import { UserAvatar } from '../components/UserAvatar';
 import { NotificationBell } from '../components/NotificationBell';
-import { PulsingHalo } from '../components/PulsingHalo';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
@@ -749,14 +748,10 @@ export struct HomePage {
             .height(22)
             .color($r('app.color.brand'))
         } else if (this.isLoggedIn) {
-          // 光圈在底层(先声明)、头像在顶层(后声明),头像后方一圈圈向外扩散。
-          Stack() {
-            PulsingHalo({ baseSize: 34, color: $r('app.color.brand') })
-            UserAvatar({
-              user: this.accountUser,
-              avatarSize: 34
-            })
-          }
+          UserAvatar({
+            user: this.accountUser,
+            avatarSize: 34
+          })
         } else {
           SymbolGlyph($r('sys.symbol.person'))
             .fontSize(28)
