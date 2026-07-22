@@ -598,7 +598,7 @@ export struct ComposerPage {
       .padding({ top: this.sysTopInset, bottom: this.keyboardHeight > 0 ? this.keyboardHeight : this.sysBottomInset })
       .backgroundColor($r('app.color.page_bg'))
       // 一镜到底主体:与详情页底部输入条同 id,展开时从输入条几何生长铺满全屏;clip 裁掉
-      // 生长中溢出的子内容;OPACITY 让配对元素交叉淡入(对齐搜索浮层手法)。
+      // 生长中溢出的子内容;OPACITY 让配对元素交叉淡入(对齐搜索页手法)。
       .geometryTransition(COMPOSER_GEOMETRY_ID, { follow: true })
       .clip(true)
       .transition(TransitionEffect.OPACITY.animation({ duration: COMPOSER_ANIM_MS, curve: Curve.EaseOut }))
