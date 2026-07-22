@@ -132,6 +132,8 @@ export struct SearchOverlay {
           .fontColor($r('app.color.text_primary'))
           .placeholderColor($r('app.color.text_tertiary'))
           .enterKeyType(EnterKeyType.Search)
+          // 输入框默认会吞掉返回事件，导致边缘返回第一次只收键盘；放行给 @Entry 关闭 SearchFlow。
+          .stopBackPress(false)
           .onChange((value: string) => {
             this.handleQueryChanged(value);
           })
@@ -164,6 +166,7 @@ export struct SearchOverlay {
         .fontSize(15)
         .fontColor($r('app.color.brand'))
         .onClick(() => {
+          this.hideKeyboard();
           this.onClose();
         })
     }

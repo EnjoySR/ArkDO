@@ -105,7 +105,11 @@ export struct SearchFlow {
       this.popInternal();
       return;
     }
-    this.closeSearchFlow();
+    // @Watch 正处于 AppStorage 状态刷新事务中，直接关闭会吞掉外层 opacity 动画。
+    // 下一任务再进入与“取消”按钮相同的普通关闭路径，让淡出动画正常起播。
+    setTimeout(() => {
+      this.closeSearchFlow();
+    }, 0);
   }
 
   private consumeTopicDetailBack(): boolean {
