@@ -1,5 +1,6 @@
 import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
 import { RelativeTime } from '../../common/utils/RelativeTime';
+import { FONT_BODY_LARGE } from '../../common/theme/Metrics';
 import { TopicMetadataBadges } from './TopicBadges';
 import { UserAvatar } from './UserAvatar';
 
@@ -59,8 +60,8 @@ export struct TopicListItem {
             if (this.searchHighlights.length > 0) {
               ForEach(this.titleSegments(), (seg: BlurbSegment, index: number) => {
                 Span(seg.text)
-                  .fontColor(seg.hit ? $r('app.color.brand') : $r('app.color.text_primary'))
-                  .fontWeight(seg.hit ? FontWeight.Medium : FontWeight.Regular)
+                  .fontColor(seg.hit ? $r('app.color.brand') : $r('app.color.text_body'))
+                  .fontWeight(FontWeight.Medium)
               }, (seg: BlurbSegment, index: number) => `t${index}`)
             } else {
               Span(this.topic.title)
@@ -80,9 +81,10 @@ export struct TopicListItem {
                 .fontColor('#66CCFF')
             }
           }
-          .fontSize(18)
-          .fontWeight(FontWeight.Regular)
-          .fontColor($r('app.color.text_primary'))
+          .fontSize(FONT_BODY_LARGE)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_body'))
+          .lineHeight(23)
           .textVerticalAlign(TextVerticalAlign.CENTER)
           .width('100%')
 
